@@ -1,0 +1,36 @@
+[package]
+name = "molrs-md"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Molecular dynamics engine for molrs (pure Rust CPU, optional CUDA)"
+
+[features]
+default = []
+cuda = ["molrs/cuda"]
+zarr = ["molrs/filesystem"]
+f64 = ["molrs/f64", "molrs-pack/f64"]
+
+[dependencies]
+molrs = { path = "../molrs-core", package = "molrs-core" }
+molrs-pack = { path = "../molrs-pack" }
+ndarray = "0.17"
+log = "0.4"
+
+[build-dependencies]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[example]]
+name = "tip3p"
+required-features = ["zarr"]
+
+[[example]]
+name = "tip3p_gpu"
+required-features = ["cuda", "zarr"]
+
+[[bench]]
+name = "cpu_bench"
+harness = false

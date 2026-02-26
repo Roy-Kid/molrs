@@ -1,0 +1,53 @@
+name: Publish molrs-wasm to npm
+
+on:
+  push:
+    branches: [ master ]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+  packages: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Build wasm package
+        working-directory: molrs-wasm
+        run: wasm-pack build --release --target web -s molcrafts --out-name molrs
+
+      - name: Verify package
+        working-directory: molrs-wasm/pkg
+        run: |
+          node -p "require('./package.json').name"
+          node -p "require('./package.json').version"
+
+      - name: Publish to npm
+        working-directory: molrs-wasm/pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --scope=@molcrafts --access public

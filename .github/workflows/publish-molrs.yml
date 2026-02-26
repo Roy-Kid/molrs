@@ -1,0 +1,45 @@
+name: Publish molrs to crates.io
+
+on:
+  push:
+    branches: [ master ]
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache test data
+        uses: actions/cache@v4
+        with:
+          path: target/tests-data
+          key: ${{ runner.os }}-test-data-${{ hashFiles('scripts/fetch-test-data.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-test-data-
+
+      - name: Fetch test data
+        run: bash scripts/fetch-test-data.sh
+
+      - name: Verify
+        run: |
+          cargo fmt --check
+          cargo test --all-features
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cargo publish
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
