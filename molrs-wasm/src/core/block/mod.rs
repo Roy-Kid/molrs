@@ -1,6 +1,6 @@
 //! WASM bindings for Block and zero-copy ColumnView.
 
-use js_sys::{Array as JsArray, Float32Array};
+use js_sys::{Array as JsArray, Float32Array, Uint32Array, Uint8Array};
 use ndarray::Array1;
 use wasm_bindgen::prelude::*;
 
@@ -229,6 +229,56 @@ impl Block {
                     js.push(&JsValue::from_str(s));
                 }
                 Some(js)
+            })
+            .ok()?
+    }
+
+    #[wasm_bindgen(js_name = setColumnF32)]
+    pub fn set_column_f32(&mut self, key: &str, data: &Float32Array) -> Result<(), JsValue> {
+        self.insert_f32(key, data.to_vec(), None)
+    }
+
+    #[wasm_bindgen(js_name = setColumnU32)]
+    pub fn set_column_u32(&mut self, key: &str, data: &Uint32Array) -> Result<(), JsValue> {
+        let vec: Vec<u32> = data.to_vec();
+        self.insert_col(key, Array1::from(vec).into_dyn())
+    }
+
+    #[wasm_bindgen(js_name = setColumnU8)]
+    pub fn set_column_u8(&mut self, key: &str, data: &Uint8Array) -> Result<(), JsValue> {
+        let vec: Vec<u8> = data.to_vec();
+        self.insert_col(key, Array1::from(vec).into_dyn())
+    }
+
+    #[wasm_bindgen(js_name = getColumnF32)]
+    pub fn get_column_f32(&self, key: &str) -> Option<Float32Array> {
+        self.store
+            .borrow()
+            .with_block(&self.handle, |b| {
+                let arr = b.get_f32(key)?;
+                Some(Float32Array::from(arr.as_slice_memory_order()?))
+            })
+            .ok()?
+    }
+
+    #[wasm_bindgen(js_name = getColumnU32)]
+    pub fn get_column_u32(&self, key: &str) -> Option<Uint32Array> {
+        self.store
+            .borrow()
+            .with_block(&self.handle, |b| {
+                let arr = b.get_u32(key)?;
+                Some(Uint32Array::from(arr.as_slice_memory_order()?))
+            })
+            .ok()?
+    }
+
+    #[wasm_bindgen(js_name = getColumnU8)]
+    pub fn get_column_u8(&self, key: &str) -> Option<Uint8Array> {
+        self.store
+            .borrow()
+            .with_block(&self.handle, |b| {
+                let arr = b.get_u8(key)?;
+                Some(Uint8Array::from(arr.as_slice_memory_order()?))
             })
             .ok()?
     }

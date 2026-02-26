@@ -8,6 +8,7 @@ pub mod forcefield;
 pub mod frame;
 pub mod gasteiger;
 pub use gasteiger::{GasteigerCharges, compute_gasteiger_charges};
+pub mod gen3d;
 pub mod hydrogens;
 pub mod molgraph;
 pub mod pme;

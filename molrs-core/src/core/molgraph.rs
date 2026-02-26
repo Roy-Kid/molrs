@@ -18,16 +18,16 @@
 //! let h1 = g.add_atom(Atom::xyz("H", 0.96, 0.0, 0.0));
 //! let h2 = g.add_atom(Atom::xyz("H", -0.24, 0.93, 0.0));
 //!
-//! g.add_bond(o, h1);
-//! g.add_bond(o, h2);
-//! g.add_angle(h1, o, h2);
+//! g.add_bond(o, h1).expect("add bond");
+//! g.add_bond(o, h2).expect("add bond");
+//! g.add_angle(h1, o, h2).expect("add angle");
 //!
 //! assert_eq!(g.n_atoms(), 3);
 //! assert_eq!(g.n_bonds(), 2);
 //! assert_eq!(g.n_angles(), 1);
 //!
 //! g.translate([1.0, 0.0, 0.0]);
-//! assert!((g.atom(o).unwrap().get_f64("x").unwrap() - 1.0).abs() < 1e-12);
+//! assert!((g.get_atom(o).expect("get atom").get_f64("x").unwrap() - 1.0).abs() < 1e-12);
 //! ```
 
 use std::collections::HashMap;
@@ -273,8 +273,11 @@ impl MolGraph {
     }
 
     /// Remove an atom and all incident bonds / angles / dihedrals.
-    pub fn remove_atom(&mut self, id: AtomId) -> Option<Atom> {
-        let atom = self.atoms.remove(id)?;
+    pub fn remove_atom(&mut self, id: AtomId) -> Result<Atom, MolRsError> {
+        let atom = self
+            .atoms
+            .remove(id)
+            .ok_or_else(|| MolRsError::not_found("atom", format!("AtomId {:?}", id)))?;
 
         // Collect incident bonds.
         let incident: Vec<BondId> = self.adjacency.remove(&id).unwrap_or_default();
@@ -304,28 +307,34 @@ impl MolGraph {
             self.dihedrals.remove(did);
         }
 
-        Some(atom)
+        Ok(atom)
     }
 
     /// Get a reference to an atom.
-    pub fn atom(&self, id: AtomId) -> Option<&Atom> {
-        self.atoms.get(id)
+    pub fn get_atom(&self, id: AtomId) -> Result<&Atom, MolRsError> {
+        self.atoms
+            .get(id)
+            .ok_or_else(|| MolRsError::not_found("atom", format!("AtomId {:?}", id)))
     }
 
     /// Get a mutable reference to an atom.
-    pub fn atom_mut(&mut self, id: AtomId) -> Option<&mut Atom> {
-        self.atoms.get_mut(id)
+    pub fn get_atom_mut(&mut self, id: AtomId) -> Result<&mut Atom, MolRsError> {
+        self.atoms
+            .get_mut(id)
+            .ok_or_else(|| MolRsError::not_found("atom", format!("AtomId {:?}", id)))
     }
 
     // =====================================================================
     // Bond CRUD
     // =====================================================================
 
-    /// Add a bond between two existing atoms. Returns `None` if either atom
-    /// does not exist.
-    pub fn add_bond(&mut self, a: AtomId, b: AtomId) -> Option<BondId> {
-        if !self.atoms.contains_key(a) || !self.atoms.contains_key(b) {
-            return None;
+    /// Add a bond between two existing atoms.
+    pub fn add_bond(&mut self, a: AtomId, b: AtomId) -> Result<BondId, MolRsError> {
+        if !self.atoms.contains_key(a) {
+            return Err(MolRsError::not_found("atom", format!("AtomId {:?}", a)));
+        }
+        if !self.atoms.contains_key(b) {
+            return Err(MolRsError::not_found("atom", format!("AtomId {:?}", b)));
         }
         let bond = Bond {
             atoms: [a, b],
@@ -334,28 +343,35 @@ impl MolGraph {
         let bid = self.bonds.insert(bond);
         self.adjacency.entry(a).or_default().push(bid);
         self.adjacency.entry(b).or_default().push(bid);
-        Some(bid)
+        Ok(bid)
     }
 
     /// Remove a bond and update the adjacency index.
-    pub fn remove_bond(&mut self, id: BondId) -> Option<Bond> {
-        let bond = self.bonds.remove(id)?;
+    pub fn remove_bond(&mut self, id: BondId) -> Result<Bond, MolRsError> {
+        let bond = self
+            .bonds
+            .remove(id)
+            .ok_or_else(|| MolRsError::not_found("bond", format!("BondId {:?}", id)))?;
         for &aid in &bond.atoms {
             if let Some(adj) = self.adjacency.get_mut(&aid) {
                 adj.retain(|bid| *bid != id);
             }
         }
-        Some(bond)
+        Ok(bond)
     }
 
     /// Get a reference to a bond.
-    pub fn bond(&self, id: BondId) -> Option<&Bond> {
-        self.bonds.get(id)
+    pub fn get_bond(&self, id: BondId) -> Result<&Bond, MolRsError> {
+        self.bonds
+            .get(id)
+            .ok_or_else(|| MolRsError::not_found("bond", format!("BondId {:?}", id)))
     }
 
     /// Get a mutable reference to a bond.
-    pub fn bond_mut(&mut self, id: BondId) -> Option<&mut Bond> {
-        self.bonds.get_mut(id)
+    pub fn get_bond_mut(&mut self, id: BondId) -> Result<&mut Bond, MolRsError> {
+        self.bonds
+            .get_mut(id)
+            .ok_or_else(|| MolRsError::not_found("bond", format!("BondId {:?}", id)))
     }
 
     // internal: remove bond from adjacency for a specific atom being removed
@@ -377,63 +393,76 @@ impl MolGraph {
     // Angle CRUD
     // =====================================================================
 
-    /// Add an angle (i-j-k, j central). Returns `None` if any atom is missing.
-    pub fn add_angle(&mut self, i: AtomId, j: AtomId, k: AtomId) -> Option<AngleId> {
-        if !self.atoms.contains_key(i) || !self.atoms.contains_key(j) || !self.atoms.contains_key(k)
-        {
-            return None;
+    /// Add an angle (i-j-k, j central).
+    pub fn add_angle(&mut self, i: AtomId, j: AtomId, k: AtomId) -> Result<AngleId, MolRsError> {
+        for &atom_id in &[i, j, k] {
+            if !self.atoms.contains_key(atom_id) {
+                return Err(MolRsError::not_found(
+                    "atom",
+                    format!("AtomId {:?}", atom_id),
+                ));
+            }
         }
         let angle = Angle {
             atoms: [i, j, k],
             props: HashMap::new(),
         };
-        Some(self.angles.insert(angle))
+        Ok(self.angles.insert(angle))
     }
 
     /// Remove an angle.
-    pub fn remove_angle(&mut self, id: AngleId) -> Option<Angle> {
-        self.angles.remove(id)
+    pub fn remove_angle(&mut self, id: AngleId) -> Result<Angle, MolRsError> {
+        self.angles
+            .remove(id)
+            .ok_or_else(|| MolRsError::not_found("angle", format!("AngleId {:?}", id)))
     }
 
     /// Get a reference to an angle.
-    pub fn angle(&self, id: AngleId) -> Option<&Angle> {
-        self.angles.get(id)
+    pub fn get_angle(&self, id: AngleId) -> Result<&Angle, MolRsError> {
+        self.angles
+            .get(id)
+            .ok_or_else(|| MolRsError::not_found("angle", format!("AngleId {:?}", id)))
     }
 
     // =====================================================================
     // Dihedral CRUD
     // =====================================================================
 
-    /// Add a dihedral (i-j-k-l). Returns `None` if any atom is missing.
+    /// Add a dihedral (i-j-k-l).
     pub fn add_dihedral(
         &mut self,
         i: AtomId,
         j: AtomId,
         k: AtomId,
         l: AtomId,
-    ) -> Option<DihedralId> {
-        if !self.atoms.contains_key(i)
-            || !self.atoms.contains_key(j)
-            || !self.atoms.contains_key(k)
-            || !self.atoms.contains_key(l)
-        {
-            return None;
+    ) -> Result<DihedralId, MolRsError> {
+        for &atom_id in &[i, j, k, l] {
+            if !self.atoms.contains_key(atom_id) {
+                return Err(MolRsError::not_found(
+                    "atom",
+                    format!("AtomId {:?}", atom_id),
+                ));
+            }
         }
         let dih = Dihedral {
             atoms: [i, j, k, l],
             props: HashMap::new(),
         };
-        Some(self.dihedrals.insert(dih))
+        Ok(self.dihedrals.insert(dih))
     }
 
     /// Remove a dihedral.
-    pub fn remove_dihedral(&mut self, id: DihedralId) -> Option<Dihedral> {
-        self.dihedrals.remove(id)
+    pub fn remove_dihedral(&mut self, id: DihedralId) -> Result<Dihedral, MolRsError> {
+        self.dihedrals
+            .remove(id)
+            .ok_or_else(|| MolRsError::not_found("dihedral", format!("DihedralId {:?}", id)))
     }
 
     /// Get a reference to a dihedral.
-    pub fn dihedral(&self, id: DihedralId) -> Option<&Dihedral> {
-        self.dihedrals.get(id)
+    pub fn get_dihedral(&self, id: DihedralId) -> Result<&Dihedral, MolRsError> {
+        self.dihedrals
+            .get(id)
+            .ok_or_else(|| MolRsError::not_found("dihedral", format!("DihedralId {:?}", id)))
     }
 
     // =====================================================================
@@ -808,7 +837,7 @@ impl MolGraph {
                 let ai = col_i[[row]] as usize;
                 let aj = col_j[[row]] as usize;
                 if ai < atom_ids.len() && aj < atom_ids.len() {
-                    g.add_bond(atom_ids[ai], atom_ids[aj]);
+                    g.add_bond(atom_ids[ai], atom_ids[aj])?;
                 }
             }
         }
@@ -827,7 +856,7 @@ impl MolGraph {
                 let aj = cj[[row]] as usize;
                 let ak = ck[[row]] as usize;
                 if ai < atom_ids.len() && aj < atom_ids.len() && ak < atom_ids.len() {
-                    g.add_angle(atom_ids[ai], atom_ids[aj], atom_ids[ak]);
+                    g.add_angle(atom_ids[ai], atom_ids[aj], atom_ids[ak])?;
                 }
             }
         }
@@ -852,7 +881,7 @@ impl MolGraph {
                     && ak < atom_ids.len()
                     && al < atom_ids.len()
                 {
-                    g.add_dihedral(atom_ids[ai], atom_ids[aj], atom_ids[ak], atom_ids[al]);
+                    g.add_dihedral(atom_ids[ai], atom_ids[aj], atom_ids[ak], atom_ids[al])?;
                 }
             }
         }
@@ -930,11 +959,14 @@ mod tests {
 
         let id = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
         assert_eq!(g.n_atoms(), 1);
-        assert_eq!(g.atom(id).unwrap().get_str("symbol"), Some("C"));
+        assert_eq!(
+            g.get_atom(id).expect("get atom").get_str("symbol"),
+            Some("C")
+        );
 
-        g.remove_atom(id);
+        g.remove_atom(id).expect("remove atom");
         assert_eq!(g.n_atoms(), 0);
-        assert!(g.atom(id).is_none());
+        assert!(g.get_atom(id).is_err());
     }
 
     #[test]
@@ -942,8 +974,8 @@ mod tests {
         let mut g = MolGraph::new();
         let id = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
 
-        g.atom_mut(id).unwrap().set("x", 5.0);
-        assert_eq!(g.atom(id).unwrap().get_f64("x"), Some(5.0));
+        g.get_atom_mut(id).expect("get atom mut").set("x", 5.0);
+        assert_eq!(g.get_atom(id).expect("get atom").get_f64("x"), Some(5.0));
     }
 
     // ----- Bond CRUD -----
@@ -954,7 +986,7 @@ mod tests {
         let a = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
         let b = g.add_atom(Atom::xyz("O", 1.0, 0.0, 0.0));
 
-        let bid = g.add_bond(a, b).unwrap();
+        let bid = g.add_bond(a, b).expect("add bond");
         assert_eq!(g.n_bonds(), 1);
 
         // Neighbors.
@@ -964,7 +996,7 @@ mod tests {
         assert_eq!(neigh_b, vec![a]);
 
         // Remove bond.
-        g.remove_bond(bid);
+        g.remove_bond(bid).expect("remove bond");
         assert_eq!(g.n_bonds(), 0);
         assert_eq!(g.neighbors(a).count(), 0);
         assert_eq!(g.neighbors(b).count(), 0);
@@ -976,8 +1008,8 @@ mod tests {
         let a = g.add_atom(Atom::new());
         let b = g.add_atom(Atom::new());
         // Remove b, then try to bond to it.
-        g.remove_atom(b);
-        assert!(g.add_bond(a, b).is_none());
+        g.remove_atom(b).expect("remove atom b");
+        assert!(g.add_bond(a, b).is_err());
     }
 
     // ----- Cascading deletion -----
@@ -990,18 +1022,18 @@ mod tests {
         let c = g.add_atom(Atom::xyz("H", -1.0, 0.0, 0.0));
         let d = g.add_atom(Atom::xyz("H", 0.0, 1.0, 0.0));
 
-        g.add_bond(a, b);
-        g.add_bond(a, c);
-        g.add_bond(a, d);
-        g.add_angle(b, a, c);
-        g.add_dihedral(b, a, c, d);
+        g.add_bond(a, b).expect("add bond");
+        g.add_bond(a, c).expect("add bond");
+        g.add_bond(a, d).expect("add bond");
+        g.add_angle(b, a, c).expect("add angle");
+        g.add_dihedral(b, a, c, d).expect("add dihedral");
 
         assert_eq!(g.n_bonds(), 3);
         assert_eq!(g.n_angles(), 1);
         assert_eq!(g.n_dihedrals(), 1);
 
         // Remove the central atom — everything incident must go.
-        g.remove_atom(a);
+        g.remove_atom(a).expect("remove atom a");
         assert_eq!(g.n_atoms(), 3);
         assert_eq!(g.n_bonds(), 0);
         assert_eq!(g.n_angles(), 0);
@@ -1017,11 +1049,11 @@ mod tests {
         let b = g.add_atom(Atom::new());
         let c = g.add_atom(Atom::new());
 
-        let aid = g.add_angle(a, b, c).unwrap();
+        let aid = g.add_angle(a, b, c).expect("add angle");
         assert_eq!(g.n_angles(), 1);
-        assert_eq!(g.angle(aid).unwrap().atoms, [a, b, c]);
+        assert_eq!(g.get_angle(aid).expect("get angle").atoms, [a, b, c]);
 
-        g.remove_angle(aid);
+        g.remove_angle(aid).expect("remove angle");
         assert_eq!(g.n_angles(), 0);
     }
 
@@ -1033,11 +1065,14 @@ mod tests {
         let c = g.add_atom(Atom::new());
         let d = g.add_atom(Atom::new());
 
-        let did = g.add_dihedral(a, b, c, d).unwrap();
+        let did = g.add_dihedral(a, b, c, d).expect("add dihedral");
         assert_eq!(g.n_dihedrals(), 1);
-        assert_eq!(g.dihedral(did).unwrap().atoms, [a, b, c, d]);
+        assert_eq!(
+            g.get_dihedral(did).expect("get dihedral").atoms,
+            [a, b, c, d]
+        );
 
-        g.remove_dihedral(did);
+        g.remove_dihedral(did).expect("remove dihedral");
         assert_eq!(g.n_dihedrals(), 0);
     }
 
@@ -1050,9 +1085,9 @@ mod tests {
         let b = g.add_atom(Atom::xyz("O", 1.0, 0.0, 0.0));
         let c = g.add_atom(Atom::xyz("H", 2.0, 0.0, 0.0));
 
-        g.add_bond(a, b);
-        g.add_bond(b, c);
-        g.add_angle(a, b, c);
+        g.add_bond(a, b).expect("add bond");
+        g.add_bond(b, c).expect("add bond");
+        g.add_angle(a, b, c).expect("add angle");
 
         assert_eq!(g.atoms().count(), 3);
         assert_eq!(g.bonds().count(), 2);
@@ -1069,8 +1104,8 @@ mod tests {
         let b = g.add_atom(Atom::new());
         let c = g.add_atom(Atom::new());
 
-        g.add_bond(a, b);
-        g.add_bond(a, c);
+        g.add_bond(a, b).expect("add bond");
+        g.add_bond(a, c).expect("add bond");
 
         let mut n: Vec<AtomId> = g.neighbors(a).collect();
         n.sort_by_key(|id| id.0); // deterministic order
@@ -1092,7 +1127,7 @@ mod tests {
 
         g.translate([10.0, 20.0, 30.0]);
 
-        let a = g.atom(id).unwrap();
+        let a = g.get_atom(id).expect("get atom");
         assert!((a.get_f64("x").unwrap() - 11.0).abs() < 1e-12);
         assert!((a.get_f64("y").unwrap() - 22.0).abs() < 1e-12);
         assert!((a.get_f64("z").unwrap() - 33.0).abs() < 1e-12);
@@ -1104,7 +1139,7 @@ mod tests {
         let id = g.add_atom(Atom::new()); // no x/y/z
         g.translate([1.0, 2.0, 3.0]);
         // Should not panic.
-        assert!(g.atom(id).unwrap().get_f64("x").is_none());
+        assert!(g.get_atom(id).expect("get atom").get_f64("x").is_none());
     }
 
     #[test]
@@ -1115,7 +1150,7 @@ mod tests {
         let half_pi = std::f64::consts::FRAC_PI_2;
         g.rotate([0.0, 0.0, 1.0], half_pi, None);
 
-        let a = g.atom(id).unwrap();
+        let a = g.get_atom(id).expect("get atom");
         assert!((a.get_f64("x").unwrap()).abs() < 1e-12);
         assert!((a.get_f64("y").unwrap() - 1.0).abs() < 1e-12);
         assert!((a.get_f64("z").unwrap()).abs() < 1e-12);
@@ -1130,9 +1165,9 @@ mod tests {
         let h1 = g.add_atom(Atom::xyz("H", 0.96, 0.0, 0.0));
         let h2 = g.add_atom(Atom::xyz("H", -0.24, 0.93, 0.0));
 
-        g.add_bond(o, h1);
-        g.add_bond(o, h2);
-        g.add_angle(h1, o, h2);
+        g.add_bond(o, h1).expect("add bond");
+        g.add_bond(o, h2).expect("add bond");
+        g.add_angle(h1, o, h2).expect("add angle");
 
         let frame = g.to_frame();
         assert!(frame.contains_key("atoms"));
@@ -1144,7 +1179,7 @@ mod tests {
         assert_eq!(frame["angles"].nrows(), Some(1));
 
         // Round-trip.
-        let g2 = MolGraph::from_frame(&frame).unwrap();
+        let g2 = MolGraph::from_frame(&frame).expect("from_frame");
         assert_eq!(g2.n_atoms(), 3);
         assert_eq!(g2.n_bonds(), 2);
         assert_eq!(g2.n_angles(), 1);
@@ -1157,12 +1192,12 @@ mod tests {
         let mut g1 = MolGraph::new();
         let a = g1.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
         let b = g1.add_atom(Atom::xyz("O", 1.0, 0.0, 0.0));
-        g1.add_bond(a, b);
+        g1.add_bond(a, b).expect("add bond");
 
         let mut g2 = MolGraph::new();
         let c = g2.add_atom(Atom::xyz("N", 5.0, 0.0, 0.0));
         let d = g2.add_atom(Atom::xyz("H", 6.0, 0.0, 0.0));
-        g2.add_bond(c, d);
+        g2.add_bond(c, d).expect("add bond");
 
         g1.merge(g2);
 
@@ -1180,10 +1215,10 @@ mod tests {
 
         let mut g2 = g.clone();
         // Mutate original.
-        g.atom_mut(id).unwrap().set("x", 99.0);
+        g.get_atom_mut(id).expect("get atom mut").set("x", 99.0);
 
         // Clone should still have original value (slotmap keys carry across clone).
-        assert_eq!(g2.atom(id).unwrap().get_f64("x"), Some(0.0));
+        assert_eq!(g2.get_atom(id).expect("get atom").get_f64("x"), Some(0.0));
 
         // Independent counts.
         assert_eq!(g2.n_atoms(), 2);
@@ -1191,7 +1226,7 @@ mod tests {
             let (fid, _) = g2.atoms().next().unwrap();
             fid
         };
-        g2.remove_atom(first_id);
+        g2.remove_atom(first_id).expect("remove atom");
         assert_eq!(g2.n_atoms(), 1);
         // Original unaffected.
         assert_eq!(g.n_atoms(), 2);
@@ -1206,9 +1241,9 @@ mod tests {
         let h1 = water.add_atom(Atom::xyz("H", 0.9572, 0.0, 0.0));
         let h2 = water.add_atom(Atom::xyz("H", -0.2399, 0.9266, 0.0));
 
-        water.add_bond(o, h1);
-        water.add_bond(o, h2);
-        water.add_angle(h1, o, h2);
+        water.add_bond(o, h1).expect("add bond");
+        water.add_bond(o, h2).expect("add bond");
+        water.add_angle(h1, o, h2).expect("add angle");
 
         assert_eq!(water.n_atoms(), 3);
         assert_eq!(water.n_bonds(), 2);
@@ -1244,11 +1279,17 @@ mod tests {
 
         let id1 = g.add_atom(b1);
         let id2 = g.add_atom(b2);
-        g.add_bond(id1, id2);
+        g.add_bond(id1, id2).expect("add bond");
 
         assert_eq!(g.n_atoms(), 2);
         assert_eq!(g.n_bonds(), 1);
-        assert_eq!(g.atom(id1).unwrap().get_f64("mass"), Some(72.0));
-        assert_eq!(g.atom(id1).unwrap().get_str("name"), Some("W"));
+        assert_eq!(
+            g.get_atom(id1).expect("get atom").get_f64("mass"),
+            Some(72.0)
+        );
+        assert_eq!(
+            g.get_atom(id1).expect("get atom").get_str("name"),
+            Some("W")
+        );
     }
 }

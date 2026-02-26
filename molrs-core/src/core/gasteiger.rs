@@ -92,9 +92,9 @@ fn gasteiger_params(elem: &str, mode: &str) -> [f64; 3] {
 /// Corresponds to `switch (hybridization)` in `GasteigerCharges.cpp`, but
 /// inferred from bond orders rather than a stored hybridization flag.
 fn hybridization_mode(mol: &MolGraph, id: AtomId) -> &'static str {
-    let atom = match mol.atom(id) {
-        Some(a) => a,
-        None => return "*",
+    let atom = match mol.get_atom(id) {
+        Ok(a) => a,
+        Err(_) => return "*",
     };
     let sym = atom.get_str("symbol").unwrap_or("");
 
@@ -126,7 +126,8 @@ fn hybridization_mode(mol: &MolGraph, id: AtomId) -> &'static str {
         let n_oxygen = mol
             .neighbors(id)
             .filter(|&nbr| {
-                mol.atom(nbr)
+                mol.get_atom(nbr)
+                    .ok()
                     .and_then(|a| a.get_str("symbol"))
                     .map(|s| s == "O")
                     .unwrap_or(false)
@@ -187,9 +188,9 @@ fn split_charge_conjugated(
     let n = atom_ids.len();
     for i in 0..n {
         let id_i = atom_ids[i];
-        let atom_i = match mol.atom(id_i) {
-            Some(a) => a,
-            None => continue,
+        let atom_i = match mol.get_atom(id_i) {
+            Ok(a) => a,
+            Err(_) => continue,
         };
 
         let fc = atom_i.get_f64("formal_charge").unwrap_or(0.0);
@@ -217,7 +218,8 @@ fn split_charge_conjugated(
                     continue;
                 }
                 let sym_k = mol
-                    .atom(k_id)
+                    .get_atom(k_id)
+                    .ok()
                     .and_then(|a| a.get_str("symbol"))
                     .unwrap_or("");
                 let elem_k = Element::by_symbol(sym_k);
@@ -290,7 +292,11 @@ pub fn compute_gasteiger_charges(mol: &MolGraph, n_iter: usize) -> Vec<(AtomId, 
     let atm_ps: Vec<[f64; 3]> = atom_ids
         .iter()
         .map(|&id| {
-            let sym = mol.atom(id).and_then(|a| a.get_str("symbol")).unwrap_or("");
+            let sym = mol
+                .get_atom(id)
+                .ok()
+                .and_then(|a| a.get_str("symbol"))
+                .unwrap_or("");
             let mode = hybridization_mode(mol, id);
             gasteiger_params(sym, mode)
         })
@@ -410,8 +416,8 @@ mod tests {
     }
 
     fn bond_order(mol: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
-        if let Some(bid) = mol.add_bond(a, b) {
-            if let Some(bond) = mol.bond_mut(bid) {
+        if let Ok(bid) = mol.add_bond(a, b) {
+            if let Ok(bond) = mol.get_bond_mut(bid) {
                 bond.props
                     .insert("order".to_string(), PropValue::F64(order));
             }

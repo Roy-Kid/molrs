@@ -9,7 +9,7 @@ fn carbon() -> Atom {
 }
 
 fn bond(g: &mut MolGraph, a: AtomId, b: AtomId) {
-    g.add_bond(a, b);
+    g.add_bond(a, b).expect("add bond");
 }
 
 /// Build a simple cycle graph (n atoms in a ring).

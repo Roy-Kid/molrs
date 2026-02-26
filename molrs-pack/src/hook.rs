@@ -438,7 +438,7 @@ mod tests {
             ids.push(g.add_atom(Atom::new()));
         }
         for i in 0..n - 1 {
-            g.add_bond(ids[i], ids[i + 1]);
+            g.add_bond(ids[i], ids[i + 1]).expect("add chain bond");
         }
         (g, zigzag_coords(n))
     }

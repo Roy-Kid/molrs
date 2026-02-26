@@ -66,7 +66,7 @@ pub enum BondStereo {
 /// Returns `0.0` if any atom lacks `x`/`y`/`z` coordinates.
 pub fn chiral_volume(mol: &MolGraph, center: AtomId, neighbor_order: &[AtomId; 4]) -> f64 {
     let pos = |id: AtomId| -> Option<[f64; 3]> {
-        let a = mol.atom(id)?;
+        let a = mol.get_atom(id).ok()?;
         Some([a.get_f64("x")?, a.get_f64("y")?, a.get_f64("z")?])
     };
 
@@ -203,7 +203,8 @@ pub fn assign_bond_stereo_from_3d(mol: &MolGraph) -> HashMap<BondId, BondStereo>
             subs.iter()
                 .copied()
                 .max_by_key(|&s| {
-                    mol.atom(s)
+                    mol.get_atom(s)
+                        .ok()
                         .and_then(|a| a.get_str("symbol"))
                         .and_then(super::element::Element::by_symbol)
                         .map(|e| e.z())
@@ -217,7 +218,7 @@ pub fn assign_bond_stereo_from_3d(mol: &MolGraph) -> HashMap<BondId, BondStereo>
 
         // Get 3-D positions
         let pos = |id: AtomId| -> Option<[f64; 3]> {
-            let atom = mol.atom(id)?;
+            let atom = mol.get_atom(id).ok()?;
             Some([atom.get_f64("x")?, atom.get_f64("y")?, atom.get_f64("z")?])
         };
 
@@ -301,8 +302,8 @@ mod tests {
     }
 
     fn add_double_bond(mol: &mut MolGraph, a: AtomId, b: AtomId) {
-        if let Some(bid) = mol.add_bond(a, b) {
-            if let Some(bond) = mol.bond_mut(bid) {
+        if let Ok(bid) = mol.add_bond(a, b) {
+            if let Ok(bond) = mol.get_bond_mut(bid) {
                 bond.props.insert("order".to_string(), PropValue::F64(2.0));
             }
         }
@@ -321,7 +322,7 @@ mod tests {
         let n3 = g.add_atom(atom_xyz("H", 0.0, 0.0, 1.0));
         let n4 = g.add_atom(atom_xyz("H", -1.0, -1.0, -1.0));
         for &n in &[n1, n2, n3, n4] {
-            g.add_bond(c, n);
+            g.add_bond(c, n).expect("add bond");
         }
         let vol = chiral_volume(&g, c, &[n1, n2, n3, n4]);
         assert!(vol > 0.0, "expected positive chiral volume, got {}", vol);
@@ -336,7 +337,7 @@ mod tests {
         let n3 = g.add_atom(atom_xyz("H", 0.0, 0.0, 1.0));
         let n4 = g.add_atom(atom_xyz("H", -1.0, -1.0, -1.0));
         for &n in &[n1, n2, n3, n4] {
-            g.add_bond(c, n);
+            g.add_bond(c, n).expect("add bond");
         }
         // Swapping two neighbours flips the sign
         let vol_swapped = chiral_volume(&g, c, &[n2, n1, n3, n4]);
@@ -350,7 +351,7 @@ mod tests {
         let mut g = MolGraph::new();
         let c1 = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let c2 = g.add_atom(atom_xyz("C", 1.5, 0.0, 0.0));
-        g.add_bond(c1, c2);
+        g.add_bond(c1, c2).expect("add bond");
         assert!(find_chiral_centers(&g).is_empty());
     }
 
@@ -360,7 +361,7 @@ mod tests {
         let c = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         for i in 0..4_usize {
             let h = g.add_atom(atom_xyz("H", i as f64, 0.0, 0.0));
-            g.add_bond(c, h);
+            g.add_bond(c, h).expect("add bond");
         }
         // 4 neighbours, all with distinct IDs → detected
         let centers = find_chiral_centers(&g);
@@ -379,7 +380,7 @@ mod tests {
         let n3 = g.add_atom(atom_xyz("Br", 0.0, 0.0, 1.0));
         let n4 = g.add_atom(atom_xyz("H", -1.0, -1.0, -1.0));
         for &n in &[n1, n2, n3, n4] {
-            g.add_bond(c, n);
+            g.add_bond(c, n).expect("add bond");
         }
         let stereo = assign_stereo_from_3d(&g);
         assert!(stereo.contains_key(&c));
@@ -402,8 +403,8 @@ mod tests {
         let sub1 = g.add_atom(atom_xyz("C", -0.5, 1.0, 0.0)); // +y side
         let sub2 = g.add_atom(atom_xyz("C", 1.84, 1.0, 0.0)); // +y side
         add_double_bond(&mut g, c1, c2);
-        g.add_bond(c1, sub1);
-        g.add_bond(c2, sub2);
+        g.add_bond(c1, sub1).expect("add bond");
+        g.add_bond(c2, sub2).expect("add bond");
 
         let stereo = assign_bond_stereo_from_3d(&g);
         let double_bid = stereo
@@ -423,8 +424,8 @@ mod tests {
         let sub1 = g.add_atom(atom_xyz("C", -0.5, 1.0, 0.0)); // +y side
         let sub2 = g.add_atom(atom_xyz("C", 1.84, -1.0, 0.0)); // -y side
         add_double_bond(&mut g, c1, c2);
-        g.add_bond(c1, sub1);
-        g.add_bond(c2, sub2);
+        g.add_bond(c1, sub1).expect("add bond");
+        g.add_bond(c2, sub2).expect("add bond");
 
         let stereo = assign_bond_stereo_from_3d(&g);
         let double_bid = stereo
@@ -440,7 +441,7 @@ mod tests {
         let mut g = MolGraph::new();
         let a = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let b = g.add_atom(atom_xyz("C", 1.5, 0.0, 0.0));
-        g.add_bond(a, b); // default single bond
+        g.add_bond(a, b).expect("add bond"); // default single bond
         let stereo = assign_bond_stereo_from_3d(&g);
         let bid = g.bonds().next().unwrap().0;
         assert_eq!(stereo[&bid], BondStereo::None);

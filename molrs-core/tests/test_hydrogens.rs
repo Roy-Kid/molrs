@@ -1,6 +1,6 @@
 //! Integration tests for hydrogen addition (src/core/hydrogens.rs).
 
-use molrs::{Atom, AtomId, MolGraph, PropValue, add_hydrogens, implicit_h_count};
+use molrs::{Atom, AtomId, MolGraph, PropValue, add_hydrogens, implicit_h_count, remove_hydrogens};
 
 fn atom(sym: &str) -> Atom {
     let mut a = Atom::new();
@@ -9,8 +9,8 @@ fn atom(sym: &str) -> Atom {
 }
 
 fn bond_order(g: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
-    if let Some(bid) = g.add_bond(a, b) {
-        if let Some(bnd) = g.bond_mut(bid) {
+    if let Ok(bid) = g.add_bond(a, b) {
+        if let Ok(bnd) = g.get_bond_mut(bid) {
             bnd.props.insert("order".to_string(), PropValue::F64(order));
         }
     }
@@ -183,7 +183,7 @@ fn test_missing_bond_order_defaults_to_single() {
     let mut g = MolGraph::new();
     let c1 = g.add_atom(atom("C"));
     let c2 = g.add_atom(atom("C"));
-    g.add_bond(c1, c2); // no order property
+    g.add_bond(c1, c2).expect("add bond"); // no order property
     let result = add_hydrogens(&g);
     // Each C treated as having 1 single bond → 3H each
     assert_eq!(count_symbol(&result, "H"), 6);
@@ -201,4 +201,87 @@ fn test_add_hydrogens_immutable() {
     assert_eq!(g.n_atoms(), before_atoms);
     assert_eq!(g.n_bonds(), before_bonds);
     let _ = c;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// remove_hydrogens tests
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── Roundtrip: add then remove on methane skeleton ───────────────────────
+
+#[test]
+fn test_remove_hydrogens_roundtrip_methane() {
+    let mut g = MolGraph::new();
+    g.add_atom(atom("C"));
+    let with_h = add_hydrogens(&g);
+    assert_eq!(with_h.n_atoms(), 5, "C + 4H");
+    let stripped = remove_hydrogens(&with_h);
+    assert_eq!(stripped.n_atoms(), 1, "back to C only");
+    assert_eq!(stripped.n_bonds(), 0);
+}
+
+// ── Roundtrip: benzene ──────────────────────────────────────────────────
+
+#[test]
+fn test_remove_hydrogens_roundtrip_benzene() {
+    let mut g = MolGraph::new();
+    let ids: Vec<AtomId> = (0..6).map(|_| g.add_atom(atom("C"))).collect();
+    for i in 0..6 {
+        bond_order(&mut g, ids[i], ids[(i + 1) % 6], 1.5);
+    }
+    let with_h = add_hydrogens(&g);
+    assert_eq!(with_h.n_atoms(), 12, "6C + 6H");
+    let stripped = remove_hydrogens(&with_h);
+    assert_eq!(stripped.n_atoms(), 6, "back to 6C");
+    assert_eq!(stripped.n_bonds(), 6, "ring bonds preserved");
+}
+
+// ── Partial explicit H: only terminal H removed ─────────────────────────
+
+#[test]
+fn test_remove_hydrogens_partial_explicit() {
+    // C with 1 explicit H + add_hydrogens → 5 atoms; remove → back to 1C
+    let mut g = MolGraph::new();
+    let c = g.add_atom(atom("C"));
+    let h = g.add_atom(atom("H"));
+    bond_order(&mut g, c, h, 1.0);
+    let with_h = add_hydrogens(&g);
+    assert_eq!(count_symbol(&with_h, "H"), 4);
+    let stripped = remove_hydrogens(&with_h);
+    assert_eq!(stripped.n_atoms(), 1, "all H removed");
+    assert_eq!(count_symbol(&stripped, "C"), 1);
+}
+
+// ── Immutability: remove_hydrogens does not mutate input ────────────────
+
+#[test]
+fn test_remove_hydrogens_immutable() {
+    let mut g = MolGraph::new();
+    g.add_atom(atom("C"));
+    let with_h = add_hydrogens(&g);
+    let before = with_h.n_atoms();
+    let _stripped = remove_hydrogens(&with_h);
+    assert_eq!(with_h.n_atoms(), before, "input unchanged");
+}
+
+// ── Water roundtrip ─────────────────────────────────────────────────────
+
+#[test]
+fn test_remove_hydrogens_water_roundtrip() {
+    let mut g = MolGraph::new();
+    g.add_atom(atom("O"));
+    let with_h = add_hydrogens(&g);
+    assert_eq!(with_h.n_atoms(), 3, "O + 2H");
+    let stripped = remove_hydrogens(&with_h);
+    assert_eq!(stripped.n_atoms(), 1, "back to O only");
+}
+
+// ── Noble gas: no H to remove ───────────────────────────────────────────
+
+#[test]
+fn test_remove_hydrogens_noble_gas_unchanged() {
+    let mut g = MolGraph::new();
+    g.add_atom(atom("Ne"));
+    let stripped = remove_hydrogens(&g);
+    assert_eq!(stripped.n_atoms(), 1, "Ne unchanged");
 }

@@ -63,7 +63,11 @@ pub use core::block::Block;
 pub use core::element::Element;
 pub use core::frame::Frame;
 pub use core::gasteiger::{GasteigerCharges, compute_gasteiger_charges};
-pub use core::hydrogens::{add_hydrogens, implicit_h_count};
+pub use core::gen3d::{
+    EmbedAlgorithm, ForceFieldKind, Gen3DOptions, Gen3DReport, Gen3DSpeed, StageKind, StageReport,
+    generate_3d,
+};
+pub use core::hydrogens::{add_hydrogens, implicit_h_count, remove_hydrogens};
 pub use core::molgraph::{Atom, AtomId, Bead, Bond, BondId, MolGraph, PropValue};
 pub use core::rings::{RingInfo, find_rings};
 pub use core::stereo::{

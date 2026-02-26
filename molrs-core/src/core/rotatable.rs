@@ -237,7 +237,7 @@ mod tests {
             ids.push(g.add_atom(Atom::new()));
         }
         for i in 0..n - 1 {
-            g.add_bond(ids[i], ids[i + 1]);
+            g.add_bond(ids[i], ids[i + 1]).expect("add chain bond");
         }
         g
     }
@@ -255,9 +255,9 @@ mod tests {
         let a = g.add_atom(Atom::new());
         let b = g.add_atom(Atom::new());
         let c = g.add_atom(Atom::new());
-        g.add_bond(a, b);
-        g.add_bond(b, c);
-        g.add_bond(c, a);
+        g.add_bond(a, b).expect("add bond");
+        g.add_bond(b, c).expect("add bond");
+        g.add_bond(c, a).expect("add bond");
 
         assert_eq!(detect_rotatable_bonds(&g).len(), 0);
     }
@@ -306,12 +306,12 @@ mod tests {
         let b2 = g.add_atom(Atom::new());
         let b2p = g.add_atom(Atom::new());
 
-        g.add_bond(center, b0);
-        g.add_bond(b0, b0p);
-        g.add_bond(center, b1);
-        g.add_bond(b1, b1p);
-        g.add_bond(center, b2);
-        g.add_bond(b2, b2p);
+        g.add_bond(center, b0).expect("add bond");
+        g.add_bond(b0, b0p).expect("add bond");
+        g.add_bond(center, b1).expect("add bond");
+        g.add_bond(b1, b1p).expect("add bond");
+        g.add_bond(center, b2).expect("add bond");
+        g.add_bond(b2, b2p).expect("add bond");
 
         assert_eq!(detect_rotatable_bonds(&g).len(), 3);
     }

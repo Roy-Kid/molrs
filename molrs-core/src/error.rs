@@ -35,6 +35,14 @@ pub enum MolRsError {
         message: String,
     },
 
+    /// Entity not found (atom, bond, angle, dihedral)
+    NotFound {
+        /// Kind of entity ("atom", "bond", "angle", "dihedral")
+        entity: &'static str,
+        /// Human-readable message
+        message: String,
+    },
+
     /// Generic error with message
     Other(String),
 }
@@ -58,6 +66,9 @@ impl fmt::Display for MolRsError {
             }
             MolRsError::Validation { message } => {
                 write!(f, "Validation error: {}", message)
+            }
+            MolRsError::NotFound { entity, message } => {
+                write!(f, "{} not found: {}", entity, message)
             }
             #[cfg(feature = "zarr")]
             MolRsError::Zarr { message } => {
@@ -124,6 +135,14 @@ impl MolRsError {
     /// Create a validation error
     pub fn validation(message: impl Into<String>) -> Self {
         MolRsError::Validation {
+            message: message.into(),
+        }
+    }
+
+    /// Create a not-found error
+    pub fn not_found(entity: &'static str, message: impl Into<String>) -> Self {
+        MolRsError::NotFound {
+            entity,
             message: message.into(),
         }
     }

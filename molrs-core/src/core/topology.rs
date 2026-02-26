@@ -1,42 +1,47 @@
-//! Graph-based molecular topology using igraph.
+//! Graph-based molecular topology using petgraph.
 //!
 //! Provides graph-based representation of molecular connectivity with
-//! automated detection of angles, dihedrals, and impropers via VF2
-//! subisomorphism matching.
+//! automated detection of angles, dihedrals, and impropers via neighbor
+//! traversal.
 
-use igraph::Graph;
+use petgraph::graph::{EdgeIndex, NodeIndex, UnGraph};
 
 /// Graph-based molecular topology.
 ///
-/// Wraps an undirected `igraph::Graph` where vertices are atoms and edges
-/// are bonds. Angles, dihedrals, and impropers are detected automatically
-/// from bond connectivity using VF2 subisomorphism.
+/// Wraps an undirected `petgraph::UnGraph<(), ()>` where vertices are atoms
+/// and edges are bonds. Angles, dihedrals, and impropers are detected
+/// automatically from bond connectivity using neighbor traversal.
 pub struct Topology {
-    graph: Graph,
+    graph: UnGraph<(), ()>,
 }
 
 impl Topology {
     /// Create an empty topology with no atoms or bonds.
     pub fn new() -> Self {
         Self {
-            graph: Graph::empty(0, false).expect("failed to create empty graph"),
+            graph: UnGraph::new_undirected(),
         }
     }
 
     /// Create a topology with `n` atoms and no bonds.
     pub fn with_atoms(n: usize) -> Self {
-        Self {
-            graph: Graph::empty(n as i64, false).expect("failed to create graph"),
+        let mut graph = UnGraph::new_undirected();
+        for _ in 0..n {
+            graph.add_node(());
         }
+        Self { graph }
     }
 
     /// Create a topology from edge pairs.
     pub fn from_edges(n_atoms: usize, edges: &[[usize; 2]]) -> Self {
-        let pairs: Vec<(i64, i64)> = edges.iter().map(|e| (e[0] as i64, e[1] as i64)).collect();
-        Self {
-            graph: Graph::from_edges(&pairs, n_atoms as i64, false)
-                .expect("failed to create graph from edges"),
+        let mut graph = UnGraph::new_undirected();
+        for _ in 0..n_atoms {
+            graph.add_node(());
         }
+        for e in edges {
+            graph.add_edge(NodeIndex::new(e[0]), NodeIndex::new(e[1]), ());
+        }
+        Self { graph }
     }
 
     // -----------------------------------------------------------------------
@@ -45,26 +50,22 @@ impl Topology {
 
     /// Number of atoms (vertices).
     pub fn n_atoms(&self) -> usize {
-        self.graph.vcount() as usize
+        self.graph.node_count()
     }
 
     /// Number of bonds (edges).
     pub fn n_bonds(&self) -> usize {
-        self.graph.ecount() as usize
+        self.graph.edge_count()
     }
 
     /// Number of unique angles (i-j-k triplets).
     pub fn n_angles(&self) -> usize {
-        let pattern = Graph::from_edges(&[(0, 1), (1, 2)], 3, false).unwrap();
-        let count = self.graph.count_subisomorphisms_vf2(&pattern).unwrap();
-        (count / 2) as usize
+        self.angles().len()
     }
 
     /// Number of unique proper dihedrals (i-j-k-l quartets).
     pub fn n_dihedrals(&self) -> usize {
-        let pattern = Graph::from_edges(&[(0, 1), (1, 2), (2, 3)], 4, false).unwrap();
-        let count = self.graph.count_subisomorphisms_vf2(&pattern).unwrap();
-        (count / 2) as usize
+        self.dihedrals().len()
     }
 
     // -----------------------------------------------------------------------
@@ -73,56 +74,86 @@ impl Topology {
 
     /// All atom indices.
     pub fn atoms(&self) -> Vec<usize> {
-        (0..self.n_atoms()).collect()
+        self.graph.node_indices().map(|n| n.index()).collect()
     }
 
     /// All bond pairs as `[i, j]`.
     pub fn bonds(&self) -> Vec<[usize; 2]> {
         self.graph
-            .get_edgelist()
-            .unwrap()
-            .into_iter()
-            .map(|(a, b)| [a as usize, b as usize])
+            .edge_indices()
+            .map(|e| {
+                let (a, b) = self.graph.edge_endpoints(e).unwrap();
+                [a.index(), b.index()]
+            })
             .collect()
     }
 
-    /// All unique angle triplets `[i, j, k]`, deduplicated.
+    /// All unique angle triplets `[i, j, k]`, deduplicated (i < k).
     pub fn angles(&self) -> Vec<[usize; 3]> {
-        let pattern = Graph::from_edges(&[(0, 1), (1, 2)], 3, false).unwrap();
-        let matches = self.graph.get_subisomorphisms_vf2(&pattern).unwrap();
-        matches
-            .into_iter()
-            .filter(|m| m[0] < m[2])
-            .map(|m| [m[0] as usize, m[1] as usize, m[2] as usize])
-            .collect()
+        let mut result = Vec::new();
+        for j in self.graph.node_indices() {
+            let neighbors: Vec<NodeIndex> = self.graph.neighbors(j).collect();
+            for a in 0..neighbors.len() {
+                for b in (a + 1)..neighbors.len() {
+                    let i = neighbors[a].index();
+                    let k = neighbors[b].index();
+                    if i < k {
+                        result.push([i, j.index(), k]);
+                    } else {
+                        result.push([k, j.index(), i]);
+                    }
+                }
+            }
+        }
+        result
     }
 
-    /// All unique proper dihedral quartets `[i, j, k, l]`, deduplicated.
+    /// All unique proper dihedral quartets `[i, j, k, l]`, deduplicated (j < k).
     pub fn dihedrals(&self) -> Vec<[usize; 4]> {
-        let pattern = Graph::from_edges(&[(0, 1), (1, 2), (2, 3)], 4, false).unwrap();
-        let matches = self.graph.get_subisomorphisms_vf2(&pattern).unwrap();
-        matches
-            .into_iter()
-            .filter(|m| m[1] < m[2])
-            .map(|m| [m[0] as usize, m[1] as usize, m[2] as usize, m[3] as usize])
-            .collect()
+        let mut result = Vec::new();
+        for edge in self.graph.edge_indices() {
+            let (a, b) = self.graph.edge_endpoints(edge).unwrap();
+            // Canonical ordering: j < k
+            let (j, k) = if a.index() < b.index() {
+                (a, b)
+            } else {
+                (b, a)
+            };
+
+            let j_neighbors: Vec<NodeIndex> = self.graph.neighbors(j).filter(|&n| n != k).collect();
+            let k_neighbors: Vec<NodeIndex> = self.graph.neighbors(k).filter(|&n| n != j).collect();
+
+            for &i in &j_neighbors {
+                for &l in &k_neighbors {
+                    if i != l {
+                        result.push([i.index(), j.index(), k.index(), l.index()]);
+                    }
+                }
+            }
+        }
+        result
     }
 
     /// All unique improper dihedral quartets `[center, i, j, k]`, deduplicated.
+    ///
+    /// For each atom with degree >= 3, iterate all sorted 3-combinations
+    /// of its neighbors.
     pub fn impropers(&self) -> Vec<[usize; 4]> {
-        let pattern = Graph::from_edges(&[(0, 1), (0, 2), (0, 3)], 4, false).unwrap();
-        let matches = self.graph.get_subisomorphisms_vf2(&pattern).unwrap();
-        if matches.is_empty() {
-            return Vec::new();
-        }
-        let mut seen = std::collections::HashSet::new();
         let mut result = Vec::new();
-        for m in &matches {
-            let mut tail = [m[1], m[2], m[3]];
-            tail.sort();
-            let key = (m[0], tail[0], tail[1], tail[2]);
-            if seen.insert(key) {
-                result.push([m[0] as usize, m[1] as usize, m[2] as usize, m[3] as usize]);
+        for center in self.graph.node_indices() {
+            let mut neighbors: Vec<usize> =
+                self.graph.neighbors(center).map(|n| n.index()).collect();
+            if neighbors.len() < 3 {
+                continue;
+            }
+            neighbors.sort_unstable();
+            let n = neighbors.len();
+            for a in 0..n {
+                for b in (a + 1)..n {
+                    for c in (b + 1)..n {
+                        result.push([center.index(), neighbors[a], neighbors[b], neighbors[c]]);
+                    }
+                }
             }
         }
         result
@@ -134,21 +165,22 @@ impl Topology {
 
     /// Add a single atom.
     pub fn add_atom(&mut self) {
-        self.graph.add_vertices(1).expect("failed to add vertex");
+        self.graph.add_node(());
     }
 
     /// Add `n` atoms.
     pub fn add_atoms(&mut self, n: usize) {
-        self.graph
-            .add_vertices(n as i64)
-            .expect("failed to add vertices");
+        for _ in 0..n {
+            self.graph.add_node(());
+        }
     }
 
     /// Delete an atom by index.
+    ///
+    /// Note: petgraph swaps the last node into the removed node's slot,
+    /// so indices of other nodes may change.
     pub fn delete_atom(&mut self, idx: usize) {
-        self.graph
-            .delete_vertices(&[idx as i64])
-            .expect("failed to delete vertex");
+        self.graph.remove_node(NodeIndex::new(idx));
     }
 
     // -----------------------------------------------------------------------
@@ -157,10 +189,10 @@ impl Topology {
 
     /// Add a bond between atoms `i` and `j` if not already connected.
     pub fn add_bond(&mut self, i: usize, j: usize) {
-        if !self.graph.are_adjacent(i as i64, j as i64).unwrap_or(false) {
-            self.graph
-                .add_edges(&[(i as i64, j as i64)])
-                .expect("failed to add edge");
+        let ni = NodeIndex::new(i);
+        let nj = NodeIndex::new(j);
+        if self.graph.find_edge(ni, nj).is_none() {
+            self.graph.add_edge(ni, nj, ());
         }
     }
 
@@ -173,9 +205,7 @@ impl Topology {
 
     /// Delete a bond by edge index.
     pub fn delete_bond(&mut self, idx: usize) {
-        self.graph
-            .delete_edges(&[idx as i64])
-            .expect("failed to delete edge");
+        self.graph.remove_edge(EdgeIndex::new(idx));
     }
 
     // -----------------------------------------------------------------------

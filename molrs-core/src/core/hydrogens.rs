@@ -4,6 +4,9 @@
 //! requires (based on its element's default valences and the sum of its current
 //! bond orders) and returns a **new** [`MolGraph`] with explicit H atoms added.
 //!
+//! [`remove_hydrogens`] does the inverse: it returns a new [`MolGraph`] with
+//! all terminal explicit hydrogen atoms removed.
+//!
 //! # Immutability
 //! The original `MolGraph` is never mutated; a clone is returned.
 //!
@@ -50,14 +53,44 @@ pub fn add_hydrogens(mol: &MolGraph) -> MolGraph {
             h.set("symbol", "H");
             h.set("mass", 1.008_f64);
             let h_id = new_mol.add_atom(h);
-            if let Some(bid) = new_mol.add_bond(heavy_id, h_id)
-                && let Some(bond) = new_mol.bond_mut(bid)
+            if let Ok(bid) = new_mol.add_bond(heavy_id, h_id)
+                && let Ok(bond) = new_mol.get_bond_mut(bid)
             {
                 bond.props.insert("order".to_string(), 1.0_f64.into());
             }
         }
     }
 
+    new_mol
+}
+
+/// Return a new [`MolGraph`] with all terminal explicit hydrogen atoms removed.
+///
+/// Only hydrogen atoms with exactly one neighbor (degree == 1) are removed,
+/// which is the standard cheminformatics convention for "non-bridging" H.
+/// Incident bonds, angles, and dihedrals are cascade-deleted by
+/// [`MolGraph::remove_atom`].
+///
+/// The original `MolGraph` is never mutated; a clone is returned.
+pub fn remove_hydrogens(mol: &MolGraph) -> MolGraph {
+    let mut new_mol = mol.clone();
+    let h_ids: Vec<AtomId> = new_mol
+        .atoms()
+        .filter_map(|(id, atom)| {
+            let sym = atom.get_str("symbol")?;
+            if !sym.eq_ignore_ascii_case("H") {
+                return None;
+            }
+            if new_mol.neighbors(id).count() == 1 {
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for h_id in h_ids {
+        let _ = new_mol.remove_atom(h_id);
+    }
     new_mol
 }
 
@@ -70,7 +103,7 @@ pub fn add_hydrogens(mol: &MolGraph) -> MolGraph {
 /// Returns `None` if the atom has no recognisable element symbol or if its
 /// element has no defined default valences (e.g. noble gases).
 pub fn implicit_h_count(mol: &MolGraph, atom_id: AtomId) -> Option<u32> {
-    let atom = mol.atom(atom_id)?;
+    let atom = mol.get_atom(atom_id).ok()?;
     let sym = atom.get_str("symbol")?;
     let element = Element::by_symbol(sym)?;
 
@@ -111,7 +144,7 @@ fn bond_order_sum(mol: &MolGraph, atom_id: AtomId) -> f64 {
     // Build a local bond-id list from bond iteration (adjacency is private).
     bond_ids_for(mol, atom_id)
         .into_iter()
-        .filter_map(|bid| mol.bond(bid))
+        .filter_map(|bid| mol.get_bond(bid).ok())
         .map(|bond| {
             bond.props
                 .get("order")
@@ -160,8 +193,8 @@ mod tests {
     }
 
     fn bond_with_order(mol: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
-        if let Some(bid) = mol.add_bond(a, b) {
-            if let Some(bond) = mol.bond_mut(bid) {
+        if let Ok(bid) = mol.add_bond(a, b) {
+            if let Ok(bond) = mol.get_bond_mut(bid) {
                 bond.props
                     .insert("order".to_string(), PropValue::F64(order));
             }
@@ -268,5 +301,73 @@ mod tests {
             .filter(|(_, a)| a.get_str("symbol") == Some("H"))
             .count();
         assert_eq!(n_h, 4); // 1 original + 3 new
+    }
+
+    // ── remove_hydrogens tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_remove_hydrogens_methane() {
+        // C + 4H → remove → 1 atom (C only), 0 bonds
+        let mut g = MolGraph::new();
+        g.add_atom(atom("C"));
+        let with_h = add_hydrogens(&g);
+        assert_eq!(with_h.n_atoms(), 5);
+        let stripped = remove_hydrogens(&with_h);
+        assert_eq!(stripped.n_atoms(), 1);
+        assert_eq!(stripped.n_bonds(), 0);
+    }
+
+    #[test]
+    fn test_remove_hydrogens_ethane() {
+        // 2C + 6H → remove → 2 atoms, 1 bond (C-C preserved)
+        let mut g = MolGraph::new();
+        let c1 = g.add_atom(atom("C"));
+        let c2 = g.add_atom(atom("C"));
+        bond_with_order(&mut g, c1, c2, 1.0);
+        let with_h = add_hydrogens(&g);
+        assert_eq!(with_h.n_atoms(), 8);
+        let stripped = remove_hydrogens(&with_h);
+        assert_eq!(stripped.n_atoms(), 2);
+        assert_eq!(stripped.n_bonds(), 1);
+    }
+
+    #[test]
+    fn test_remove_hydrogens_immutable() {
+        // Original graph must remain unchanged after remove_hydrogens
+        let mut g = MolGraph::new();
+        g.add_atom(atom("C"));
+        let with_h = add_hydrogens(&g);
+        let before = with_h.n_atoms();
+        let _stripped = remove_hydrogens(&with_h);
+        assert_eq!(with_h.n_atoms(), before);
+    }
+
+    #[test]
+    fn test_remove_hydrogens_no_h_present() {
+        // C=C without any H → unchanged
+        let mut g = MolGraph::new();
+        let c1 = g.add_atom(atom("C"));
+        let c2 = g.add_atom(atom("C"));
+        bond_with_order(&mut g, c1, c2, 2.0);
+        let stripped = remove_hydrogens(&g);
+        assert_eq!(stripped.n_atoms(), 2);
+        assert_eq!(stripped.n_bonds(), 1);
+    }
+
+    #[test]
+    fn test_remove_hydrogens_cascades_angles() {
+        // Build C with H and an angle involving H, then remove H → angle gone
+        let mut g = MolGraph::new();
+        let c = g.add_atom(atom("C"));
+        let h1 = g.add_atom(atom("H"));
+        let h2 = g.add_atom(atom("H"));
+        bond_with_order(&mut g, c, h1, 1.0);
+        bond_with_order(&mut g, c, h2, 1.0);
+        g.add_angle(h1, c, h2).expect("add angle");
+        assert_eq!(g.n_angles(), 1);
+        let stripped = remove_hydrogens(&g);
+        assert_eq!(stripped.n_atoms(), 1);
+        assert_eq!(stripped.n_bonds(), 0);
+        assert_eq!(stripped.n_angles(), 0);
     }
 }

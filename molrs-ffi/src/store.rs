@@ -201,6 +201,46 @@ impl Store {
         Ok((data, shape))
     }
 
+    /// Gets a u32 column as an owned copy with shape.
+    pub fn block_col_u32(
+        &self,
+        handle: &BlockHandle,
+        col: &str,
+    ) -> Result<(Vec<u32>, Vec<usize>), FfiError> {
+        self.validate_block_handle(handle)?;
+        let entry = self.frames.get(handle.frame_id).unwrap();
+        let block = entry.frame.get(&handle.key).unwrap();
+
+        let arr = block.get_u32(col).ok_or_else(|| FfiError::KeyNotFound {
+            key: col.to_string(),
+        })?;
+
+        let shape = arr.shape().to_vec();
+        let data = arr.iter().copied().collect();
+
+        Ok((data, shape))
+    }
+
+    /// Gets a u8 column as an owned copy with shape.
+    pub fn block_col_u8(
+        &self,
+        handle: &BlockHandle,
+        col: &str,
+    ) -> Result<(Vec<u8>, Vec<usize>), FfiError> {
+        self.validate_block_handle(handle)?;
+        let entry = self.frames.get(handle.frame_id).unwrap();
+        let block = entry.frame.get(&handle.key).unwrap();
+
+        let arr = block.get_u8(col).ok_or_else(|| FfiError::KeyNotFound {
+            key: col.to_string(),
+        })?;
+
+        let shape = arr.shape().to_vec();
+        let data = arr.iter().copied().collect();
+
+        Ok((data, shape))
+    }
+
     /// Gets an f64 column as an owned copy with shape.
     pub fn block_col_f64(
         &self,

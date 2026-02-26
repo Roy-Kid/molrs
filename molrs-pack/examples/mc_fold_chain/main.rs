@@ -215,7 +215,9 @@ fn zigzag_pe_chain(
         c_ids.push(backbone.add_atom(a));
     }
     for i in 0..n_carbons - 1 {
-        backbone.add_bond(c_ids[i], c_ids[i + 1]);
+        backbone
+            .add_bond(c_ids[i], c_ids[i + 1])
+            .expect("add backbone bond");
     }
 
     // Zigzag backbone in the xz-plane (all-trans).
@@ -249,7 +251,8 @@ fn zigzag_pe_chain(
 
     for &atom_id in &all_ids {
         let sym = full_graph
-            .atom(atom_id)
+            .get_atom(atom_id)
+            .ok()
             .and_then(|a| a.get_str("symbol"))
             .unwrap_or("X");
         if sym != "H" {
@@ -264,7 +267,8 @@ fn zigzag_pe_chain(
             .filter(|&nid| {
                 nid != atom_id
                     && full_graph
-                        .atom(nid)
+                        .get_atom(nid)
+                        .ok()
                         .and_then(|a| a.get_str("symbol"))
                         .map(|s| s != "H")
                         .unwrap_or(false)
@@ -276,7 +280,8 @@ fn zigzag_pe_chain(
             .filter(|&nid| {
                 nid != atom_id
                     && full_graph
-                        .atom(nid)
+                        .get_atom(nid)
+                        .ok()
                         .and_then(|a| a.get_str("symbol"))
                         .map(|s| s == "H")
                         .unwrap_or(false)
