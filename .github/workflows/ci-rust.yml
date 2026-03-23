@@ -1,0 +1,62 @@
+name: CI Rust
+
+on:
+  push:
+    branches: [dev, master]
+    tags: "v*"
+  pull_request:
+    branches: [dev, master]
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  formatting:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Rustfmt Check
+        run: cargo fmt --check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache test data
+        uses: actions/cache@v4
+        with:
+          path: molrs-core/target/tests-data
+          key: ${{ runner.os }}-test-data-${{ hashFiles('scripts/fetch-test-data.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-test-data-
+
+      - name: Fetch test data
+        run: bash scripts/fetch-test-data.sh
+
+      - name: Clippy
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy -p molcrafts-molrs --all-targets --features "filesystem f64" -- -D warnings
+          cargo clippy -p molcrafts-molrs-pack --all-targets --features f64 -- -D warnings
+
+      - name: Test
+        run: |
+          cargo test --workspace --lib --tests --examples
+          cargo bench -p molcrafts-molrs --no-run
+          cargo test -p molcrafts-molrs --lib --tests --examples --features "filesystem f64"
+          cargo bench -p molcrafts-molrs --no-run --features "filesystem f64"
+          cargo test -p molcrafts-molrs-pack --lib --tests --examples --features f64

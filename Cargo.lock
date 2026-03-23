@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "criterion",
  "flate2",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-pack"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "env_logger",
  "log",

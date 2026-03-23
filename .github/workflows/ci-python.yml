@@ -1,0 +1,53 @@
+name: CI Python
+
+on:
+  push:
+    branches: [dev, master]
+    tags: "v*"
+  pull_request:
+    branches: [dev, master]
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache test data
+        uses: actions/cache@v4
+        with:
+          path: molrs-core/target/tests-data
+          key: ${{ runner.os }}-test-data-${{ hashFiles('scripts/fetch-test-data.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-test-data-
+
+      - name: Fetch test data
+        run: bash scripts/fetch-test-data.sh
+
+      - name: Install Python build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install maturin pytest numpy
+
+      - name: Build wheel
+        working-directory: molrs-python
+        run: maturin build
+
+      - name: Install built wheel
+        working-directory: molrs-python
+        run: python -m pip install target/wheels/*.whl
+
+      - name: Test Python package
+        working-directory: molrs-python
+        run: pytest -q

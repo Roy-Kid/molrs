@@ -1,0 +1,35 @@
+name: CI C API
+
+on:
+  push:
+    branches: [dev, master]
+    tags: "v*"
+  pull_request:
+    branches: [dev, master]
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build molrs-capi (generates header via cbindgen)
+        run: cargo build --manifest-path molrs-capi/Cargo.toml
+
+      - name: Configure C++ integration tests
+        working-directory: molrs-capi
+        run: cmake -S tests/cpp -B build-test
+
+      - name: Build C++ integration tests
+        working-directory: molrs-capi
+        run: cmake --build build-test
+
+      - name: Run C++ integration tests
+        working-directory: molrs-capi
+        run: ctest --test-dir build-test --output-on-failure

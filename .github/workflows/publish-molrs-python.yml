@@ -2,15 +2,19 @@ name: Publish molrs Python package
 
 on:
   push:
-    branches: [ master ]
-    tags: ["v*"]
+    tags:
+      - "v*"
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci-python.yml
+
   publish:
+    needs: ci
     runs-on: ubuntu-latest
     environment: pypi
     steps:
@@ -36,3 +40,4 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: molrs-python/dist
+          verbose: true
