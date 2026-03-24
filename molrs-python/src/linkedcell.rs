@@ -161,9 +161,7 @@ impl PyNeighborList {
         let n = self.inner.n_pairs();
         let qi = self.inner.query_point_indices();
         let pi = self.inner.point_indices();
-        let flat: Vec<i64> = (0..n)
-            .flat_map(|k| [qi[k] as i64, pi[k] as i64])
-            .collect();
+        let flat: Vec<i64> = (0..n).flat_map(|k| [qi[k] as i64, pi[k] as i64]).collect();
         let array = ndarray::Array2::from_shape_vec((n, 2), flat)
             .map_err(|e| PyValueError::new_err(format!("failed to build output array: {}", e)))?;
         Ok(array.into_pyarray(py))
@@ -234,11 +232,7 @@ impl PyNeighborQuery {
     ///     If ``points`` does not have 3 columns.
     #[new]
     #[pyo3(signature = (r#box, points, cutoff))]
-    fn new(
-        r#box: &PyBox,
-        points: PyReadonlyArray2<'_, NpF>,
-        cutoff: NpF,
-    ) -> PyResult<Self> {
+    fn new(r#box: &PyBox, points: PyReadonlyArray2<'_, NpF>, cutoff: NpF) -> PyResult<Self> {
         let view = points.as_array();
         if view.ncols() != 3 {
             return Err(PyValueError::new_err("points must have shape (N,3)"));
@@ -372,9 +366,7 @@ impl PyLinkedCell {
         let n = result.n_pairs();
         let qi = result.query_point_indices();
         let pi = result.point_indices();
-        let flat: Vec<i64> = (0..n)
-            .flat_map(|k| [qi[k] as i64, pi[k] as i64])
-            .collect();
+        let flat: Vec<i64> = (0..n).flat_map(|k| [qi[k] as i64, pi[k] as i64]).collect();
         let array = ndarray::Array2::from_shape_vec((n, 2), flat)
             .map_err(|e| PyValueError::new_err(format!("failed to build output array: {}", e)))?;
         Ok(array.into_pyarray(py))

@@ -1,15 +1,13 @@
-mod properties;
 mod result;
 
-pub use properties::ClusterProperties;
-pub use result::{ClusterPropsResult, ClusterResult};
+pub use result::ClusterResult;
 
 use crate::Frame;
 use crate::neighbors::NeighborList;
 use ndarray::Array1;
 
 use super::error::ComputeError;
-use super::traits::PairCompute;
+use super::traits::Compute;
 
 /// Distance-based cluster analysis using BFS on the neighbor graph.
 ///
@@ -29,7 +27,8 @@ impl Cluster {
     }
 }
 
-impl PairCompute for Cluster {
+impl Compute for Cluster {
+    type Args<'a> = &'a NeighborList;
     type Output = ClusterResult;
 
     fn compute(
@@ -252,5 +251,150 @@ mod tests {
 
         assert_eq!(result.num_clusters, 1);
         assert_eq!(result.cluster_sizes[0], 4);
+    }
+
+    // --- freud: test_query_ball — 4 collinear particles, count neighbors ---
+
+    #[test]
+    fn collinear_four_particles() {
+        // freud data: [0,0,0], [1,0,0], [3,0,0], [2,0,0], cutoff=2.01
+        // p0 neighbors: p1(d=1), p3(d=2) → 2 bonds (self-query i<j)
+        // p1 neighbors: p3(d=1), p2(d=2) → but as i<j pairs:
+        // Pairs: (0,1)=1, (0,3)=2, (1,3)=1, (1,2)=2, (2,3)=1 → 5 pairs
+        // All connected transitively → 1 cluster
+        let positions = [
+            [1.0, 5.0, 5.0],
+            [2.0, 5.0, 5.0],
+            [4.0, 5.0, 5.0],
+            [3.0, 5.0, 5.0],
+        ];
+        let frame = make_frame_with_positions(&positions, 10.0);
+        let nbrs = build_neighbors(&frame, 2.01);
+
+        let result = Cluster::new(1).compute(&frame, &nbrs).unwrap();
+        assert_eq!(result.num_clusters, 1);
+        assert_eq!(result.cluster_sizes[0], 4);
+    }
+
+    // --- freud: all isolated → N clusters of size 1 ---
+
+    #[test]
+    fn all_isolated() {
+        let positions = [[1.0, 1.0, 1.0], [5.0, 5.0, 5.0], [9.0, 9.0, 9.0]];
+        let frame = make_frame_with_positions(&positions, 20.0);
+        let nbrs = build_neighbors(&frame, 0.5);
+
+        let result = Cluster::new(1).compute(&frame, &nbrs).unwrap();
+        assert_eq!(result.num_clusters, 3);
+        for &s in &result.cluster_sizes {
+            assert_eq!(s, 1);
+        }
+        // all different IDs
+        assert_ne!(result.cluster_idx[0], result.cluster_idx[1]);
+        assert_ne!(result.cluster_idx[1], result.cluster_idx[2]);
+    }
+
+    // --- freud: coincident particles → same cluster ---
+
+    #[test]
+    fn coincident_particles() {
+        let positions = [[3.0, 3.0, 3.0], [3.0, 3.0, 3.0], [3.0, 3.0, 3.0]];
+        let frame = make_frame_with_positions(&positions, 10.0);
+        let nbrs = build_neighbors(&frame, 0.5);
+
+        let result = Cluster::new(1).compute(&frame, &nbrs).unwrap();
+        assert_eq!(result.num_clusters, 1);
+        assert_eq!(result.cluster_sizes[0], 3);
+    }
+
+    // --- empty frame ---
+
+    #[test]
+    fn empty_frame() {
+        let frame = make_frame_with_positions(&[], 10.0);
+        let nbrs = build_neighbors(&frame, 1.0);
+        let result = Cluster::new(1).compute(&frame, &nbrs).unwrap();
+        assert_eq!(result.num_clusters, 0);
+        assert!(result.cluster_idx.is_empty());
+    }
+
+    // --- single particle ---
+
+    #[test]
+    fn single_particle() {
+        let positions = [[5.0, 5.0, 5.0]];
+        let frame = make_frame_with_positions(&positions, 10.0);
+        let nbrs = build_neighbors(&frame, 1.0);
+        let result = Cluster::new(1).compute(&frame, &nbrs).unwrap();
+        assert_eq!(result.num_clusters, 1);
+        assert_eq!(result.cluster_idx[0], 0);
+    }
+
+    // --- transitive connectivity (chain) ---
+
+    #[test]
+    fn transitive_chain() {
+        // A-B-C-D: each pair within cutoff, but A and D not directly connected
+        // A=1, B=2, C=3, D=4 along x, cutoff=1.5
+        let positions = [
+            [1.0, 5.0, 5.0],
+            [2.0, 5.0, 5.0],
+            [3.0, 5.0, 5.0],
+            [4.0, 5.0, 5.0],
+        ];
+        let frame = make_frame_with_positions(&positions, 10.0);
+        let nbrs = build_neighbors(&frame, 1.5);
+
+        let result = Cluster::new(1).compute(&frame, &nbrs).unwrap();
+        assert_eq!(result.num_clusters, 1, "chain should form 1 cluster");
+        assert_eq!(result.cluster_sizes[0], 4);
+    }
+
+    // --- PBC wrapping: two particles near opposite boundaries ---
+
+    #[test]
+    fn pbc_wrapping_cluster() {
+        let positions = [[0.5, 5.0, 5.0], [9.5, 5.0, 5.0]];
+        let x = A1::from_iter(positions.iter().map(|p| p[0]));
+        let y = A1::from_iter(positions.iter().map(|p| p[1]));
+        let z = A1::from_iter(positions.iter().map(|p| p[2]));
+        let mut block = Block::new();
+        block.insert("x", x.into_dyn()).unwrap();
+        block.insert("y", y.into_dyn()).unwrap();
+        block.insert("z", z.into_dyn()).unwrap();
+        let mut frame = Frame::new();
+        frame.insert("atoms", block);
+        frame.simbox = Some(
+            SimBox::cube(
+                10.0,
+                array![0.0 as F, 0.0 as F, 0.0 as F],
+                [true, true, true],
+            )
+            .unwrap(),
+        );
+
+        let nbrs = build_neighbors(&frame, 2.0);
+        let result = Cluster::new(1).compute(&frame, &nbrs).unwrap();
+        // MIC distance = 1.0 < 2.0 → same cluster
+        assert_eq!(result.num_clusters, 1);
+    }
+
+    // --- cluster_sizes sum == total assigned particles ---
+
+    #[test]
+    fn sizes_sum_to_n() {
+        let positions = [
+            [1.0, 1.0, 1.0],
+            [1.5, 1.0, 1.0],
+            [5.0, 5.0, 5.0],
+            [5.5, 5.0, 5.0],
+            [9.0, 9.0, 9.0],
+        ];
+        let frame = make_frame_with_positions(&positions, 20.0);
+        let nbrs = build_neighbors(&frame, 1.0);
+
+        let result = Cluster::new(1).compute(&frame, &nbrs).unwrap();
+        let total: usize = result.cluster_sizes.iter().sum();
+        assert_eq!(total, 5);
     }
 }

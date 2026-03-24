@@ -4,7 +4,10 @@
 //! automated detection of angles, dihedrals, and impropers via neighbor
 //! traversal.
 
+use std::collections::{HashMap, HashSet, VecDeque};
+
 use petgraph::graph::{EdgeIndex, NodeIndex, UnGraph};
+use petgraph::visit::EdgeRef;
 
 /// Graph-based molecular topology.
 ///
@@ -160,6 +163,209 @@ impl Topology {
     }
 
     // -----------------------------------------------------------------------
+    // Query accessors
+    // -----------------------------------------------------------------------
+
+    /// Neighbor atom indices of atom `idx`.
+    pub fn neighbors(&self, idx: usize) -> Vec<usize> {
+        self.graph
+            .neighbors(NodeIndex::new(idx))
+            .map(|n| n.index())
+            .collect()
+    }
+
+    /// Degree (number of bonds) of atom `idx`.
+    pub fn degree(&self, idx: usize) -> usize {
+        self.graph.neighbors(NodeIndex::new(idx)).count()
+    }
+
+    /// Whether atoms `i` and `j` are directly bonded.
+    pub fn are_bonded(&self, i: usize, j: usize) -> bool {
+        self.graph
+            .find_edge(NodeIndex::new(i), NodeIndex::new(j))
+            .is_some()
+    }
+
+    // -----------------------------------------------------------------------
+    // Connected components (cluster by bond topology)
+    // -----------------------------------------------------------------------
+
+    /// Per-atom connected component labels.
+    ///
+    /// Returns a `Vec<i64>` of length `n_atoms`, where each element is the
+    /// component ID (0-based, contiguous). Isolated atoms each form their own
+    /// component.
+    pub fn connected_components(&self) -> Vec<i64> {
+        let n = self.graph.node_count();
+        let mut labels = vec![-1i64; n];
+        let mut label = 0i64;
+
+        for start in 0..n {
+            if labels[start] >= 0 {
+                continue;
+            }
+            let mut queue = VecDeque::new();
+            queue.push_back(NodeIndex::new(start));
+            labels[start] = label;
+
+            while let Some(current) = queue.pop_front() {
+                for neighbor in self.graph.neighbors(current) {
+                    let ni = neighbor.index();
+                    if labels[ni] < 0 {
+                        labels[ni] = label;
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+            label += 1;
+        }
+        labels
+    }
+
+    /// Number of connected components.
+    pub fn n_components(&self) -> usize {
+        petgraph::algo::connected_components(&self.graph)
+    }
+
+    // -----------------------------------------------------------------------
+    // Ring detection (SSSR)
+    // -----------------------------------------------------------------------
+
+    /// Compute the Smallest Set of Smallest Rings (SSSR).
+    ///
+    /// Returns a [`TopologyRingInfo`] containing all detected rings and
+    /// lookup tables for per-atom and per-bond ring membership.
+    pub fn find_rings(&self) -> TopologyRingInfo {
+        let n_nodes = self.graph.node_count();
+        let n_edges = self.graph.edge_count();
+        if n_nodes == 0 || n_edges == 0 {
+            return TopologyRingInfo::empty();
+        }
+
+        // Expected cycle basis size = E - V + C
+        let n_comp = petgraph::algo::connected_components(&self.graph);
+        let cycle_rank = n_edges as isize - n_nodes as isize + n_comp as isize;
+        if cycle_rank <= 0 {
+            return TopologyRingInfo::empty();
+        }
+        let cycle_rank = cycle_rank as usize;
+
+        // Generate candidate cycles (Horton-style)
+        let mut candidates: Vec<Vec<usize>> = Vec::new();
+        for edge_idx in self.graph.edge_indices() {
+            let (u, v) = self.graph.edge_endpoints(edge_idx).unwrap();
+            if let Some(path) = self.bfs_skip_edge(u, v, edge_idx) {
+                candidates.push(path);
+            }
+        }
+        candidates.sort_by_key(|c| c.len());
+
+        // Edge lookup for bit vector construction
+        let mut edge_lookup: HashMap<(usize, usize), usize> = HashMap::new();
+        for edge_idx in self.graph.edge_indices() {
+            let (a, b) = self.graph.edge_endpoints(edge_idx).unwrap();
+            let key = if a.index() < b.index() {
+                (a.index(), b.index())
+            } else {
+                (b.index(), a.index())
+            };
+            edge_lookup.insert(key, edge_idx.index());
+        }
+
+        // Select linearly independent cycles via GF(2) Gaussian elimination
+        let words = n_edges.div_ceil(64);
+        let mut basis: Vec<Vec<u64>> = Vec::new();
+        let mut selected: Vec<Vec<usize>> = Vec::new();
+
+        for cycle in &candidates {
+            if selected.len() >= cycle_rank {
+                break;
+            }
+            let mut bitvec = vec![0u64; words];
+            let n = cycle.len();
+            for i in 0..n {
+                let a = cycle[i];
+                let b = cycle[(i + 1) % n];
+                let key = if a < b { (a, b) } else { (b, a) };
+                if let Some(&ei) = edge_lookup.get(&key) {
+                    bitvec[ei / 64] |= 1u64 << (ei % 64);
+                }
+            }
+            if gf2_independent(&mut basis, bitvec, words) {
+                selected.push(cycle.clone());
+            }
+        }
+
+        selected.sort_by_key(Vec::len);
+
+        // Build reverse-lookup maps
+        let mut atom_rings: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut bond_rings: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        for (ri, ring) in selected.iter().enumerate() {
+            let n = ring.len();
+            for i in 0..n {
+                atom_rings.entry(ring[i]).or_default().push(ri);
+                let a = ring[i];
+                let b = ring[(i + 1) % n];
+                let key = if a < b { (a, b) } else { (b, a) };
+                if let Some(&ei) = edge_lookup.get(&key) {
+                    bond_rings.entry(ei).or_default().push(ri);
+                }
+            }
+        }
+
+        TopologyRingInfo {
+            rings: selected,
+            atom_rings,
+            bond_rings,
+        }
+    }
+
+    /// BFS from `start` to `goal`, skipping one specific edge.
+    fn bfs_skip_edge(
+        &self,
+        start: NodeIndex,
+        goal: NodeIndex,
+        skip: petgraph::graph::EdgeIndex,
+    ) -> Option<Vec<usize>> {
+        let mut visited = HashSet::new();
+        let mut parent: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+        let mut queue = VecDeque::new();
+
+        visited.insert(start);
+        queue.push_back(start);
+
+        while let Some(current) = queue.pop_front() {
+            if current == goal {
+                let mut path = vec![goal.index()];
+                let mut node = goal;
+                while node != start {
+                    node = parent[&node];
+                    path.push(node.index());
+                }
+                path.reverse();
+                return Some(path);
+            }
+            for edge_ref in self.graph.edges(current) {
+                if edge_ref.id() == skip {
+                    continue;
+                }
+                let neighbor = if edge_ref.target() == current {
+                    edge_ref.source()
+                } else {
+                    edge_ref.target()
+                };
+                if visited.insert(neighbor) {
+                    parent.insert(neighbor, current);
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        None
+    }
+
+    // -----------------------------------------------------------------------
     // Atom operations
     // -----------------------------------------------------------------------
 
@@ -230,6 +436,102 @@ impl Default for Topology {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ---------------------------------------------------------------------------
+// TopologyRingInfo
+// ---------------------------------------------------------------------------
+
+/// Ring information from SSSR detection on a [`Topology`] graph.
+///
+/// Rings are stored as ordered lists of atom indices forming closed paths.
+#[derive(Debug, Clone)]
+pub struct TopologyRingInfo {
+    rings: Vec<Vec<usize>>,
+    atom_rings: HashMap<usize, Vec<usize>>,
+    bond_rings: HashMap<usize, Vec<usize>>,
+}
+
+impl TopologyRingInfo {
+    fn empty() -> Self {
+        Self {
+            rings: Vec::new(),
+            atom_rings: HashMap::new(),
+            bond_rings: HashMap::new(),
+        }
+    }
+
+    /// Whether the atom belongs to any ring.
+    pub fn is_atom_in_ring(&self, idx: usize) -> bool {
+        self.atom_rings.get(&idx).is_some_and(|v| !v.is_empty())
+    }
+
+    /// Number of rings containing this atom.
+    pub fn num_atom_rings(&self, idx: usize) -> usize {
+        self.atom_rings.get(&idx).map_or(0, Vec::len)
+    }
+
+    /// Size (atom count) of every ring, sorted ascending.
+    pub fn ring_sizes(&self) -> Vec<usize> {
+        self.rings.iter().map(Vec::len).collect()
+    }
+
+    /// All rings of exactly `n` atoms.
+    pub fn rings_of_size(&self, n: usize) -> Vec<&Vec<usize>> {
+        self.rings.iter().filter(|r| r.len() == n).collect()
+    }
+
+    /// Total number of rings detected.
+    pub fn num_rings(&self) -> usize {
+        self.rings.len()
+    }
+
+    /// All rings as slices of atom indices.
+    pub fn rings(&self) -> &[Vec<usize>] {
+        &self.rings
+    }
+
+    /// Per-atom boolean mask: true if the atom is in any ring.
+    pub fn atom_ring_mask(&self, n_atoms: usize) -> Vec<bool> {
+        let mut mask = vec![false; n_atoms];
+        for &idx in self.atom_rings.keys() {
+            if idx < n_atoms {
+                mask[idx] = true;
+            }
+        }
+        mask
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GF(2) linear independence helper
+// ---------------------------------------------------------------------------
+
+/// Try to add `vec` to `basis` over GF(2). Returns true if independent.
+fn gf2_independent(basis: &mut Vec<Vec<u64>>, mut vec: Vec<u64>, words: usize) -> bool {
+    for basis_vec in basis.iter() {
+        if let Some(lead) = leading_bit(basis_vec, words) {
+            if (vec[lead / 64] >> (lead % 64)) & 1 == 1 {
+                for w in 0..words {
+                    vec[w] ^= basis_vec[w];
+                }
+            }
+        }
+    }
+    let is_nonzero = vec.iter().any(|&w| w != 0);
+    if is_nonzero {
+        basis.push(vec);
+    }
+    is_nonzero
+}
+
+fn leading_bit(vec: &[u64], words: usize) -> Option<usize> {
+    for w in (0..words).rev() {
+        if vec[w] != 0 {
+            return Some(w * 64 + (63 - vec[w].leading_zeros() as usize));
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -390,5 +692,100 @@ mod tests {
         assert_eq!(topo.n_bonds(), 3);
         assert_eq!(topo.n_angles(), 2);
         assert_eq!(topo.n_dihedrals(), 1);
+    }
+
+    #[test]
+    fn test_neighbors() {
+        let topo = Topology::from_edges(4, &[[0, 1], [1, 2], [2, 3]]);
+        let mut n = topo.neighbors(1);
+        n.sort();
+        assert_eq!(n, vec![0, 2]);
+    }
+
+    #[test]
+    fn test_degree() {
+        let topo = Topology::from_edges(4, &[[0, 1], [1, 2], [2, 3]]);
+        assert_eq!(topo.degree(0), 1);
+        assert_eq!(topo.degree(1), 2);
+    }
+
+    #[test]
+    fn test_are_bonded() {
+        let topo = Topology::from_edges(3, &[[0, 1], [1, 2]]);
+        assert!(topo.are_bonded(0, 1));
+        assert!(!topo.are_bonded(0, 2));
+    }
+
+    #[test]
+    fn test_connected_components_single() {
+        let topo = Topology::from_edges(3, &[[0, 1], [1, 2]]);
+        let cc = topo.connected_components();
+        assert_eq!(cc.len(), 3);
+        assert_eq!(cc[0], cc[1]);
+        assert_eq!(cc[1], cc[2]);
+        assert_eq!(topo.n_components(), 1);
+    }
+
+    #[test]
+    fn test_connected_components_two() {
+        let topo = Topology::from_edges(4, &[[0, 1], [2, 3]]);
+        let cc = topo.connected_components();
+        assert_eq!(cc[0], cc[1]);
+        assert_eq!(cc[2], cc[3]);
+        assert_ne!(cc[0], cc[2]);
+        assert_eq!(topo.n_components(), 2);
+    }
+
+    #[test]
+    fn test_connected_components_isolated() {
+        let topo = Topology::with_atoms(3); // no bonds
+        assert_eq!(topo.n_components(), 3);
+        let cc = topo.connected_components();
+        assert_ne!(cc[0], cc[1]);
+        assert_ne!(cc[1], cc[2]);
+    }
+
+    #[test]
+    fn test_find_rings_linear() {
+        let topo = Topology::from_edges(4, &[[0, 1], [1, 2], [2, 3]]);
+        assert_eq!(topo.find_rings().num_rings(), 0);
+    }
+
+    #[test]
+    fn test_find_rings_single_6ring() {
+        // Hexagon: 0-1-2-3-4-5-0
+        let topo = Topology::from_edges(
+            6,
+            &[[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 0]],
+        );
+        let ri = topo.find_rings();
+        assert_eq!(ri.num_rings(), 1);
+        assert_eq!(ri.ring_sizes(), vec![6]);
+        for i in 0..6 {
+            assert!(ri.is_atom_in_ring(i));
+        }
+    }
+
+    #[test]
+    fn test_find_rings_naphthalene() {
+        // Two fused 6-membered rings
+        let topo = Topology::from_edges(
+            10,
+            &[
+                [0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 0], // ring A
+                [2, 6], [6, 7], [7, 8], [8, 9], [9, 3],         // ring B
+            ],
+        );
+        let ri = topo.find_rings();
+        assert_eq!(ri.num_rings(), 2);
+        let mut sizes = ri.ring_sizes();
+        sizes.sort();
+        assert_eq!(sizes, vec![6, 6]);
+    }
+
+    #[test]
+    fn test_find_rings_empty() {
+        let topo = Topology::new();
+        assert_eq!(topo.find_rings().num_rings(), 0);
     }
 }

@@ -16,11 +16,13 @@ use crate::linkedcell::{PyLinkedCell, PyNeighborList};
 use crate::simbox::PyBox;
 
 use molrs::compute::{
-    Cluster, ClusterResult, Compute, MSD, MSDResult, PairCompute, RDF, RDFResult,
+    CenterOfMass, Cluster, ClusterCenters, ClusterResult, Compute, GyrationTensor, InertiaTensor,
+    MSD, MSDResult, RDF, RDFResult, RadiusOfGyration,
 };
 use molrs::neighbors::NbListAlgo;
+use molrs::types::F;
 
-use numpy::{IntoPyArray, PyArray1};
+use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayDyn, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -307,6 +309,7 @@ impl PyMSD {
     ///     If the frame lacks an ``"atoms"`` block or ``x``/``y``/``z``
     ///     columns.
     #[new]
+    #[allow(deprecated)]
     fn new(ref_frame: &PyFrame) -> PyResult<Self> {
         let core_frame = ref_frame.clone_core_frame()?;
         let msd =
@@ -335,7 +338,7 @@ impl PyMSD {
         let core_frame = frame.clone_core_frame()?;
         let result = self
             .inner
-            .compute(&core_frame)
+            .compute(&core_frame, ())
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(PyMSDResult { inner: result })
     }
@@ -468,11 +471,7 @@ impl PyCluster {
     /// ValueError
     ///     If the frame lacks required data.
     #[pyo3(name = "compute")]
-    fn compute_nlist(
-        &self,
-        frame: &PyFrame,
-        nlist: &PyNeighborList,
-    ) -> PyResult<PyClusterResult> {
+    fn compute_nlist(&self, frame: &PyFrame, nlist: &PyNeighborList) -> PyResult<PyClusterResult> {
         let core_frame = frame.clone_core_frame()?;
         let result = self
             .inner
@@ -515,5 +514,364 @@ impl PyCluster {
 
     fn __repr__(&self) -> String {
         "Cluster(...)".to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ClusterCenters
+// ---------------------------------------------------------------------------
+
+/// Geometric cluster centers (MIC-aware).
+///
+/// Exposed to Python as `molrs.ClusterCenters`.
+///
+/// Examples
+/// --------
+/// >>> centers = molrs.ClusterCenters().compute(frame, cluster_result)
+#[pyclass(name = "ClusterCenters", unsendable)]
+pub struct PyClusterCenters {
+    inner: ClusterCenters,
+}
+
+#[pymethods]
+impl PyClusterCenters {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: ClusterCenters::new(),
+        }
+    }
+
+    /// Compute geometric centers for each cluster.
+    ///
+    /// Parameters
+    /// ----------
+    /// frame : Frame
+    /// cluster_result : ClusterResult
+    ///
+    /// Returns
+    /// -------
+    /// numpy.ndarray, shape (num_clusters, 3)
+    fn compute<'py>(
+        &self,
+        py: Python<'py>,
+        frame: &PyFrame,
+        cluster_result: &PyClusterResult,
+    ) -> PyResult<Bound<'py, PyArray2<NpF>>> {
+        let core_frame = frame.clone_core_frame()?;
+        let centers = self
+            .inner
+            .compute(&core_frame, &cluster_result.inner)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let nc = centers.len();
+        let flat: Vec<NpF> = centers
+            .iter()
+            .flat_map(|c| [c[0] as NpF, c[1] as NpF, c[2] as NpF])
+            .collect();
+        Ok(ndarray::Array2::from_shape_vec((nc, 3), flat)
+            .expect("centers shape")
+            .into_pyarray(py))
+    }
+
+    fn __repr__(&self) -> String {
+        "ClusterCenters()".to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CenterOfMass
+// ---------------------------------------------------------------------------
+
+/// Mass-weighted cluster centers (center of mass, MIC-aware).
+///
+/// Exposed to Python as `molrs.CenterOfMass`.
+///
+/// Examples
+/// --------
+/// >>> com = molrs.CenterOfMass(masses=masses).compute(frame, cluster_result)
+/// >>> com.centers_of_mass  # (nc, 3)
+/// >>> com.cluster_masses   # (nc,)
+#[pyclass(name = "CenterOfMassResult", unsendable)]
+pub struct PyCenterOfMassResult {
+    inner: molrs::compute::CenterOfMassResult,
+}
+
+#[pymethods]
+impl PyCenterOfMassResult {
+    /// Mass-weighted centers, shape (num_clusters, 3).
+    #[getter]
+    fn centers_of_mass<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<NpF>> {
+        let nc = self.inner.centers_of_mass.len();
+        let flat: Vec<NpF> = self
+            .inner
+            .centers_of_mass
+            .iter()
+            .flat_map(|c| [c[0] as NpF, c[1] as NpF, c[2] as NpF])
+            .collect();
+        ndarray::Array2::from_shape_vec((nc, 3), flat)
+            .expect("com shape")
+            .into_pyarray(py)
+    }
+
+    /// Total mass per cluster, shape (num_clusters,).
+    #[getter]
+    fn cluster_masses<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<NpF>> {
+        let v: Vec<NpF> = self
+            .inner
+            .cluster_masses
+            .iter()
+            .map(|&m| m as NpF)
+            .collect();
+        ndarray::Array1::from_vec(v).into_pyarray(py)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CenterOfMassResult(num_clusters={})",
+            self.inner.centers_of_mass.len()
+        )
+    }
+}
+
+#[pyclass(name = "CenterOfMass", unsendable)]
+pub struct PyCenterOfMass {
+    masses: Option<Vec<F>>,
+}
+
+#[pymethods]
+impl PyCenterOfMass {
+    /// Create a center-of-mass calculator.
+    ///
+    /// Parameters
+    /// ----------
+    /// masses : numpy.ndarray, optional
+    ///     Per-particle masses. If None, all masses = 1.0.
+    #[new]
+    #[pyo3(signature = (masses=None))]
+    fn new(masses: Option<PyReadonlyArray1<'_, NpF>>) -> Self {
+        let masses = masses.map(|m| {
+            m.as_slice()
+                .unwrap()
+                .iter()
+                .map(|&v| v as F)
+                .collect::<Vec<F>>()
+        });
+        Self { masses }
+    }
+
+    /// Compute centers of mass for each cluster.
+    ///
+    /// Parameters
+    /// ----------
+    /// frame : Frame
+    /// cluster_result : ClusterResult
+    ///
+    /// Returns
+    /// -------
+    /// CenterOfMassResult
+    fn compute(
+        &self,
+        frame: &PyFrame,
+        cluster_result: &PyClusterResult,
+    ) -> PyResult<PyCenterOfMassResult> {
+        let core_frame = frame.clone_core_frame()?;
+        let calc = if let Some(ref ms) = self.masses {
+            CenterOfMass::new().with_masses(ms)
+        } else {
+            CenterOfMass::new()
+        };
+        let result = calc
+            .compute(&core_frame, &cluster_result.inner)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(PyCenterOfMassResult { inner: result })
+    }
+
+    fn __repr__(&self) -> String {
+        "CenterOfMass(...)".to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GyrationTensor
+// ---------------------------------------------------------------------------
+
+/// Gyration tensor per cluster.
+///
+/// Exposed to Python as `molrs.GyrationTensor`.
+///
+/// Examples
+/// --------
+/// >>> tensors = molrs.GyrationTensor().compute(frame, cluster_result)
+/// >>> tensors.shape  # (nc, 3, 3)
+#[pyclass(name = "GyrationTensor", unsendable)]
+pub struct PyGyrationTensor {
+    inner: GyrationTensor,
+}
+
+#[pymethods]
+impl PyGyrationTensor {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: GyrationTensor::new(),
+        }
+    }
+
+    /// Compute gyration tensors.
+    ///
+    /// Returns
+    /// -------
+    /// numpy.ndarray, shape (num_clusters, 3, 3)
+    fn compute<'py>(
+        &self,
+        py: Python<'py>,
+        frame: &PyFrame,
+        cluster_result: &PyClusterResult,
+    ) -> PyResult<Bound<'py, PyArrayDyn<NpF>>> {
+        let core_frame = frame.clone_core_frame()?;
+        let tensors = self
+            .inner
+            .compute(&core_frame, &cluster_result.inner)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let nc = tensors.len();
+        let flat: Vec<NpF> = tensors
+            .iter()
+            .flat_map(|t| t.iter().flat_map(|row| row.iter().map(|&v| v as NpF)))
+            .collect();
+        Ok(ndarray::ArrayD::from_shape_vec(vec![nc, 3, 3], flat)
+            .expect("gyration shape")
+            .into_pyarray(py))
+    }
+
+    fn __repr__(&self) -> String {
+        "GyrationTensor()".to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// InertiaTensor
+// ---------------------------------------------------------------------------
+
+/// Moment of inertia tensor per cluster.
+///
+/// Exposed to Python as `molrs.InertiaTensor`.
+///
+/// Examples
+/// --------
+/// >>> tensors = molrs.InertiaTensor(masses=masses).compute(frame, cluster_result)
+/// >>> tensors.shape  # (nc, 3, 3)
+#[pyclass(name = "InertiaTensor", unsendable)]
+pub struct PyInertiaTensor {
+    masses: Option<Vec<F>>,
+}
+
+#[pymethods]
+impl PyInertiaTensor {
+    #[new]
+    #[pyo3(signature = (masses=None))]
+    fn new(masses: Option<PyReadonlyArray1<'_, NpF>>) -> Self {
+        let masses = masses.map(|m| {
+            m.as_slice()
+                .unwrap()
+                .iter()
+                .map(|&v| v as F)
+                .collect::<Vec<F>>()
+        });
+        Self { masses }
+    }
+
+    /// Compute inertia tensors.
+    ///
+    /// Returns
+    /// -------
+    /// numpy.ndarray, shape (num_clusters, 3, 3)
+    fn compute<'py>(
+        &self,
+        py: Python<'py>,
+        frame: &PyFrame,
+        cluster_result: &PyClusterResult,
+    ) -> PyResult<Bound<'py, PyArrayDyn<NpF>>> {
+        let core_frame = frame.clone_core_frame()?;
+        let calc = if let Some(ref ms) = self.masses {
+            InertiaTensor::new().with_masses(ms)
+        } else {
+            InertiaTensor::new()
+        };
+        let tensors = calc
+            .compute(&core_frame, &cluster_result.inner)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let nc = tensors.len();
+        let flat: Vec<NpF> = tensors
+            .iter()
+            .flat_map(|t| t.iter().flat_map(|row| row.iter().map(|&v| v as NpF)))
+            .collect();
+        Ok(ndarray::ArrayD::from_shape_vec(vec![nc, 3, 3], flat)
+            .expect("inertia shape")
+            .into_pyarray(py))
+    }
+
+    fn __repr__(&self) -> String {
+        "InertiaTensor(...)".to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RadiusOfGyration
+// ---------------------------------------------------------------------------
+
+/// Radius of gyration per cluster.
+///
+/// Exposed to Python as `molrs.RadiusOfGyration`.
+///
+/// Examples
+/// --------
+/// >>> rg = molrs.RadiusOfGyration(masses=masses).compute(frame, cluster_result)
+/// >>> rg  # numpy.ndarray, shape (nc,)
+#[pyclass(name = "RadiusOfGyration", unsendable)]
+pub struct PyRadiusOfGyration {
+    masses: Option<Vec<F>>,
+}
+
+#[pymethods]
+impl PyRadiusOfGyration {
+    #[new]
+    #[pyo3(signature = (masses=None))]
+    fn new(masses: Option<PyReadonlyArray1<'_, NpF>>) -> Self {
+        let masses = masses.map(|m| {
+            m.as_slice()
+                .unwrap()
+                .iter()
+                .map(|&v| v as F)
+                .collect::<Vec<F>>()
+        });
+        Self { masses }
+    }
+
+    /// Compute radii of gyration.
+    ///
+    /// Returns
+    /// -------
+    /// numpy.ndarray, shape (num_clusters,)
+    fn compute<'py>(
+        &self,
+        py: Python<'py>,
+        frame: &PyFrame,
+        cluster_result: &PyClusterResult,
+    ) -> PyResult<Bound<'py, PyArray1<NpF>>> {
+        let core_frame = frame.clone_core_frame()?;
+        let calc = if let Some(ref ms) = self.masses {
+            RadiusOfGyration::new().with_masses(ms)
+        } else {
+            RadiusOfGyration::new()
+        };
+        let radii = calc
+            .compute(&core_frame, &cluster_result.inner)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let v: Vec<NpF> = radii.iter().map(|&r| r as NpF).collect();
+        Ok(ndarray::Array1::from_vec(v).into_pyarray(py))
+    }
+
+    fn __repr__(&self) -> String {
+        "RadiusOfGyration(...)".to_string()
     }
 }

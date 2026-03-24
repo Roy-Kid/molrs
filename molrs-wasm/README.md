@@ -75,10 +75,13 @@ Frames without a simulation box are supported — a non-periodic bounding box is
 | `bonds` | `i`, `j` | `u32` | Atom indices |
 | `bonds` | `order` | `f32` | Bond order (1.0, 1.5, 2.0, 3.0) |
 
-## Build from source
+## Build from source and use it for development
 
 ```bash
 wasm-pack build --target bundler --scope molcrafts --out-name molrs
+npm link
+cd ../my-app
+npm link @molcrafts/molrs
 ```
 
 ## License

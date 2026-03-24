@@ -147,9 +147,10 @@ impl Default for MSD {
 }
 
 impl Compute for MSD {
+    type Args<'a> = ();
     type Output = MSDResult;
 
-    fn compute(&self, frame: &Frame) -> Result<MSDResult, ComputeError> {
+    fn compute(&self, frame: &Frame, _args: ()) -> Result<MSDResult, ComputeError> {
         if self.n_particles == 0 {
             return Err(ComputeError::MissingBlock { name: "atoms" });
         }

@@ -69,7 +69,10 @@ mod forcefield;
 use forcefield::{PyMMFFTypifier, PyPotentials};
 
 mod compute;
-use compute::{PyCluster, PyClusterResult, PyMSD, PyMSDResult, PyRDF, PyRDFResult};
+use compute::{
+    PyCenterOfMass, PyCenterOfMassResult, PyCluster, PyClusterCenters, PyClusterResult,
+    PyGyrationTensor, PyInertiaTensor, PyMSD, PyMSDResult, PyRDF, PyRDFResult, PyRadiusOfGyration,
+};
 
 /// Root Python module for the molrs library.
 ///
@@ -88,10 +91,18 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFrame>()?;
 
     // I/O + SMILES
+    // Readers
     m.add_function(wrap_pyfunction!(io::read_pdb, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_xyz, m)?)?;
+    m.add_function(wrap_pyfunction!(io::read_xyz_trajectory, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_lammps, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_lammps_traj, m)?)?;
+    // Writers
+    m.add_function(wrap_pyfunction!(io::write_pdb, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_xyz, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_lammps, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_lammps_traj, m)?)?;
+    // SMILES
     m.add_function(wrap_pyfunction!(io::parse_smiles, m)?)?;
     m.add_class::<io::PySmilesIR>()?;
 
@@ -135,6 +146,12 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMSDResult>()?;
     m.add_class::<PyCluster>()?;
     m.add_class::<PyClusterResult>()?;
+    m.add_class::<PyClusterCenters>()?;
+    m.add_class::<PyCenterOfMass>()?;
+    m.add_class::<PyCenterOfMassResult>()?;
+    m.add_class::<PyGyrationTensor>()?;
+    m.add_class::<PyInertiaTensor>()?;
+    m.add_class::<PyRadiusOfGyration>()?;
 
     Ok(())
 }

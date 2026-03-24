@@ -1,17 +1,25 @@
-//! I/O functions for reading molecular data files and parsing SMILES notation.
+//! I/O functions for reading and writing molecular data files, and parsing
+//! SMILES notation.
 //!
-//! Provides free functions to load PDB and XYZ files into [`PyFrame`]s, and
-//! a SMILES parser that produces an intermediate representation convertible to
-//! an [`PyAtomistic`] molecular graph.
+//! ## Supported formats
+//!
+//! | Format | Read | Write |
+//! |--------|------|-------|
+//! | PDB | [`read_pdb`] | [`write_pdb`] |
+//! | XYZ | [`read_xyz`], [`read_xyz_traj`] | [`write_xyz`] |
+//! | LAMMPS data | [`read_lammps`] | [`write_lammps`] |
+//! | LAMMPS dump | [`read_lammps_traj`] | [`write_lammps_traj`] |
 
 use crate::frame::PyFrame;
 use crate::helpers::{io_error_to_pyerr, smiles_error_to_pyerr};
 use crate::molgraph::PyAtomistic;
-use molrs::io::lammps_data::read_lammps_data;
-use molrs::io::lammps_dump::read_lammps_dump;
-use molrs::io::pdb::read_pdb_frame;
-use molrs::io::xyz::read_xyz_frame;
+use molrs::io::lammps_data::{read_lammps_data, write_lammps_data};
+use molrs::io::lammps_dump::{read_lammps_dump, write_lammps_dump};
+use molrs::io::pdb::{read_pdb_frame, write_pdb_frame};
+use molrs::io::xyz::{read_xyz_frame, read_xyz_traj, write_xyz_frame};
 use pyo3::prelude::*;
+use std::fs::File;
+use std::io::BufWriter;
 
 /// Read a PDB file and return a Frame.
 ///
@@ -45,10 +53,7 @@ pub fn read_pdb(path: &str) -> PyResult<PyFrame> {
     PyFrame::from_core_frame(frame)
 }
 
-/// Read an XYZ file and return a Frame.
-///
-/// The resulting frame contains an ``"atoms"`` block with columns ``symbol``
-/// (str) and ``x``/``y``/``z`` (float).
+/// Read an XYZ file and return a single Frame.
 ///
 /// Parameters
 /// ----------
@@ -58,21 +63,26 @@ pub fn read_pdb(path: &str) -> PyResult<PyFrame> {
 /// Returns
 /// -------
 /// Frame
-///     Parsed molecular data.
-///
-/// Raises
-/// ------
-/// IOError
-///     If the file cannot be opened or parsed.
-///
-/// Examples
-/// --------
-/// >>> frame = molrs.read_xyz("molecule.xyz")
-/// >>> n_atoms = frame["atoms"].nrows
 #[pyfunction]
 pub fn read_xyz(path: &str) -> PyResult<PyFrame> {
     let frame = read_xyz_frame(path).map_err(io_error_to_pyerr)?;
     PyFrame::from_core_frame(frame)
+}
+
+/// Read all frames from an XYZ trajectory file.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a multi-frame ``.xyz`` file.
+///
+/// Returns
+/// -------
+/// list[Frame]
+#[pyfunction]
+pub fn read_xyz_trajectory(path: &str) -> PyResult<Vec<PyFrame>> {
+    let frames = read_xyz_traj(path).map_err(io_error_to_pyerr)?;
+    frames.into_iter().map(PyFrame::from_core_frame).collect()
 }
 
 /// Read a LAMMPS data file and return a Frame.
@@ -127,10 +137,74 @@ pub fn read_lammps(path: &str) -> PyResult<PyFrame> {
 #[pyfunction]
 pub fn read_lammps_traj(path: &str) -> PyResult<Vec<PyFrame>> {
     let frames = read_lammps_dump(path).map_err(io_error_to_pyerr)?;
-    frames
-        .into_iter()
-        .map(PyFrame::from_core_frame)
-        .collect()
+    frames.into_iter().map(PyFrame::from_core_frame).collect()
+}
+
+// ============================================================================
+// Writers
+// ============================================================================
+
+/// Write a Frame to a PDB file.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frame : Frame
+///     Frame to write.
+#[pyfunction]
+pub fn write_pdb(path: &str, frame: &PyFrame) -> PyResult<()> {
+    let core_frame = frame.clone_core_frame()?;
+    let file = File::create(path).map_err(io_error_to_pyerr)?;
+    let mut buf = BufWriter::new(file);
+    write_pdb_frame(&mut buf, &core_frame).map_err(io_error_to_pyerr)
+}
+
+/// Write a Frame to an XYZ file.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frame : Frame
+///     Frame to write.
+#[pyfunction]
+pub fn write_xyz(path: &str, frame: &PyFrame) -> PyResult<()> {
+    let core_frame = frame.clone_core_frame()?;
+    let file = File::create(path).map_err(io_error_to_pyerr)?;
+    let mut buf = BufWriter::new(file);
+    write_xyz_frame(&mut buf, &core_frame).map_err(io_error_to_pyerr)
+}
+
+/// Write a Frame to a LAMMPS data file.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frame : Frame
+///     Frame to write.
+#[pyfunction]
+pub fn write_lammps(path: &str, frame: &PyFrame) -> PyResult<()> {
+    let core_frame = frame.clone_core_frame()?;
+    write_lammps_data(path, &core_frame).map_err(io_error_to_pyerr)
+}
+
+/// Write Frames to a LAMMPS dump trajectory file.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frames : list[Frame]
+///     Frames to write.
+#[pyfunction]
+pub fn write_lammps_traj(path: &str, frames: Vec<PyRef<'_, PyFrame>>) -> PyResult<()> {
+    let core_frames: Vec<_> = frames
+        .iter()
+        .map(|f| f.clone_core_frame())
+        .collect::<PyResult<_>>()?;
+    write_lammps_dump(path, &core_frames).map_err(io_error_to_pyerr)
 }
 
 /// Intermediate representation of a parsed SMILES or SMARTS string.

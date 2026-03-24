@@ -39,13 +39,22 @@
 
 use wasm_bindgen::prelude::*;
 
+use molrs::topology::{Topology as RsTopology, TopologyRingInfo as RsTopologyRingInfo};
+
+use molrs::compute::center_of_mass::{
+    CenterOfMass as RsCenterOfMass, CenterOfMassResult as RsCenterOfMassResult,
+};
 use molrs::compute::cluster::{Cluster as RsCluster, ClusterResult as RsClusterResult};
+use molrs::compute::cluster_centers::ClusterCenters as RsClusterCenters;
+use molrs::compute::gyration_tensor::GyrationTensor as RsGyrationTensor;
+use molrs::compute::inertia_tensor::InertiaTensor as RsInertiaTensor;
 use molrs::compute::msd::{MSD as RsMSD, MSDResult as RsMSDResult};
+use molrs::compute::radius_of_gyration::RadiusOfGyration as RsRadiusOfGyration;
 use molrs::compute::rdf::{RDF as RsRDF, RDFResult as RsRDFResult};
-use molrs::compute::traits::{Compute, PairCompute};
+use molrs::compute::traits::Compute;
 use molrs::neighbors::{
-    NeighborQuery as RsNeighborQuery, LinkCell as RsLinkCell, NbListAlgo, NeighborList as RsNeighborList,
-    QueryMode,
+    LinkCell as RsLinkCell, NbListAlgo, NeighborList as RsNeighborList,
+    NeighborQuery as RsNeighborQuery, QueryMode,
 };
 use molrs::types::F;
 
@@ -205,11 +214,7 @@ impl LinkedCell {
     /// const crossPairs = lc.query(refFrame, otherFrame);
     /// console.log(crossPairs.numPairs);
     /// ```
-    pub fn query(
-        &self,
-        ref_frame: &Frame,
-        query_frame: &Frame,
-    ) -> Result<NeighborList, JsValue> {
+    pub fn query(&self, ref_frame: &Frame, query_frame: &Frame) -> Result<NeighborList, JsValue> {
         let rs_ref = ref_frame.clone_core_frame()?;
         let ref_pos = positions_from_frame(&rs_ref)?;
 
@@ -510,6 +515,7 @@ pub struct MSD {
     inner: RsMSD,
 }
 
+#[allow(clippy::new_without_default)]
 #[wasm_bindgen(js_class = MSD)]
 impl MSD {
     /// Create an empty MSD analysis.
@@ -885,5 +891,518 @@ mod tests {
         let idx = result.cluster_idx();
         assert_eq!(idx[2], -1); // filtered out
         assert!(idx[0] >= 0);
+    }
+}
+
+// ===========================================================================
+// ClusterCenters — Geometric cluster centers (MIC-aware)
+// ===========================================================================
+
+/// Geometric cluster centers with minimum image convention.
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const centers = new ClusterCenters().compute(frame, clusterResult);
+/// // Float32Array [x0,y0,z0, x1,y1,z1, ...]
+/// ```
+#[wasm_bindgen(js_name = ClusterCenters)]
+pub struct ClusterCenters {
+    inner: RsClusterCenters,
+}
+
+#[allow(clippy::new_without_default)]
+#[wasm_bindgen(js_class = ClusterCenters)]
+impl ClusterCenters {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: RsClusterCenters::new(),
+        }
+    }
+
+    /// Compute geometric centers. Returns flat `Float32Array` `[x0,y0,z0, ...]`.
+    pub fn compute(
+        &self,
+        frame: &Frame,
+        cluster_result: &ClusterResult,
+    ) -> Result<Vec<f32>, JsValue> {
+        let rs_frame = frame.clone_core_frame()?;
+        let centers = self
+            .inner
+            .compute(&rs_frame, &cluster_result.inner)
+            .map_err(|e| JsValue::from_str(&format!("ClusterCenters: {e}")))?;
+        Ok(centers.iter().flat_map(|c| [c[0], c[1], c[2]]).collect())
+    }
+}
+
+// ===========================================================================
+// CenterOfMass — Mass-weighted cluster centers
+// ===========================================================================
+
+/// Result of center-of-mass computation.
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const com = new CenterOfMass().compute(frame, clusterResult);
+/// com.centersOfMass();   // Float32Array [x0,y0,z0, ...]
+/// com.clusterMasses();   // Float32Array
+/// ```
+#[wasm_bindgen(js_name = CenterOfMassResult)]
+pub struct CenterOfMassResult {
+    inner: RsCenterOfMassResult,
+}
+
+#[wasm_bindgen(js_class = CenterOfMassResult)]
+impl CenterOfMassResult {
+    /// Mass-weighted centers, flat `[x0,y0,z0, x1,y1,z1, ...]`.
+    #[wasm_bindgen(js_name = centersOfMass)]
+    pub fn centers_of_mass(&self) -> Vec<f32> {
+        self.inner
+            .centers_of_mass
+            .iter()
+            .flat_map(|c| [c[0], c[1], c[2]])
+            .collect()
+    }
+
+    /// Total mass per cluster.
+    #[wasm_bindgen(js_name = clusterMasses)]
+    pub fn cluster_masses(&self) -> Vec<f32> {
+        self.inner.cluster_masses.clone()
+    }
+
+    /// Number of clusters.
+    #[wasm_bindgen(getter, js_name = numClusters)]
+    pub fn num_clusters(&self) -> usize {
+        self.inner.centers_of_mass.len()
+    }
+}
+
+/// Mass-weighted cluster center calculator.
+#[wasm_bindgen(js_name = CenterOfMass)]
+pub struct CenterOfMass {
+    masses: Option<Vec<f32>>,
+}
+
+#[wasm_bindgen(js_class = CenterOfMass)]
+impl CenterOfMass {
+    /// Create a center-of-mass calculator.
+    ///
+    /// Pass `null` for uniform masses, or a `Float32Array` of per-particle masses.
+    #[wasm_bindgen(constructor)]
+    pub fn new(masses: Option<Vec<f32>>) -> Self {
+        Self { masses }
+    }
+
+    /// Compute centers of mass.
+    pub fn compute(
+        &self,
+        frame: &Frame,
+        cluster_result: &ClusterResult,
+    ) -> Result<CenterOfMassResult, JsValue> {
+        let rs_frame = frame.clone_core_frame()?;
+        let calc = if let Some(ref ms) = self.masses {
+            RsCenterOfMass::new().with_masses(ms)
+        } else {
+            RsCenterOfMass::new()
+        };
+        let result = calc
+            .compute(&rs_frame, &cluster_result.inner)
+            .map_err(|e| JsValue::from_str(&format!("CenterOfMass: {e}")))?;
+        Ok(CenterOfMassResult { inner: result })
+    }
+}
+
+// ===========================================================================
+// GyrationTensor
+// ===========================================================================
+
+/// Gyration tensor per cluster.
+///
+/// Returns flat array: `[g00,g01,g02, g10,g11,g12, g20,g21,g22, ...]` per cluster.
+#[wasm_bindgen(js_name = GyrationTensor)]
+pub struct GyrationTensor {
+    inner: RsGyrationTensor,
+}
+
+#[allow(clippy::new_without_default)]
+#[wasm_bindgen(js_class = GyrationTensor)]
+impl GyrationTensor {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: RsGyrationTensor::new(),
+        }
+    }
+
+    /// Compute gyration tensors. Returns flat `Float32Array` (9 values per cluster).
+    pub fn compute(
+        &self,
+        frame: &Frame,
+        cluster_result: &ClusterResult,
+    ) -> Result<Vec<f32>, JsValue> {
+        let rs_frame = frame.clone_core_frame()?;
+        let tensors = self
+            .inner
+            .compute(&rs_frame, &cluster_result.inner)
+            .map_err(|e| JsValue::from_str(&format!("GyrationTensor: {e}")))?;
+        Ok(tensors
+            .iter()
+            .flat_map(|t| t.iter().flat_map(|row| row.iter().copied()))
+            .collect())
+    }
+}
+
+// ===========================================================================
+// InertiaTensor
+// ===========================================================================
+
+/// Moment of inertia tensor per cluster.
+#[wasm_bindgen(js_name = InertiaTensor)]
+pub struct InertiaTensor {
+    masses: Option<Vec<f32>>,
+}
+
+#[wasm_bindgen(js_class = InertiaTensor)]
+impl InertiaTensor {
+    #[wasm_bindgen(constructor)]
+    pub fn new(masses: Option<Vec<f32>>) -> Self {
+        Self { masses }
+    }
+
+    /// Compute inertia tensors. Returns flat `Float32Array` (9 values per cluster).
+    pub fn compute(
+        &self,
+        frame: &Frame,
+        cluster_result: &ClusterResult,
+    ) -> Result<Vec<f32>, JsValue> {
+        let rs_frame = frame.clone_core_frame()?;
+        let calc = if let Some(ref ms) = self.masses {
+            RsInertiaTensor::new().with_masses(ms)
+        } else {
+            RsInertiaTensor::new()
+        };
+        let tensors = calc
+            .compute(&rs_frame, &cluster_result.inner)
+            .map_err(|e| JsValue::from_str(&format!("InertiaTensor: {e}")))?;
+        Ok(tensors
+            .iter()
+            .flat_map(|t| t.iter().flat_map(|row| row.iter().copied()))
+            .collect())
+    }
+}
+
+// ===========================================================================
+// RadiusOfGyration
+// ===========================================================================
+
+/// Radius of gyration per cluster.
+#[wasm_bindgen(js_name = RadiusOfGyration)]
+pub struct RadiusOfGyration {
+    masses: Option<Vec<f32>>,
+}
+
+#[wasm_bindgen(js_class = RadiusOfGyration)]
+impl RadiusOfGyration {
+    #[wasm_bindgen(constructor)]
+    pub fn new(masses: Option<Vec<f32>>) -> Self {
+        Self { masses }
+    }
+
+    /// Compute radii of gyration. Returns `Float32Array` of length `numClusters`.
+    pub fn compute(
+        &self,
+        frame: &Frame,
+        cluster_result: &ClusterResult,
+    ) -> Result<Vec<f32>, JsValue> {
+        let rs_frame = frame.clone_core_frame()?;
+        let calc = if let Some(ref ms) = self.masses {
+            RsRadiusOfGyration::new().with_masses(ms)
+        } else {
+            RsRadiusOfGyration::new()
+        };
+        let radii = calc
+            .compute(&rs_frame, &cluster_result.inner)
+            .map_err(|e| JsValue::from_str(&format!("RadiusOfGyration: {e}")))?;
+        Ok(radii)
+    }
+}
+
+// ===========================================================================
+// Topology — Graph-based molecular topology (igraph-style API)
+// ===========================================================================
+
+/// Graph-based molecular topology with automated detection of angles,
+/// dihedrals, impropers, connected components, and rings (SSSR).
+///
+/// API mirrors igraph / molpy conventions.
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const topo = Topology.fromFrame(frame);
+/// console.log(topo.nAtoms, topo.nBonds);
+///
+/// const angles = topo.angles();       // Uint32Array [i,j,k, ...]
+/// const dihedrals = topo.dihedrals(); // Uint32Array [i,j,k,l, ...]
+/// const cc = topo.connectedComponents(); // Int32Array per-atom labels
+///
+/// const rings = topo.findRings();
+/// console.log(rings.numRings);
+/// ```
+#[wasm_bindgen(js_name = Topology)]
+pub struct WasmTopology {
+    inner: RsTopology,
+}
+
+#[wasm_bindgen(js_class = Topology)]
+impl WasmTopology {
+    /// Create a topology with `n` atoms and no bonds.
+    #[wasm_bindgen(constructor)]
+    pub fn new(n_atoms: usize) -> Self {
+        Self {
+            inner: RsTopology::with_atoms(n_atoms),
+        }
+    }
+
+    /// Build a topology from a Frame's `bonds` block.
+    ///
+    /// Reads the `atoms` block for atom count and `bonds` block for
+    /// `i`, `j` columns (Uint32).
+    #[wasm_bindgen(js_name = fromFrame)]
+    pub fn from_frame(frame: &Frame) -> Result<WasmTopology, JsValue> {
+        let rs_frame = frame.clone_core_frame()?;
+
+        let atoms = rs_frame
+            .get("atoms")
+            .ok_or_else(|| JsValue::from_str("Frame has no 'atoms' block"))?;
+        let n_atoms = atoms
+            .nrows()
+            .ok_or_else(|| JsValue::from_str("atoms block is empty"))?;
+
+        let mut topo = RsTopology::with_atoms(n_atoms);
+
+        if let Some(bonds) = rs_frame.get("bonds") {
+            use molrs::block::BlockDtype;
+            let col_i = bonds
+                .get("i")
+                .and_then(|c| <u32 as BlockDtype>::from_column(c))
+                .and_then(|a| a.as_slice().map(|s| s.to_vec()));
+            let col_j = bonds
+                .get("j")
+                .and_then(|c| <u32 as BlockDtype>::from_column(c))
+                .and_then(|a| a.as_slice().map(|s| s.to_vec()));
+
+            if let (Some(is), Some(js)) = (col_i, col_j) {
+                let pairs: Vec<[usize; 2]> = is
+                    .iter()
+                    .zip(js.iter())
+                    .map(|(&i, &j)| [i as usize, j as usize])
+                    .collect();
+                topo.add_bonds(&pairs);
+            }
+        }
+
+        Ok(Self { inner: topo })
+    }
+
+    /// Number of atoms (vertices).
+    #[wasm_bindgen(getter, js_name = nAtoms)]
+    pub fn n_atoms(&self) -> usize {
+        self.inner.n_atoms()
+    }
+
+    /// Number of bonds (edges).
+    #[wasm_bindgen(getter, js_name = nBonds)]
+    pub fn n_bonds(&self) -> usize {
+        self.inner.n_bonds()
+    }
+
+    /// Number of unique angles.
+    #[wasm_bindgen(getter, js_name = nAngles)]
+    pub fn n_angles(&self) -> usize {
+        self.inner.n_angles()
+    }
+
+    /// Number of unique proper dihedrals.
+    #[wasm_bindgen(getter, js_name = nDihedrals)]
+    pub fn n_dihedrals(&self) -> usize {
+        self.inner.n_dihedrals()
+    }
+
+    /// Number of connected components.
+    #[wasm_bindgen(getter, js_name = nComponents)]
+    pub fn n_components(&self) -> usize {
+        self.inner.n_components()
+    }
+
+    /// All bond pairs as flat `Uint32Array` `[i0,j0, i1,j1, ...]`.
+    pub fn bonds(&self) -> Vec<u32> {
+        self.inner
+            .bonds()
+            .iter()
+            .flat_map(|b| [b[0] as u32, b[1] as u32])
+            .collect()
+    }
+
+    /// All angle triplets as flat `Uint32Array` `[i,j,k, ...]`.
+    pub fn angles(&self) -> Vec<u32> {
+        self.inner
+            .angles()
+            .iter()
+            .flat_map(|a| [a[0] as u32, a[1] as u32, a[2] as u32])
+            .collect()
+    }
+
+    /// All proper dihedral quartets as flat `Uint32Array` `[i,j,k,l, ...]`.
+    pub fn dihedrals(&self) -> Vec<u32> {
+        self.inner
+            .dihedrals()
+            .iter()
+            .flat_map(|d| [d[0] as u32, d[1] as u32, d[2] as u32, d[3] as u32])
+            .collect()
+    }
+
+    /// All improper dihedral quartets as flat `Uint32Array` `[center,i,j,k, ...]`.
+    pub fn impropers(&self) -> Vec<u32> {
+        self.inner
+            .impropers()
+            .iter()
+            .flat_map(|d| [d[0] as u32, d[1] as u32, d[2] as u32, d[3] as u32])
+            .collect()
+    }
+
+    /// Per-atom connected component labels as `Int32Array`.
+    ///
+    /// Labels are 0-based and contiguous. Each atom gets a component ID.
+    /// Atoms in the same connected subgraph share the same label.
+    #[wasm_bindgen(js_name = connectedComponents)]
+    pub fn connected_components(&self) -> Vec<i32> {
+        self.inner
+            .connected_components()
+            .iter()
+            .map(|&c| c as i32)
+            .collect()
+    }
+
+    /// Neighbor atom indices of atom `idx` as `Uint32Array`.
+    pub fn neighbors(&self, idx: usize) -> Vec<u32> {
+        self.inner.neighbors(idx).iter().map(|&n| n as u32).collect()
+    }
+
+    /// Degree (number of bonds) of atom `idx`.
+    pub fn degree(&self, idx: usize) -> usize {
+        self.inner.degree(idx)
+    }
+
+    /// Whether atoms `i` and `j` are directly bonded.
+    #[wasm_bindgen(js_name = areBonded)]
+    pub fn are_bonded(&self, i: usize, j: usize) -> bool {
+        self.inner.are_bonded(i, j)
+    }
+
+    /// Add a single atom.
+    #[wasm_bindgen(js_name = addAtom)]
+    pub fn add_atom(&mut self) {
+        self.inner.add_atom();
+    }
+
+    /// Add a bond between atoms `i` and `j`.
+    #[wasm_bindgen(js_name = addBond)]
+    pub fn add_bond(&mut self, i: usize, j: usize) {
+        self.inner.add_bond(i, j);
+    }
+
+    /// Delete an atom by index.
+    #[wasm_bindgen(js_name = deleteAtom)]
+    pub fn delete_atom(&mut self, idx: usize) {
+        self.inner.delete_atom(idx);
+    }
+
+    /// Delete a bond by edge index.
+    #[wasm_bindgen(js_name = deleteBond)]
+    pub fn delete_bond(&mut self, idx: usize) {
+        self.inner.delete_bond(idx);
+    }
+
+    /// Compute the Smallest Set of Smallest Rings (SSSR).
+    #[wasm_bindgen(js_name = findRings)]
+    pub fn find_rings(&self) -> TopologyRingInfo {
+        TopologyRingInfo {
+            inner: self.inner.find_rings(),
+        }
+    }
+}
+
+// ===========================================================================
+// TopologyRingInfo — SSSR ring detection result
+// ===========================================================================
+
+/// Result of ring detection (SSSR) on a topology graph.
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const rings = topo.findRings();
+/// console.log(rings.numRings);
+/// console.log(rings.ringSizes());   // Uint32Array
+/// console.log(rings.isAtomInRing(0));
+///
+/// // Get all rings as flat array [size0, idx0_0, idx0_1, ..., size1, ...]
+/// const data = rings.rings();
+/// ```
+#[wasm_bindgen(js_name = TopologyRingInfo)]
+pub struct TopologyRingInfo {
+    inner: RsTopologyRingInfo,
+}
+
+#[wasm_bindgen(js_class = TopologyRingInfo)]
+impl TopologyRingInfo {
+    /// Total number of rings detected.
+    #[wasm_bindgen(getter, js_name = numRings)]
+    pub fn num_rings(&self) -> usize {
+        self.inner.num_rings()
+    }
+
+    /// Size of each ring as `Uint32Array`.
+    #[wasm_bindgen(js_name = ringSizes)]
+    pub fn ring_sizes(&self) -> Vec<u32> {
+        self.inner.ring_sizes().iter().map(|&s| s as u32).collect()
+    }
+
+    /// Whether atom `idx` belongs to any ring.
+    #[wasm_bindgen(js_name = isAtomInRing)]
+    pub fn is_atom_in_ring(&self, idx: usize) -> bool {
+        self.inner.is_atom_in_ring(idx)
+    }
+
+    /// Number of rings containing atom `idx`.
+    #[wasm_bindgen(js_name = numAtomRings)]
+    pub fn num_atom_rings(&self, idx: usize) -> usize {
+        self.inner.num_atom_rings(idx)
+    }
+
+    /// Per-atom boolean mask as `Uint8Array` (0 or 1). 1 if atom is in any ring.
+    #[wasm_bindgen(js_name = atomRingMask)]
+    pub fn atom_ring_mask(&self, n_atoms: usize) -> Vec<u8> {
+        self.inner
+            .atom_ring_mask(n_atoms)
+            .iter()
+            .map(|&b| b as u8)
+            .collect()
+    }
+
+    /// All rings as flat `Uint32Array` with length-prefixed encoding:
+    /// `[size0, atom0, atom1, ..., size1, atom0, atom1, ...]`.
+    pub fn rings(&self) -> Vec<u32> {
+        let mut out = Vec::new();
+        for ring in self.inner.rings() {
+            out.push(ring.len() as u32);
+            for &idx in ring {
+                out.push(idx as u32);
+            }
+        }
+        out
     }
 }

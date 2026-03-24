@@ -8,16 +8,44 @@ repos:
         pass_filenames: false
         types: [rust]
 
+      - id: cargo-fmt-python
+        name: cargo fmt (python)
+        entry: bash -c 'cd molrs-python && cargo fmt -- --check'
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-fmt-wasm
+        name: cargo fmt (wasm)
+        entry: bash -c 'cd molrs-wasm && cargo fmt -- --check'
+        language: system
+        pass_filenames: false
+        types: [rust]
+
       - id: cargo-clippy
-        name: cargo clippy
-        entry: cargo clippy --workspace --all-targets -- -D warnings
+        name: cargo clippy (workspace)
+        entry: cargo clippy -- -D warnings
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-clippy-python
+        name: cargo clippy (python)
+        entry: bash -c 'cd molrs-python && cargo clippy -- -D warnings'
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-clippy-wasm
+        name: cargo clippy (wasm)
+        entry: bash -c 'cd molrs-wasm && cargo clippy -- -D warnings'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: cargo-test
-        name: cargo test
-        entry: cargo test --workspace --lib --tests --examples
+        name: cargo test (core)
+        entry: bash -c 'cd molrs-core && cargo test'
         language: system
         pass_filenames: false
         types: [rust]

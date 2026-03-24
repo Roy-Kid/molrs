@@ -896,7 +896,7 @@ ITEM: ATOMS id type x y z
         // Check box
         assert_eq!(frame.meta.get("box").unwrap(), "10 10 10");
         assert_eq!(frame.meta.get("box_origin").unwrap(), "0 0 0");
-        assert!(frame.meta.get("box_tilt").is_none());
+        assert!(!frame.meta.contains_key("box_tilt"));
         assert_eq!(frame.meta.get("boundary").unwrap(), "pp pp pp");
     }
 

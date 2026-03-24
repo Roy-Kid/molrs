@@ -1,33 +1,24 @@
 use crate::Frame;
-use crate::neighbors::NeighborList;
 
 use super::error::ComputeError;
 
-/// Analysis that only needs a Frame (positions, simbox, topology already inside).
+/// Unified analysis trait for all compute operations.
 ///
-/// `&self` is an immutable parameter container (bins, cutoffs, etc.).
+/// `Args` is a GAT that specifies what additional data the compute needs
+/// beyond the `Frame`:
+///
+/// - `()` for frame-only analyses (e.g. MSD)
+/// - `&'a NeighborList` for pair-based analyses (e.g. RDF, Cluster)
+/// - `&'a ClusterResult` for cluster property analyses
+///
+/// `&self` is an immutable parameter container (bins, cutoffs, masses, etc.).
 /// Returns an owned result struct — no hidden mutable state.
 pub trait Compute {
+    /// Additional arguments beyond the Frame (e.g. `&NeighborList`, `&ClusterResult`).
+    type Args<'a>;
     /// The per-frame result type.
     type Output;
 
-    /// Run the analysis on a single frame.
-    fn compute(&self, frame: &Frame) -> Result<Self::Output, ComputeError>;
-}
-
-/// Analysis that additionally needs pre-built neighbor pairs.
-///
-/// The caller builds a [`NeighborList`] (via [`NeighborQuery`] or [`NbListAlgo`])
-/// and passes `&NeighborList`. Multiple `PairCompute` instances with the same
-/// cutoff can share a single neighbor build.
-pub trait PairCompute {
-    /// The per-frame result type.
-    type Output;
-
-    /// Run the analysis on a single frame with neighbor pairs.
-    fn compute(
-        &self,
-        frame: &Frame,
-        neighbors: &NeighborList,
-    ) -> Result<Self::Output, ComputeError>;
+    /// Run the analysis on a single frame with the given arguments.
+    fn compute(&self, frame: &Frame, args: Self::Args<'_>) -> Result<Self::Output, ComputeError>;
 }

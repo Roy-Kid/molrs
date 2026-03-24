@@ -5,6 +5,9 @@
 //! same cell occupy a contiguous slice of `sorted_idx` / `sorted_pos`.
 //! This gives excellent cache locality during the pair search compared to a
 //! linked-list layout.
+//!
+//! Only **occupied cells** are visited during pair search, so sparse systems
+//! (few particles, many cells) pay O(N), not O(n_cells).
 
 use crate::neighbors::{NbListAlgo, NeighborList, PairVisitor, QueryMode};
 use crate::region::simbox::SimBox;
@@ -18,7 +21,7 @@ use ndarray::array;
 /// iteration so each pair is found exactly once.
 ///
 /// With the `rayon` feature (default), the pair search is parallelized across
-/// cells via `rayon::par_iter`.
+/// occupied cells via `rayon::par_iter`.
 ///
 /// # Usage
 ///
@@ -38,14 +41,8 @@ pub struct LinkCell {
     sorted_idx: Vec<u32>,
     /// Particle positions in sorted order (N x 3) for cache-friendly access.
     sorted_pos: FNx3,
-    /// CSR-style forward neighbor cell indices (flat).
-    fwd_neighbors: Vec<u32>,
-    /// CSR-style offsets into `fwd_neighbors`, length = n_cells + 1.
-    fwd_neighbor_offsets: Vec<u32>,
-    /// CSR-style ALL neighbor cell indices (flat) — for cross-query.
-    all_neighbors: Vec<u32>,
-    /// CSR-style offsets into `all_neighbors`, length = n_cells + 1.
-    all_neighbor_offsets: Vec<u32>,
+    /// Indices of non-empty cells — pair search only iterates these.
+    occupied_cells: Vec<u32>,
     /// Simulation box from the last build/update.
     bx: SimBox,
     /// Cached pair results.
@@ -71,10 +68,7 @@ impl LinkCell {
             cell_start: Vec::new(),
             sorted_idx: Vec::new(),
             sorted_pos: FNx3::zeros((0, 3)),
-            fwd_neighbors: Vec::new(),
-            fwd_neighbor_offsets: Vec::new(),
-            all_neighbors: Vec::new(),
-            all_neighbor_offsets: Vec::new(),
+            occupied_cells: Vec::new(),
             bx: SimBox::cube(1.0, array![0.0 as F, 0.0, 0.0], [false, false, false])
                 .expect("dummy box"),
             result: NeighborList::empty(),
@@ -107,29 +101,17 @@ impl LinkCell {
             return;
         }
 
-        // Find the cell containing the query point
         let query_cell = get_cell(bx, query_point, self.celldim);
 
-        // Check the query cell itself
-        let start = self.cell_start[query_cell] as usize;
-        let end = self.cell_start[query_cell + 1] as usize;
-        for si in start..end {
-            let oj = self.sorted_idx[si];
-            let pj = self.sorted_pos.row(si);
-            let dr = bx.shortest_vector_fast(query_point, pj);
-            let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
-            callback(oj, d2, [dr[0], dr[1], dr[2]]);
-        }
-
-        // Check all neighbor cells (using the all-neighbors table)
-        let nb_start = self.all_neighbor_offsets[query_cell] as usize;
-        let nb_end = self.all_neighbor_offsets[query_cell + 1] as usize;
-        for &nc in &self.all_neighbors[nb_start..nb_end] {
-            let nc_start = self.cell_start[nc as usize] as usize;
-            let nc_end = self.cell_start[nc as usize + 1] as usize;
-            for sj in nc_start..nc_end {
-                let oj = self.sorted_idx[sj];
-                let pj = self.sorted_pos.row(sj);
+        // Check the query cell itself + all 26 neighbor cells
+        let pbc = bx.pbc();
+        let all_cells = stencil_all(query_cell, self.celldim, pbc);
+        for nc in std::iter::once(query_cell).chain(all_cells) {
+            let start = self.cell_start[nc] as usize;
+            let end = self.cell_start[nc + 1] as usize;
+            for si in start..end {
+                let oj = self.sorted_idx[si];
+                let pj = self.sorted_pos.row(si);
                 let dr = bx.shortest_vector_fast(query_point, pj);
                 let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                 callback(oj, d2, [dr[0], dr[1], dr[2]]);
@@ -149,16 +131,13 @@ impl NbListAlgo for LinkCell {
         assert!(points.ncols() == 3, "points must have shape (N, 3)");
 
         self.counting_sort(points, bx);
-        let n_cells = (self.celldim[0] * self.celldim[1] * self.celldim[2]) as usize;
         let n_points = points.nrows();
 
-        // Pair search — parallel by default, serial fallback without rayon.
         #[cfg(feature = "rayon")]
-        self.compute_pairs_parallel(n_cells);
+        self.compute_pairs_parallel();
         #[cfg(not(feature = "rayon"))]
-        self.compute_pairs_serial(n_cells);
+        self.compute_pairs_serial();
 
-        // Tag result as self-query
         self.result.mode = QueryMode::SelfQuery;
         self.result.num_points = n_points;
         self.result.num_query_points = n_points;
@@ -179,9 +158,6 @@ impl NbListAlgo for LinkCell {
         self.update_index(points, bx);
     }
 
-    /// Rebuild counting-sort index only — NO pair enumeration.
-    ///
-    /// After this, [`visit_pairs`] can traverse pairs on-demand.
     fn update_index(&mut self, points: FNx3View<'_>, bx: &SimBox) {
         assert!(self.cutoff > 0.0, "cutoff must be positive");
         assert!(points.ncols() == 3, "points must have shape (N, 3)");
@@ -192,15 +168,15 @@ impl NbListAlgo for LinkCell {
     ///
     /// Same half-shell iteration as `compute_pairs_serial` but calls the
     /// visitor instead of building a [`NeighborList`].
-    #[allow(clippy::needless_range_loop)]
     fn visit_pairs(&self, visitor: &mut dyn PairVisitor) {
-        let n_cells = (self.celldim[0] * self.celldim[1] * self.celldim[2]) as usize;
-        if n_cells == 0 {
+        if self.occupied_cells.is_empty() {
             return;
         }
         let cutoff2 = self.cutoff * self.cutoff;
+        let pbc = self.bx.pbc();
 
-        for cell in 0..n_cells {
+        for &cell in &self.occupied_cells {
+            let cell = cell as usize;
             let start = self.cell_start[cell] as usize;
             let end = self.cell_start[cell + 1] as usize;
 
@@ -218,17 +194,15 @@ impl NbListAlgo for LinkCell {
                 }
             }
 
-            // Forward neighbor cells
-            let fwd_start = self.fwd_neighbor_offsets[cell] as usize;
-            let fwd_end = self.fwd_neighbor_offsets[cell + 1] as usize;
-
+            // Forward neighbor cells (computed inline)
+            let fwd = stencil_fwd(cell, self.celldim, pbc);
             for si in start..end {
                 let pi = self.sorted_pos.row(si);
                 let oi = self.sorted_idx[si];
 
-                for &nc in &self.fwd_neighbors[fwd_start..fwd_end] {
-                    let nc_start = self.cell_start[nc as usize] as usize;
-                    let nc_end = self.cell_start[nc as usize + 1] as usize;
+                for nc in fwd.iter().copied() {
+                    let nc_start = self.cell_start[nc] as usize;
+                    let nc_end = self.cell_start[nc + 1] as usize;
 
                     for sj in nc_start..nc_end {
                         let oj = self.sorted_idx[sj];
@@ -250,10 +224,10 @@ impl NbListAlgo for LinkCell {
 }
 
 impl LinkCell {
-    /// Counting sort particles by cell index — shared by `update` and `update_index`.
+    /// Counting sort particles by cell index.
     ///
     /// Sets up `celldim`, `bx`, `cell_start`, `sorted_idx`, `sorted_pos`,
-    /// and the forward-neighbor table. Does NOT compute pairs.
+    /// and `occupied_cells`. Does NOT compute pairs.
     fn counting_sort(&mut self, points: FNx3View<'_>, bx: &SimBox) {
         let cutoff = self.cutoff;
         let npd = bx.nearest_plane_distance();
@@ -265,27 +239,13 @@ impl LinkCell {
         let n_cells = (celldim[0] * celldim[1] * celldim[2]) as usize;
         let n_points = points.nrows();
 
-        // Rebuild neighbor tables when grid dimensions or pbc flags change.
-        let pbc = bx.pbc();
-        if celldim != self.celldim || pbc != self.bx.pbc() {
-            let (fwd_neighbors, fwd_neighbor_offsets) = build_fwd_neighbors(celldim, pbc);
-            let (all_neighbors, all_neighbor_offsets) = build_all_neighbors(celldim, pbc);
-            self.fwd_neighbors = fwd_neighbors;
-            self.fwd_neighbor_offsets = fwd_neighbor_offsets;
-            self.all_neighbors = all_neighbors;
-            self.all_neighbor_offsets = all_neighbor_offsets;
-        }
-
         self.celldim = celldim;
         self.bx = bx.clone();
-
-        // --- Counting sort particles by cell index ---
 
         // 1) Count particles per cell.
         self.cell_start.clear();
         self.cell_start.resize(n_cells + 1, 0);
 
-        // Temporary cell assignment per particle (reuse sorted_idx buffer).
         self.sorted_idx.resize(n_points, 0);
         for i in 0..n_points {
             let cell = get_cell(bx, points.row(i), celldim);
@@ -294,9 +254,14 @@ impl LinkCell {
         }
 
         // 2) Prefix sum -> cell_start[c] = offset where cell c begins.
+        //    Collect occupied cells while scanning.
+        self.occupied_cells.clear();
         let mut acc = 0u32;
         for c in 0..n_cells {
             let count = self.cell_start[c];
+            if count > 0 {
+                self.occupied_cells.push(c as u32);
+            }
             self.cell_start[c] = acc;
             acc += count;
         }
@@ -304,7 +269,6 @@ impl LinkCell {
         debug_assert_eq!(acc as usize, n_points);
 
         // 3) Scatter particles into sorted order.
-        // Reuse cursor/cell_of buffers to avoid allocation.
         self.cursor.resize(n_cells, 0);
         self.cursor.copy_from_slice(&self.cell_start[..n_cells]);
 
@@ -325,17 +289,19 @@ impl LinkCell {
         }
     }
 
-    /// Serial half-shell pair search over all cells.
+    /// Serial half-shell pair search over occupied cells only.
     #[cfg(not(feature = "rayon"))]
-    fn compute_pairs_serial(&mut self, n_cells: usize) {
+    fn compute_pairs_serial(&mut self) {
         let cutoff2 = self.cutoff * self.cutoff;
+        let pbc = self.bx.pbc();
         self.result.clear();
 
-        for cell in 0..n_cells {
+        for &cell in &self.occupied_cells {
+            let cell = cell as usize;
             let start = self.cell_start[cell] as usize;
             let end = self.cell_start[cell + 1] as usize;
 
-            // Self-cell pairs: iterate over all unique pairs within this cell.
+            // Self-cell pairs
             for si in start..end {
                 let pi = self.sorted_pos.row(si);
                 let oi = self.sorted_idx[si];
@@ -350,17 +316,16 @@ impl LinkCell {
                 }
             }
 
-            // Forward neighbor cells.
-            let fwd_start = self.fwd_neighbor_offsets[cell] as usize;
-            let fwd_end = self.fwd_neighbor_offsets[cell + 1] as usize;
+            // Forward neighbor cells (inline stencil)
+            let fwd = stencil_fwd(cell, self.celldim, pbc);
 
             for si in start..end {
                 let pi = self.sorted_pos.row(si);
                 let oi = self.sorted_idx[si];
 
-                for &nc in &self.fwd_neighbors[fwd_start..fwd_end] {
-                    let nc_start = self.cell_start[nc as usize] as usize;
-                    let nc_end = self.cell_start[nc as usize + 1] as usize;
+                for nc in fwd.iter().copied() {
+                    let nc_start = self.cell_start[nc] as usize;
+                    let nc_end = self.cell_start[nc + 1] as usize;
 
                     for sj in nc_start..nc_end {
                         let oj = self.sorted_idx[sj];
@@ -368,7 +333,6 @@ impl LinkCell {
                         let dr = self.bx.shortest_vector_fast(pi, pj);
                         let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                         if d2 <= cutoff2 {
-                            // Canonicalize: smaller original index first.
                             if oi < oj {
                                 self.result.push(oi, oj, d2, [dr[0], dr[1], dr[2]]);
                             } else {
@@ -381,25 +345,26 @@ impl LinkCell {
         }
     }
 
-    /// Parallel half-shell pair search: each rayon thread processes a chunk of
-    /// cells into thread-local buffers, then results are merged.
+    /// Parallel half-shell pair search over occupied cells.
     #[cfg(feature = "rayon")]
     #[allow(clippy::needless_range_loop)]
-    fn compute_pairs_parallel(&mut self, n_cells: usize) {
+    fn compute_pairs_parallel(&mut self) {
         use rayon::prelude::*;
 
         let cutoff2 = self.cutoff * self.cutoff;
+        let pbc = self.bx.pbc();
 
         let cell_start = &self.cell_start;
         let sorted_idx = &self.sorted_idx;
         let sorted_pos = &self.sorted_pos;
         let bx = &self.bx;
-        let fwd_neighbors = &self.fwd_neighbors;
-        let fwd_neighbor_offsets = &self.fwd_neighbor_offsets;
+        let celldim = self.celldim;
 
-        let merged = (0..n_cells)
-            .into_par_iter()
-            .fold(NeighborList::empty, |mut acc, cell| {
+        let merged = self
+            .occupied_cells
+            .par_iter()
+            .fold(NeighborList::empty, |mut acc, &cell_u32| {
+                let cell = cell_u32 as usize;
                 let start = cell_start[cell] as usize;
                 let end = cell_start[cell + 1] as usize;
 
@@ -417,17 +382,16 @@ impl LinkCell {
                     }
                 }
 
-                // Forward neighbor cells.
-                let fwd_start = fwd_neighbor_offsets[cell] as usize;
-                let fwd_end = fwd_neighbor_offsets[cell + 1] as usize;
+                // Forward neighbor cells (inline stencil).
+                let fwd = stencil_fwd(cell, celldim, pbc);
 
                 for si in start..end {
                     let pi = sorted_pos.row(si);
                     let oi = sorted_idx[si];
 
-                    for &nc in &fwd_neighbors[fwd_start..fwd_end] {
-                        let nc_start = cell_start[nc as usize] as usize;
-                        let nc_end = cell_start[nc as usize + 1] as usize;
+                    for nc in fwd.iter().copied() {
+                        let nc_start = cell_start[nc] as usize;
+                        let nc_end = cell_start[nc + 1] as usize;
 
                         for sj in nc_start..nc_end {
                             let oj = sorted_idx[sj];
@@ -460,6 +424,75 @@ impl LinkCell {
 }
 
 // ---------------------------------------------------------------------------
+// Inline stencil computation
+// ---------------------------------------------------------------------------
+
+/// Collect unique neighbor cell indices into `out`, applying the given filter.
+///
+/// With small grids + PBC, multiple stencil offsets can wrap to the same cell,
+/// so we sort + dedup after collection. The Vec is typically ≤ 13 or 26 elements.
+#[inline]
+fn collect_stencil(
+    cell: usize,
+    celldim: [u32; 3],
+    pbc: [bool; 3],
+    filter: impl Fn(usize) -> bool,
+    out: &mut Vec<usize>,
+) {
+    out.clear();
+    let idx = cell as u32;
+    let nxy = celldim[0] * celldim[1];
+    let cx = (idx % nxy) % celldim[0];
+    let cy = (idx % nxy) / celldim[0];
+    let cz = idx / nxy;
+
+    let (si, ei) = stencil_range(cx, celldim[0]);
+    let (sj, ej) = stencil_range(cy, celldim[1]);
+    let (sk, ek) = stencil_range(cz, celldim[2]);
+
+    for nk in sk..=ek {
+        if !pbc[2] && (nk < 0 || nk >= celldim[2] as i32) {
+            continue;
+        }
+        for nj in sj..=ej {
+            if !pbc[1] && (nj < 0 || nj >= celldim[1] as i32) {
+                continue;
+            }
+            for ni in si..=ei {
+                if !pbc[0] && (ni < 0 || ni >= celldim[0] as i32) {
+                    continue;
+                }
+                let wi = wrap(ni, celldim[0]);
+                let wj = wrap(nj, celldim[1]);
+                let wk = wrap(nk, celldim[2]);
+                let nc = (wk * nxy + wj * celldim[0] + wi) as usize;
+                if filter(nc) {
+                    out.push(nc);
+                }
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+}
+
+/// 13 forward-neighbor cells (half-shell) — `nc > cell`.
+#[inline]
+fn stencil_fwd(cell: usize, celldim: [u32; 3], pbc: [bool; 3]) -> Vec<usize> {
+    let mut out = Vec::with_capacity(13);
+    collect_stencil(cell, celldim, pbc, |nc| nc > cell, &mut out);
+    out
+}
+
+/// 26 neighbor cells (full shell) — `nc != cell`.
+#[inline]
+fn stencil_all(cell: usize, celldim: [u32; 3], pbc: [bool; 3]) -> Vec<usize> {
+    let mut out = Vec::with_capacity(26);
+    collect_stencil(cell, celldim, pbc, |nc| nc != cell, &mut out);
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -471,116 +504,6 @@ fn get_cell(bx: &SimBox, r: ndarray::ArrayView1<'_, F>, celldim: [u32; 3]) -> us
     let cy = (frac[1] * celldim[1] as F).floor() as u32 % celldim[1];
     let cz = (frac[2] * celldim[2] as F).floor() as u32 % celldim[2];
     (cz * celldim[1] * celldim[0] + cy * celldim[0] + cx) as usize
-}
-
-// ---------------------------------------------------------------------------
-// Forward-neighbor table construction (half-shell, for self-query)
-// ---------------------------------------------------------------------------
-
-/// Build the CSR-encoded forward-neighbor table for the given grid dimensions.
-///
-/// For non-periodic axes, out-of-range neighbor cells are skipped rather than
-/// wrapped around.
-fn build_fwd_neighbors(celldim: [u32; 3], pbc: [bool; 3]) -> (Vec<u32>, Vec<u32>) {
-    let n_cells = (celldim[0] * celldim[1] * celldim[2]) as usize;
-    let mut offsets = Vec::with_capacity(n_cells + 1);
-    let mut neighbors_all = Vec::with_capacity(n_cells * 13);
-    offsets.push(0);
-
-    for cell in 0..n_cells {
-        let idx = cell as u32;
-        let cx = (idx % (celldim[1] * celldim[0])) % celldim[0];
-        let cy = (idx % (celldim[1] * celldim[0])) / celldim[0];
-        let cz = idx / (celldim[1] * celldim[0]);
-
-        let (si, ei) = stencil_range(cx, celldim[0]);
-        let (sj, ej) = stencil_range(cy, celldim[1]);
-        let (sk, ek) = stencil_range(cz, celldim[2]);
-
-        let mark = neighbors_all.len();
-        for nk in sk..=ek {
-            if !pbc[2] && (nk < 0 || nk >= celldim[2] as i32) {
-                continue;
-            }
-            for nj in sj..=ej {
-                if !pbc[1] && (nj < 0 || nj >= celldim[1] as i32) {
-                    continue;
-                }
-                for ni in si..=ei {
-                    if !pbc[0] && (ni < 0 || ni >= celldim[0] as i32) {
-                        continue;
-                    }
-                    let wi = wrap(ni, celldim[0]);
-                    let wj = wrap(nj, celldim[1]);
-                    let wk = wrap(nk, celldim[2]);
-                    let nc = (wk * celldim[1] * celldim[0] + wj * celldim[0] + wi) as usize;
-                    if nc > cell {
-                        neighbors_all.push(nc as u32);
-                    }
-                }
-            }
-        }
-        neighbors_all[mark..].sort_unstable();
-        neighbors_all.dedup();
-        offsets.push(neighbors_all.len() as u32);
-    }
-
-    (neighbors_all, offsets)
-}
-
-// ---------------------------------------------------------------------------
-// All-neighbor table construction (full-shell, for cross-query)
-// ---------------------------------------------------------------------------
-
-/// Build the CSR-encoded all-neighbor table (all 26 surrounding cells, excluding self).
-///
-/// For non-periodic axes, out-of-range neighbor cells are skipped rather than
-/// wrapped around.
-fn build_all_neighbors(celldim: [u32; 3], pbc: [bool; 3]) -> (Vec<u32>, Vec<u32>) {
-    let n_cells = (celldim[0] * celldim[1] * celldim[2]) as usize;
-    let mut offsets = Vec::with_capacity(n_cells + 1);
-    let mut neighbors_all = Vec::with_capacity(n_cells * 26);
-    offsets.push(0);
-
-    for cell in 0..n_cells {
-        let idx = cell as u32;
-        let cx = (idx % (celldim[1] * celldim[0])) % celldim[0];
-        let cy = (idx % (celldim[1] * celldim[0])) / celldim[0];
-        let cz = idx / (celldim[1] * celldim[0]);
-
-        let (si, ei) = stencil_range(cx, celldim[0]);
-        let (sj, ej) = stencil_range(cy, celldim[1]);
-        let (sk, ek) = stencil_range(cz, celldim[2]);
-
-        let mark = neighbors_all.len();
-        for nk in sk..=ek {
-            if !pbc[2] && (nk < 0 || nk >= celldim[2] as i32) {
-                continue;
-            }
-            for nj in sj..=ej {
-                if !pbc[1] && (nj < 0 || nj >= celldim[1] as i32) {
-                    continue;
-                }
-                for ni in si..=ei {
-                    if !pbc[0] && (ni < 0 || ni >= celldim[0] as i32) {
-                        continue;
-                    }
-                    let wi = wrap(ni, celldim[0]);
-                    let wj = wrap(nj, celldim[1]);
-                    let wk = wrap(nk, celldim[2]);
-                    let nc = (wk * celldim[1] * celldim[0] + wj * celldim[0] + wi) as usize;
-                    if nc != cell {
-                        neighbors_all.push(nc as u32);
-                    }
-                }
-            }
-        }
-        neighbors_all[mark..].sort_unstable();
-        neighbors_all.dedup();
-        offsets.push(neighbors_all.len() as u32);
-    }
-
-    (neighbors_all, offsets)
 }
 
 /// Compute the stencil search range `[start, end]` for one axis.
@@ -684,8 +607,6 @@ mod tests {
         assert_eq!(res1_j, res2_j);
     }
 
-    /// Verify that `visit_pairs` on a LinkCell built with `update_index`
-    /// produces the same pair set as the full `build` + `query` path.
     #[test]
     fn visit_pairs_matches_query() {
         let bx = SimBox::cube(3.0, array![0.0, 0.0, 0.0], [true, true, true])
@@ -697,7 +618,6 @@ mod tests {
             [2.9, 2.8, 2.7]
         ];
 
-        // Full build (pairs pre-stored)
         let mut lc_full = LinkCell::new().cutoff(0.6);
         lc_full.build(pts.view(), &bx);
         let res = lc_full.query();
@@ -714,7 +634,6 @@ mod tests {
             .collect();
         full_pairs.sort_by_key(|(i, j, _, _)| (*i, *j));
 
-        // Index-only build + visit_pairs
         let mut lc_index = LinkCell::new().cutoff(0.6);
         lc_index.build_index(pts.view(), &bx);
         let mut visit_pairs: Vec<(u32, u32, F, [F; 3])> = Vec::new();
@@ -723,32 +642,13 @@ mod tests {
         });
         visit_pairs.sort_by_key(|(i, j, _, _)| (*i, *j));
 
-        assert_eq!(
-            full_pairs.len(),
-            visit_pairs.len(),
-            "pair count mismatch: full={}, visit={}",
-            full_pairs.len(),
-            visit_pairs.len()
-        );
+        assert_eq!(full_pairs.len(), visit_pairs.len());
         for (a, b) in full_pairs.iter().zip(visit_pairs.iter()) {
             assert_eq!(a.0, b.0);
             assert_eq!(a.1, b.1);
-            assert!(
-                (a.2 - b.2).abs() < 1e-6,
-                "d2 mismatch for ({},{}): {} vs {}",
-                a.0,
-                a.1,
-                a.2,
-                b.2
-            );
+            assert!((a.2 - b.2).abs() < 1e-6);
             for d in 0..3 {
-                assert!(
-                    (a.3[d] - b.3[d]).abs() < 1e-6,
-                    "diff[{}] mismatch for ({},{})",
-                    d,
-                    a.0,
-                    a.1
-                );
+                assert!((a.3[d] - b.3[d]).abs() < 1e-6);
             }
         }
     }
@@ -812,7 +712,6 @@ mod tests {
 
     #[test]
     fn non_periodic_no_wrap() {
-        // Two particles at opposite corners of a non-periodic box -- should NOT be neighbors
         let bx =
             SimBox::cube(10.0, array![0.0, 0.0, 0.0], [false, false, false]).expect("invalid box");
         let pts = array![[0.1, 0.1, 0.1], [9.9, 9.9, 9.9]];
@@ -821,13 +720,11 @@ mod tests {
         lc.build(pts.view(), &bx);
         let result = lc.query();
 
-        // Distance is ~16.97, far beyond cutoff -- should have 0 pairs
         assert_eq!(result.n_pairs(), 0, "non-periodic box should not wrap");
     }
 
     #[test]
     fn periodic_does_wrap() {
-        // Same setup but periodic -- particles should be neighbors via wrapping
         let bx =
             SimBox::cube(10.0, array![0.0, 0.0, 0.0], [true, true, true]).expect("invalid box");
         let pts = array![[0.1, 0.1, 0.1], [9.9, 9.9, 9.9]];
@@ -836,7 +733,6 @@ mod tests {
         lc.build(pts.view(), &bx);
         let result = lc.query();
 
-        // Via PBC, distance is ~0.35 -- should have 1 pair
         assert_eq!(result.n_pairs(), 1, "periodic box should wrap");
     }
 
@@ -844,7 +740,6 @@ mod tests {
     fn non_periodic_matches_brute_force() {
         let bx =
             SimBox::cube(20.0, array![0.0, 0.0, 0.0], [false, false, false]).expect("invalid box");
-        // Cluster of points -- all well inside the box
         let pts = array![
             [5.0, 5.0, 5.0],
             [5.5, 5.0, 5.0],
@@ -862,14 +757,12 @@ mod tests {
         bf.build(pts.view(), &bx);
         let bf_result = bf.query();
 
-        // Both should find the same number of pairs
         assert_eq!(
             lc_result.n_pairs(),
             bf_result.n_pairs(),
             "LinkCell and BruteForce should agree for non-periodic"
         );
 
-        // Collect and sort pairs for comparison
         let mut lc_pairs: Vec<(u32, u32)> = lc_result
             .query_point_indices()
             .iter()
@@ -887,5 +780,121 @@ mod tests {
         bf_pairs.sort();
 
         assert_eq!(lc_pairs, bf_pairs);
+    }
+
+    // --- sparse system: 3 particles in large box with small cutoff ---
+
+    #[test]
+    fn sparse_system_fast() {
+        // This previously timed out: box=20, cutoff=0.5 → 64K cells, 3 particles.
+        // With occupied_cells optimization, only 3 cells are visited.
+        let bx =
+            SimBox::cube(20.0, array![0.0, 0.0, 0.0], [false, false, false]).expect("invalid box");
+        let pts = array![[1.0, 1.0, 1.0], [5.0, 5.0, 5.0], [9.0, 9.0, 9.0]];
+        let mut lc = LinkCell::new().cutoff(0.5);
+        lc.build(pts.view(), &bx);
+        assert_eq!(lc.occupied_cells.len(), 3);
+        assert_eq!(lc.query().n_pairs(), 0);
+    }
+
+    // --- freud: 4 collinear, count pairs ---
+
+    #[test]
+    fn collinear_pair_counts() {
+        let bx = SimBox::cube(10.0, array![0.0, 0.0, 0.0], [false, false, false]).unwrap();
+        let pts = array![
+            [1.0, 5.0, 5.0],
+            [2.0, 5.0, 5.0],
+            [4.0, 5.0, 5.0],
+            [3.0, 5.0, 5.0],
+        ];
+        let mut lc = LinkCell::new().cutoff(2.01);
+        lc.build(pts.view(), &bx);
+        assert_eq!(lc.query().n_pairs(), 5);
+    }
+
+    // --- all pairs within cutoff ---
+
+    #[test]
+    fn all_pairs_within_cutoff() {
+        let bx = SimBox::cube(10.0, array![0.0, 0.0, 0.0], [false, false, false]).unwrap();
+        let pts = array![
+            [5.0, 5.0, 5.0],
+            [5.5, 5.0, 5.0],
+            [5.0, 5.5, 5.0],
+            [5.5, 5.5, 5.0],
+        ];
+        let mut lc = LinkCell::new().cutoff(1.5);
+        lc.build(pts.view(), &bx);
+        assert_eq!(lc.query().n_pairs(), 6);
+    }
+
+    // --- brute force vs linkcell with PBC ---
+
+    #[test]
+    fn exhaustive_pbc() {
+        let bx = SimBox::cube(10.0, array![0.0, 0.0, 0.0], [true, true, true]).unwrap();
+        let pts = array![
+            [1.0, 1.0, 1.0],
+            [1.5, 1.0, 1.0],
+            [9.5, 1.0, 1.0],
+            [5.0, 5.0, 5.0],
+            [5.3, 5.0, 5.0],
+        ];
+        let cutoff = 2.0;
+
+        let mut lc = LinkCell::new().cutoff(cutoff);
+        lc.build(pts.view(), &bx);
+        let lc_result = lc.query();
+
+        let mut bf = crate::neighbors::bruteforce::BruteForce::new(cutoff);
+        bf.build(pts.view(), &bx);
+        let bf_result = bf.query();
+
+        assert_eq!(lc_result.n_pairs(), bf_result.n_pairs());
+    }
+
+    // --- edge cases ---
+
+    #[test]
+    fn no_pairs_large_separation() {
+        let bx = SimBox::cube(10.0, array![0.0, 0.0, 0.0], [false, false, false]).unwrap();
+        let pts = array![[1.0, 1.0, 1.0], [8.0, 8.0, 8.0],];
+        let mut lc = LinkCell::new().cutoff(1.0);
+        lc.build(pts.view(), &bx);
+        assert_eq!(lc.query().n_pairs(), 0);
+    }
+
+    #[test]
+    fn single_particle_no_pairs() {
+        let bx = SimBox::cube(10.0, array![0.0, 0.0, 0.0], [false, false, false]).unwrap();
+        let pts = array![[5.0, 5.0, 5.0],];
+        let mut lc = LinkCell::new().cutoff(3.0);
+        lc.build(pts.view(), &bx);
+        assert_eq!(lc.query().n_pairs(), 0);
+    }
+
+    #[test]
+    fn distances_correct() {
+        let bx = SimBox::cube(10.0, array![0.0, 0.0, 0.0], [false, false, false]).unwrap();
+        let pts = array![[3.0, 5.0, 5.0], [5.0, 5.0, 5.0],];
+        let mut lc = LinkCell::new().cutoff(3.0);
+        lc.build(pts.view(), &bx);
+        let nlist = lc.query();
+        assert_eq!(nlist.n_pairs(), 1);
+        let dists = nlist.distances();
+        assert!((dists[0] - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn pbc_distance_correct() {
+        let bx = SimBox::cube(10.0, array![0.0, 0.0, 0.0], [true, true, true]).unwrap();
+        let pts = array![[0.5, 5.0, 5.0], [9.5, 5.0, 5.0],]; // MIC dist = 1.0
+        let mut lc = LinkCell::new().cutoff(2.0);
+        lc.build(pts.view(), &bx);
+        let nlist = lc.query();
+        assert_eq!(nlist.n_pairs(), 1);
+        let dists = nlist.distances();
+        assert!((dists[0] - 1.0).abs() < 1e-5);
     }
 }

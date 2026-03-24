@@ -17,10 +17,10 @@ use crate::region::simbox::SimBox;
 use crate::types::F;
 use ndarray::Array1;
 
-use super::accumulator::PairAccumulator;
+use super::accumulator::Accumulator;
 use super::error::ComputeError;
 use super::reducer::SumReducer;
-use super::traits::PairCompute;
+use super::traits::Compute;
 
 /// Radial distribution function g(r).
 ///
@@ -58,9 +58,9 @@ impl RDF {
         }
     }
 
-    /// Convenience: wrap this RDF in a `PairAccumulator<Self, SumReducer<RDFResult>>`.
-    pub fn accumulate_sum(self) -> PairAccumulator<Self, SumReducer<RDFResult>> {
-        PairAccumulator::new(self, SumReducer::new())
+    /// Convenience: wrap this RDF in an `Accumulator<Self, SumReducer<RDFResult>>`.
+    pub fn accumulate_sum(self) -> Accumulator<Self, SumReducer<RDFResult>> {
+        Accumulator::new(self, SumReducer::new())
     }
 
     /// Compute g(r) directly from a `NeighborList` and `SimBox`, without
@@ -106,7 +106,8 @@ impl RDF {
     }
 }
 
-impl PairCompute for RDF {
+impl Compute for RDF {
+    type Args<'a> = &'a NeighborList;
     type Output = RDFResult;
 
     fn compute(&self, frame: &Frame, neighbors: &NeighborList) -> Result<RDFResult, ComputeError> {
