@@ -577,7 +577,7 @@ mod tests {
         let system = make_test_system();
 
         let prov = Provenance {
-            program: Some("molrs-md".into()),
+            program: Some("molrs".into()),
             version: Some("0.5.0".into()),
             method: Some("NVT Langevin".into()),
             seed: Some(42),
@@ -588,7 +588,7 @@ mod tests {
         let store = SimulationStore::open_file(&path).unwrap();
 
         let p = store.read_provenance().unwrap();
-        assert_eq!(p.program.as_deref(), Some("molrs-md"));
+        assert_eq!(p.program.as_deref(), Some("molrs"));
         assert_eq!(p.version.as_deref(), Some("0.5.0"));
         assert_eq!(p.method.as_deref(), Some("NVT Langevin"));
         assert_eq!(p.seed, Some(42));

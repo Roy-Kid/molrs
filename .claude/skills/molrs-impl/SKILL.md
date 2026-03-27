@@ -18,17 +18,16 @@ You are the **molrs implementation orchestrator**. Given a feature description o
 1. **Parse the input**: Determine if the input is a natural language description or a path to an existing spec.
 2. **If no spec exists**: Suggest running `/molrs-spec` first to generate one. Offer to proceed with informal planning if the user prefers.
 3. **Read the spec** and identify:
-   - Which crates are affected (`molrs-core`, `molrs-md`, `molrs-pack`, `molrs-ffi`, `molrs-wasm`)
+   - Which crates are affected (`molrs-core`, `molrs-pack`, `molrs-ffi`, `molrs-wasm`)
    - Which traits are extended or created
    - Which data structures are modified
    - Whether FFI/WASM bindings need updates
-   - Whether CUDA kernels are involved
 
 ### Phase 1: Architecture Review
 
 Launch the **architect** agent (or `everything-claude-code:planner`) to:
 - Validate the feature fits the existing trait-based architecture
-- Check dependency flow: `molrs-core ← molrs-ffi ← molrs-wasm`, `molrs-core ← molrs-md`, `molrs-core ← molrs-pack`
+- Check dependency flow: `molrs-core ← molrs-ffi ← molrs-wasm`, `molrs-core ← molrs-pack`
 - Identify which module(s) the feature belongs in
 - Confirm the feature doesn't violate:
   - Handle-based FFI (no raw pointers crossing boundaries)
@@ -111,12 +110,6 @@ cargo bench -p <affected-crate>    # if performance-sensitive
 - [ ] Trait objects are `Send + Sync`
 - [ ] No `Cell<f64>` in Sync contexts (use AtomicU64)
 - [ ] Kernel registered in `KernelRegistry` (if new potential)
-
-### molrs-md changes
-- [ ] Fix declares GPU tier
-- [ ] Fix implements all relevant stage methods
-- [ ] Dump is read-only (no state mutation)
-- [ ] MDState properly initialized
 
 ### molrs-pack changes
 - [ ] Constraints accumulate TRUE gradient with `+=`

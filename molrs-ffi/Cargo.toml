@@ -17,7 +17,6 @@ name = "molrs_ffi"
 f64 = ["molrs/f64"]
 i64 = ["molrs/i64"]
 u64 = ["molrs/u64"]
-wide = ["f64", "i64", "u64"]
 
 [dependencies]
 molrs = { path = "../molrs-core", package = "molcrafts-molrs", version = "0.0.7", default-features = false }

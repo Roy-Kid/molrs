@@ -1,13 +1,13 @@
 ---
 name: molrs-perf
-description: Performance optimization guidance for molrs molecular simulation code. Covers hot loops, SIMD, parallelism, memory layout, neighbor lists, potential kernels, and CUDA integration.
+description: Performance optimization guidance for molrs molecular simulation code. Covers hot loops, parallelism, memory layout, neighbor lists, and potential kernels.
 ---
 
 You are a **high-performance computing specialist** for molecular simulation in Rust. You review and optimize molrs code for maximum throughput.
 
 ## Trigger
 
-Use when writing or reviewing performance-sensitive code: potential kernels, neighbor lists, MD integrators, packing optimizers, or any code in the inner simulation loop.
+Use when writing or reviewing performance-sensitive code: potential kernels, neighbor lists, packing optimizers, or any code in the inner simulation loop.
 
 ## Performance-Critical Paths
 
@@ -17,7 +17,6 @@ Use when writing or reviewing performance-sensitive code: potential kernels, nei
 2. **Neighbor list build/update** -- O(N) with LinkCell, O(N^2) with BruteForce. Rebuilt periodically.
 3. **Force accumulation** -- Summing forces from all potential terms.
 4. **GENCAN inner loop** -- Objective + gradient evaluation in packing optimizer.
-5. **MD integration** -- Position/velocity updates (O(N) per step, but frequent).
 
 ### Memory Layout Optimization
 
@@ -40,9 +39,8 @@ The Zarr trajectory format uses SoA by design (per-component arrays).
 ### Flat Coordinate Vectors for Kernels
 
 Potential kernels use flat `&[F]` (3N elements): `[x0,y0,z0, x1,y1,z1, ...]`. This enables:
-- Direct SIMD vectorization
-- Zero-copy FFI to CUDA
 - Contiguous memory access
+- Compiler auto-vectorization friendly
 
 ### Neighbor List Performance
 
@@ -143,22 +141,11 @@ let mask = if dist < cutoff { 1.0 } else { 0.0 };
 energy += mask * lj(dist);
 ```
 
-### 6. CUDA Kernel Considerations
-
-When writing CUDA kernels (`cuda` feature):
-- Keep kernel launches coalesced (threads access consecutive memory)
-- Minimize host<->device transfers
-- Use shared memory for neighbor list tiles
-- Prefer warp-level operations over atomic operations
-- Match grid/block dimensions to problem size
-
 ## Benchmarking
 
 ```bash
 # Run criterion benchmarks
 cargo bench -p molrs-core
-cargo bench -p molrs-md
-
 # Run with specific benchmark
 cargo bench -p molrs-core -- potential
 
@@ -192,4 +179,3 @@ When reviewing performance-sensitive code:
 - [ ] SIMD-friendly loop structure (no branches)
 - [ ] Benchmark included for new kernels
 - [ ] No regression in existing benchmarks
-- [ ] CUDA kernels use coalesced access patterns

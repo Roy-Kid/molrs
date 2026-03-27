@@ -1,5 +1,5 @@
 #![allow(clippy::missing_safety_doc)]
-//! C API for molrs -- stable ABI for C, C++, and CUDA integration.
+//! C API for molrs -- stable ABI for C and C++ integration.
 //!
 //! This crate exposes a flat, handle-based C API for creating and
 //! manipulating molecular simulation data (frames, blocks, simulation
