@@ -23,7 +23,7 @@ Generate a spec document in this structure:
 <Why this feature is needed. Link to issues, papers, or user requests if available>
 
 ## Scope
-- **Crates affected**: <list of molrs-core, molrs-md, molrs-pack, molrs-ffi, molrs-wasm>
+- **Crates affected**: <list of molrs-core, molrs-pack, molrs-ffi, molrs-wasm>
 - **Traits extended**: <existing traits that gain implementations>
 - **Traits created**: <new traits, if any>
 - **Data structures**: <new or modified structs/enums>
@@ -88,7 +88,6 @@ Read relevant source files to understand existing patterns:
 - `molrs-core/src/neighbors/` for neighbor algorithms
 - `molrs-core/src/typifier/` for type assignment
 - `molrs-core/src/gen3d/` for coordinate generation
-- `molrs-md/src/run/` for MD plugins
 - `molrs-pack/src/` for packing constraints
 - `molrs-ffi/src/` for FFI patterns
 

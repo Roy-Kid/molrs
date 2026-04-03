@@ -37,6 +37,7 @@ use std::ops::{Index, IndexMut};
 use super::block::Block;
 use super::region::simbox::SimBox;
 use crate::error::MolRsError;
+use crate::grid::Grid;
 
 /// A dictionary from string keys to [`Block`]s.
 ///
@@ -47,6 +48,7 @@ use crate::error::MolRsError;
 #[derive(Default, Clone)]
 pub struct Frame {
     map: HashMap<String, Block>,
+    grids: HashMap<String, Grid>,
     /// Arbitrary key-value metadata associated with the frame.
     pub meta: HashMap<String, String>,
     /// Simulation box defining periodic boundary conditions.
@@ -68,6 +70,11 @@ impl std::fmt::Debug for Frame {
         if !self.meta.is_empty() {
             debug_struct.field("meta", &self.meta);
         }
+        if !self.grids.is_empty() {
+            let mut grid_names: Vec<_> = self.grids.keys().cloned().collect();
+            grid_names.sort();
+            debug_struct.field("grids", &grid_names);
+        }
 
         debug_struct.finish()
     }
@@ -87,6 +94,7 @@ impl Frame {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
+            grids: HashMap::new(),
             meta: HashMap::new(),
             simbox: None,
         }
@@ -105,6 +113,7 @@ impl Frame {
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             map: HashMap::with_capacity(cap),
+            grids: HashMap::new(),
             meta: HashMap::new(),
             simbox: None,
         }
@@ -128,12 +137,13 @@ impl Frame {
     pub fn from_map(map: HashMap<String, Block>) -> Self {
         Self {
             map,
+            grids: HashMap::new(),
             meta: HashMap::new(),
             simbox: None,
         }
     }
 
-    /// Consumes the Frame and returns the inner HashMap of blocks, metadata, and simbox.
+    /// Consumes the Frame and returns the inner HashMap of blocks, grids, metadata, and simbox.
     ///
     /// # Examples
     ///
@@ -145,8 +155,9 @@ impl Frame {
     /// frame.insert("atoms", Block::new());
     /// frame.meta.insert("title".into(), "Test".into());
     ///
-    /// let (blocks, meta, simbox) = frame.into_inner();
+    /// let (blocks, grids, meta, simbox) = frame.into_inner();
     /// assert_eq!(blocks.len(), 1);
+    /// assert!(grids.is_empty());
     /// assert_eq!(meta.get("title").unwrap(), "Test");
     /// assert!(simbox.is_none());
     /// ```
@@ -154,10 +165,11 @@ impl Frame {
         self,
     ) -> (
         HashMap<String, Block>,
+        HashMap<String, Grid>,
         HashMap<String, String>,
         Option<SimBox>,
     ) {
-        (self.map, self.meta, self.simbox)
+        (self.map, self.grids, self.meta, self.simbox)
     }
 
     /// Number of blocks (keys) in the frame.
@@ -273,8 +285,44 @@ impl Frame {
     /// ```
     pub fn clear_all(&mut self) {
         self.map.clear();
+        self.grids.clear();
         self.meta.clear();
         self.simbox = None;
+    }
+
+    /// Insert or replace a named grid.
+    pub fn insert_grid(&mut self, name: impl Into<String>, grid: Grid) -> Option<Grid> {
+        self.grids.insert(name.into(), grid)
+    }
+
+    /// Remove a named grid.
+    pub fn remove_grid(&mut self, name: &str) -> Option<Grid> {
+        self.grids.remove(name)
+    }
+
+    /// Borrow a grid by name.
+    pub fn get_grid(&self, name: &str) -> Option<&Grid> {
+        self.grids.get(name)
+    }
+
+    /// Borrow a grid mutably by name.
+    pub fn get_grid_mut(&mut self, name: &str) -> Option<&mut Grid> {
+        self.grids.get_mut(name)
+    }
+
+    /// Returns true if the frame contains a named grid.
+    pub fn has_grid(&self, name: &str) -> bool {
+        self.grids.contains_key(name)
+    }
+
+    /// Returns an iterator over `(name, grid)` pairs.
+    pub fn grids(&self) -> impl Iterator<Item = (&str, &Grid)> {
+        self.grids.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Returns an iterator over grid names.
+    pub fn grid_keys(&self) -> impl Iterator<Item = &str> {
+        self.grids.keys().map(|k| k.as_str())
     }
 
     /// Renames a column in the specified block.
@@ -444,24 +492,24 @@ impl Frame {
         {
             let natoms = atoms.nrows().unwrap_or(0);
 
-            // Check i indices
-            if let Some(i_col) = bonds.get_uint("i") {
+            // Check atomi indices
+            if let Some(i_col) = bonds.get_uint("atomi") {
                 for &idx in i_col.iter() {
                     if idx as usize >= natoms {
                         return Err(MolRsError::validation(format!(
-                            "Bond i index {} out of range [0, {})",
+                            "Bond atomi index {} out of range [0, {})",
                             idx, natoms
                         )));
                     }
                 }
             }
 
-            // Check j indices
-            if let Some(j_col) = bonds.get_uint("j") {
+            // Check atomj indices
+            if let Some(j_col) = bonds.get_uint("atomj") {
                 for &idx in j_col.iter() {
                     if idx as usize >= natoms {
                         return Err(MolRsError::validation(format!(
-                            "Bond j index {} out of range [0, {})",
+                            "Bond atomj index {} out of range [0, {})",
                             idx, natoms
                         )));
                     }
@@ -636,8 +684,9 @@ mod tests {
         frame.insert("atoms", Block::new());
         frame.meta.insert("title".into(), "Test".into());
 
-        let (blocks, meta, simbox) = frame.into_inner();
+        let (blocks, grids, meta, simbox) = frame.into_inner();
         assert_eq!(blocks.len(), 1);
+        assert!(grids.is_empty());
         assert!(blocks.contains_key("atoms"));
         assert_eq!(meta.get("title").unwrap(), "Test");
         assert!(simbox.is_none());

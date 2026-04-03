@@ -8,8 +8,8 @@
 //!
 //! | Block key   | Expected columns | Column types |
 //! |-------------|------------------|--------------|
-//! | `"atoms"`   | `symbol` (string), `x`, `y`, `z` (f32), optionally `mass`, `charge` (f32) | string, f32 |
-//! | `"bonds"`   | `i`, `j` (u32 -- atom indices), `order` (f32 -- 1.0/1.5/2.0/3.0) | u32, f32 |
+//! | `"atoms"`   | `symbol` (string), `x`, `y`, `z` (F), optionally `mass`, `charge` (F) | string, F |
+//! | `"bonds"`   | `i`, `j` (u32 -- atom indices), `order` (F -- 1.0/1.5/2.0/3.0) | u32, F |
 //! | `"angles"`  | `i`, `j`, `k` (u32) | u32 |
 //!
 //! # Example (JavaScript)
@@ -18,25 +18,27 @@
 //! const frame = new Frame();
 //! const atoms = frame.createBlock("atoms");
 //! atoms.setColStr("symbol", ["C", "C", "O"]);
-//! atoms.setColF32("x", new Float32Array([0, 1.5, 2.3]));
-//! atoms.setColF32("y", new Float32Array([0, 0, 0]));
-//! atoms.setColF32("z", new Float32Array([0, 0, 0]));
+//! atoms.setColF("x", xCoords);
+//! atoms.setColF("y", yCoords);
+//! atoms.setColF("z", zCoords);
 //!
 //! const bonds = frame.createBlock("bonds");
 //! bonds.setColU32("i", new Uint32Array([0, 1]));
 //! bonds.setColU32("j", new Uint32Array([1, 2]));
-//! bonds.setColF32("order", new Float32Array([1.0, 1.0]));
+//! bonds.setColF("order", bondOrders);
 //! ```
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use js_sys::Array as JsArray;
 use wasm_bindgen::prelude::*;
 
 use molrs::block::Block as RsBlock;
 use molrs_ffi::{FrameId as FFIFrameId, Store as FFIStore};
 
 use super::block::Block;
+use super::grid::Grid;
 use super::{SharedStore, js_err};
 
 /// Hierarchical data container mapping string keys to typed [`Block`]s.
@@ -48,10 +50,10 @@ use super::{SharedStore, js_err};
 /// # Conventions
 ///
 /// - The `"atoms"` block should contain per-atom properties: `symbol`
-///   (string), `x`/`y`/`z` (f32, coordinates in angstrom), and optionally
-///   `mass` (f32, atomic mass units) and `charge` (f32, elementary charges).
+///   (string), `x`/`y`/`z` (F, coordinates in angstrom), and optionally
+///   `mass` (F, atomic mass units) and `charge` (F, elementary charges).
 /// - The `"bonds"` block should contain bond topology: `i`/`j` (u32,
-///   zero-based atom indices) and `order` (f32, bond order: 1.0 = single,
+///   zero-based atom indices) and `order` (F, bond order: 1.0 = single,
 ///   1.5 = aromatic, 2.0 = double, 3.0 = triple).
 ///
 /// # Example (JavaScript)
@@ -59,7 +61,7 @@ use super::{SharedStore, js_err};
 /// ```js
 /// const frame = new Frame();
 /// const atoms = frame.createBlock("atoms");
-/// atoms.setColF32("x", new Float32Array([0.0, 1.54]));
+/// atoms.setColF("x", xCoords);
 /// ```
 #[wasm_bindgen]
 pub struct Frame {
@@ -104,7 +106,7 @@ impl Frame {
     ///
     /// ```js
     /// const atoms = frame.createBlock("atoms");
-    /// atoms.setColF32("x", new Float32Array([1.0, 2.0]));
+    /// atoms.setColF("x", xCoords);
     /// ```
     #[wasm_bindgen(js_name = createBlock)]
     pub fn create_block(&self, key: &str) -> Result<Block, JsValue> {
@@ -140,7 +142,7 @@ impl Frame {
     /// ```js
     /// const atoms = frame.getBlock("atoms");
     /// if (atoms) {
-    ///   const x = atoms.copyColF32("x");
+    ///   const x = atoms.copyColF("x");
     /// }
     /// ```
     #[wasm_bindgen(js_name = getBlock)]
@@ -293,6 +295,132 @@ impl Frame {
             .map_err(js_err)
     }
 
+    /// Return the names of all grids attached to this frame.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const names = frame.gridNames(); // e.g. ["chgcar", "spin"]
+    /// ```
+    #[wasm_bindgen(js_name = gridNames)]
+    pub fn grid_names(&self) -> Result<JsArray, JsValue> {
+        self.store
+            .borrow()
+            .with_frame(self.id, |frame| {
+                let names = JsArray::new();
+                for name in frame.grid_keys() {
+                    names.push(&JsValue::from_str(name));
+                }
+                names
+            })
+            .map_err(js_err)
+    }
+
+    /// Returns `true` if a named grid is attached to this frame.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` — Grid name to look up.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// frame.hasGrid("chgcar"); // true or false
+    /// ```
+    #[wasm_bindgen(js_name = hasGrid)]
+    pub fn has_grid(&self, name: &str) -> Result<bool, JsValue> {
+        self.store
+            .borrow()
+            .with_frame(self.id, |frame| frame.has_grid(name))
+            .map_err(js_err)
+    }
+
+    /// Retrieve a named grid attached to this frame.
+    ///
+    /// Returns a cloned [`Grid`] wrapper, or `undefined` if the grid does
+    /// not exist. The returned object is independent of the frame — mutations
+    /// to it are not reflected in the frame without a subsequent
+    /// [`insertGrid`](Frame::insert_grid) call.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` — Grid name to retrieve.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const g = frame.getGrid("chgcar");
+    /// if (g) {
+    ///   const arr = g.getArray("rho");
+    /// }
+    /// ```
+    #[wasm_bindgen(js_name = getGrid)]
+    pub fn get_grid(&self, name: &str) -> Result<Option<Grid>, JsValue> {
+        self.store
+            .borrow()
+            .with_frame(self.id, |frame| {
+                frame.get_grid(name).map(|g| Grid::from_rs(g.clone()))
+            })
+            .map_err(js_err)
+    }
+
+    /// Attach a grid to this frame under the given name.
+    ///
+    /// If a grid with the same name already exists it is replaced. The grid
+    /// data is moved into the frame; the JS `Grid` object becomes empty after
+    /// this call and should not be reused.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` — Name to store the grid under (e.g., `"chgcar"`).
+    /// * `grid` — The [`Grid`] to attach.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string if the frame has been dropped.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const grid = new Grid(10, 10, 10, origin, cell, true, true, true);
+    /// grid.insertArray("rho", rhoData);
+    /// frame.insertGrid("chgcar", grid);
+    /// ```
+    #[wasm_bindgen(js_name = insertGrid)]
+    pub fn insert_grid(&self, name: &str, grid: Grid) -> Result<(), JsValue> {
+        self.store
+            .borrow_mut()
+            .with_frame_mut(self.id, |frame| {
+                frame.insert_grid(name, grid.into_rs());
+            })
+            .map_err(js_err)
+    }
+
+    /// Remove a named grid from this frame.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` — Grid name to remove.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string if the frame has been dropped.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// frame.removeGrid("chgcar");
+    /// ```
+    #[wasm_bindgen(js_name = removeGrid)]
+    pub fn remove_grid(&self, name: &str) -> Result<(), JsValue> {
+        self.store
+            .borrow_mut()
+            .with_frame_mut(self.id, |frame| {
+                frame.remove_grid(name);
+            })
+            .map_err(js_err)
+    }
+
     /// Get the simulation box attached to this frame (if any).
     ///
     /// # Returns
@@ -334,7 +462,7 @@ impl Frame {
     /// # Example (JavaScript)
     ///
     /// ```js
-    /// const origin = new Float32Array([0, 0, 0]);
+    /// const origin = originVec;
     /// frame.simbox = Box.cube(10.0, origin, true, true, true);
     /// ```
     #[wasm_bindgen(setter, js_name = simbox)]

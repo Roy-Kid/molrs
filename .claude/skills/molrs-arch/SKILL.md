@@ -15,9 +15,7 @@ Use when designing new features, reviewing PRs, or making module-level decisions
 
 ```
 molrs-core <- molrs-ffi <- molrs-wasm
-molrs-core <- molrs-md
 molrs-core <- molrs-pack
-molrs-pack <- molrs-md (for minimization backend)
 ```
 
 **Violations**: No crate may depend on a crate above it in the graph. `molrs-core` depends on nothing in the workspace.
@@ -64,7 +62,7 @@ molrs-pack <- molrs-md (for minimization backend)
 
 | Item | Convention | Example |
 |---|---|---|
-| Crate | `molrs-<domain>` | `molrs-core`, `molrs-md` |
+| Crate | `molrs-<domain>` | `molrs-core`, `molrs-pack` |
 | Module | snake_case, domain noun | `neighbors`, `potential`, `forcefield` |
 | Trait | PascalCase, capability noun | `NbListAlgo`, `Potential`, `Fix` |
 | Struct (impl) | PascalCase, specific noun | `LinkCell`, `MorseBondKernel` |

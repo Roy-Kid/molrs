@@ -45,12 +45,14 @@ pub mod block;
 pub mod coarsegrain;
 pub mod element;
 pub mod forcefield;
+pub mod grid;
 pub mod frame;
 pub mod gasteiger;
 pub mod gen3d;
 pub mod hydrogens;
 pub mod mapping;
 pub mod molgraph;
+pub mod molrec;
 pub mod potential;
 pub mod region;
 pub mod rings;
@@ -77,6 +79,7 @@ pub use coarsegrain::CoarseGrain;
 pub use element::Element;
 pub use error::MolRsError;
 pub use frame::Frame;
+pub use grid::Grid;
 pub use gasteiger::{GasteigerCharges, compute_gasteiger_charges};
 pub use gen3d::{
     EmbedAlgorithm, ForceFieldKind, Gen3DOptions, Gen3DReport, Gen3DSpeed, StageKind, StageReport,
@@ -101,16 +104,22 @@ pub use smiles::{parse_smarts, parse_smiles, to_atomistic};
 
 // Re-export IO functions for convenience
 pub use forcefield::xml::{read_forcefield_xml, read_forcefield_xml_str};
+pub use io::chgcar::read_chgcar;
 pub use io::lammps_data::{read_lammps_data, write_lammps_data};
 pub use io::lammps_dump::{open_lammps_dump, read_lammps_dump, write_lammps_dump};
 pub use io::pdb::{read_pdb_frame, write_pdb_frame};
 pub use io::xyz::{read_xyz_frame, read_xyz_traj, write_xyz_frame};
+pub use molrec::{
+    CellBox, MolRec, ObservableData, ObservableKind, ObservableRecord, RecordBox, SchemaValue,
+    Trajectory,
+};
 
 // Zarr I/O re-exports (only with "zarr" feature)
-#[cfg(all(feature = "zarr", feature = "filesystem"))]
-pub use io::zarr::Archive;
 #[cfg(feature = "zarr")]
 pub use io::zarr::{
-    Provenance, SimulationStore, TrajectoryConfig, TrajectoryFrame, TrajectoryReader,
-    TrajectoryWriter, UnitSystem,
+    count_molrec_frames_in_store, read_molrec_frame_from_store, read_molrec_store,
 };
+#[cfg(all(feature = "zarr", feature = "filesystem"))]
+pub use io::zarr::read_molrec_file;
+#[cfg(all(feature = "zarr", feature = "filesystem"))]
+pub use io::zarr::write_molrec_file;

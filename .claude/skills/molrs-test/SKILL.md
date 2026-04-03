@@ -15,7 +15,6 @@ Use when writing tests for molrs code, reviewing test coverage, or debugging tes
 molrs-core/tests/          # Integration tests
 molrs-core/src/**/tests.rs # Unit tests (inline #[cfg(test)] modules)
 molrs-pack/tests/          # Integration + batch validation tests
-molrs-md/tests/            # MD integration tests
 ```
 
 ### Running Tests

@@ -8,7 +8,7 @@
 //! - [`Block`] -- column-oriented data store with typed arrays.
 //! - [`Box`] -- parallelepiped simulation box with periodic boundary
 //!   conditions (PBC).
-//! - [`WasmArray`] -- owned `f32` array with shape metadata for passing
+//! - [`WasmArray`] -- owned float array with shape metadata for passing
 //!   multi-dimensional numeric data across the WASM boundary.
 //!
 //! # Internal details
@@ -28,11 +28,13 @@ use molrs_ffi::{FfiError, Store as FFIStore};
 
 pub mod block;
 pub mod frame;
+pub mod grid;
 pub mod region;
 pub mod types;
 
 pub use block::Block;
 pub use frame::Frame;
+pub use grid::Grid;
 pub use region::simbox::Box;
 pub use types::WasmArray;
 
