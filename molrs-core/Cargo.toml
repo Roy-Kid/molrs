@@ -19,6 +19,7 @@ blas = ["ndarray-linalg"]
 rayon = []
 zarr = ["dep:zarrs"]
 filesystem = ["zarr", "zarrs/filesystem"]
+# Deprecated — these features are now no-ops. F/I/U are hardcoded to f64/i32/u32.
 f64 = []
 i64 = []
 u64 = []

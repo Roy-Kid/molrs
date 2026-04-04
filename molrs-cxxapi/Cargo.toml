@@ -13,7 +13,6 @@ crate-type = ["staticlib"]
 
 [features]
 default = ["zarr"]
-f64 = ["molrs/f64"]
 zarr = ["molrs/filesystem"]
 
 [dependencies]
