@@ -14,6 +14,7 @@ use crate::frame::PyFrame;
 use crate::helpers::{io_error_to_pyerr, molrs_error_to_pyerr, smiles_error_to_pyerr};
 use crate::molgraph::PyAtomistic;
 use molrs::io::chgcar::read_chgcar;
+use molrs::io::cube::{read_cube, write_cube};
 use molrs::io::lammps_data::{read_lammps_data, write_lammps_data};
 use molrs::io::lammps_dump::{read_lammps_dump, write_lammps_dump};
 use molrs::io::pdb::{read_pdb_frame, write_pdb_frame};
@@ -179,6 +180,62 @@ pub fn read_lammps_traj(path: &str) -> PyResult<Vec<PyFrame>> {
 pub fn read_chgcar_file(path: &str) -> PyResult<PyFrame> {
     let frame = read_chgcar(path).map_err(molrs_error_to_pyerr)?;
     PyFrame::from_core_frame(frame)
+}
+
+/// Read a Gaussian Cube file.
+///
+/// Returns a Frame containing:
+///
+/// - ``"atoms"`` block with ``symbol``, ``x``, ``y``, ``z``,
+///   ``atomic_number``, ``charge``
+/// - grid ``"cube"``: a :class:`Grid` with ``"density"`` (scalar field)
+///   or ``"mo_<idx>"`` arrays (MO variant)
+///
+/// Values are stored as-is from the file (no unit conversion).
+/// The unit system is recorded in ``frame.meta["cube_units"]``
+/// (``"bohr"`` or ``"angstrom"``).
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a ``.cube`` file.
+///
+/// Returns
+/// -------
+/// Frame
+///
+/// Raises
+/// ------
+/// ValueError
+///     On parse errors.
+/// IOError
+///     If the file cannot be opened.
+///
+/// Examples
+/// --------
+/// >>> frame = molrs.read_cube_file("density.cube")
+/// >>> grid = frame["cube"]
+/// >>> density = grid["density"]       # shape (nx, ny, nz)
+#[pyfunction]
+pub fn read_cube_file(path: &str) -> PyResult<PyFrame> {
+    let frame = read_cube(path).map_err(molrs_error_to_pyerr)?;
+    PyFrame::from_core_frame(frame)
+}
+
+/// Write a Frame to a Gaussian Cube file.
+///
+/// The Frame must contain a ``"cube"`` grid and an ``"atoms"`` block.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frame : Frame
+///     Frame to write.
+#[pyfunction]
+pub fn write_cube_file(path: &str, frame: &PyFrame) -> PyResult<()> {
+    let core_frame = frame.clone_core_frame()?;
+    write_cube(path, &core_frame).map_err(molrs_error_to_pyerr)
 }
 
 // ============================================================================
