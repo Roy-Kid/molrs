@@ -140,4 +140,4 @@ Handle-based design: `FrameId` from SlotMap (index + generation), `BlockHandle` 
 
 ## Development Skills & Agents
 
-Use `/molrs-impl <feature description>` to orchestrate multi-agent feature development. Use `/molrs-spec <natural language requirement>` to generate detailed specs from requirements. See `.claude/skills/` for all available skills.
+Use `/molrs-impl <feature description>` to orchestrate multi-agent feature development. Use `/molrs-spec <natural language requirement>` to generate detailed specs from requirements. Use `/molrec-compat <format>` to evaluate molrec spec compatibility for a new format (spawns product-manager agent). See `.claude/skills/` and `.claude/agents/` for all available skills and agents.
