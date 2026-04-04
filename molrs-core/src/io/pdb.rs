@@ -5,6 +5,7 @@
 
 use crate::block::Block;
 use crate::frame::Frame;
+use crate::frame_access::FrameAccess;
 use crate::io::reader::{FrameReader, Reader};
 use crate::io::writer::FrameWriter;
 use crate::region::simbox::SimBox;
@@ -579,23 +580,21 @@ impl<W: Write> PDBWriter<W> {
     }
 }
 
-pub fn write_pdb_frame<W: Write>(writer: &mut W, _frame: &Frame) -> std::io::Result<()> {
-    let atoms = _frame
-        .get("atoms")
-        .ok_or_else(|| err_mapper("Missing 'atoms' block"))?;
-    let n = atoms
-        .nrows()
-        .ok_or_else(|| err_mapper("Empty 'atoms' block"))?;
-
-    let x = atoms
-        .get_float("x")
+/// Write a single frame in PDB format.
+///
+/// Accepts any type implementing [`FrameAccess`], including both [`Frame`] and
+/// [`FrameView`](crate::frame_view::FrameView).
+pub fn write_pdb_frame<W: Write>(writer: &mut W, frame: &impl FrameAccess) -> std::io::Result<()> {
+    let x = frame
+        .get_float("atoms", "x")
         .ok_or_else(|| err_mapper("Missing 'x' column"))?;
-    let y = atoms
-        .get_float("y")
+    let y = frame
+        .get_float("atoms", "y")
         .ok_or_else(|| err_mapper("Missing 'y' column"))?;
-    let z = atoms
-        .get_float("z")
+    let z = frame
+        .get_float("atoms", "z")
         .ok_or_else(|| err_mapper("Missing 'z' column"))?;
+    let n = x.shape().first().copied().ok_or_else(|| err_mapper("Empty 'atoms' block"))?;
 
     let x_slice = x
         .as_slice_memory_order()
@@ -607,14 +606,21 @@ pub fn write_pdb_frame<W: Write>(writer: &mut W, _frame: &Frame) -> std::io::Res
         .as_slice_memory_order()
         .ok_or_else(|| err_mapper("Non-contiguous 'z' column"))?;
 
-    let elements = atoms.get_string("element");
-    let elements_slice = elements.and_then(|arr| arr.as_slice_memory_order());
+    let elements_view = frame.get_string("atoms", "element");
+    let elements_owned: Vec<String> = elements_view
+        .as_ref()
+        .and_then(|arr| arr.as_slice().map(|s| s.to_vec()))
+        .unwrap_or_default();
 
-    let ids_u32 = atoms.get_uint("id");
-    let ids_u32_slice = ids_u32.and_then(|arr| arr.as_slice_memory_order());
+    let ids_view = frame.get_uint("atoms", "id");
+    let ids_owned: Vec<U> = ids_view
+        .as_ref()
+        .and_then(|arr| arr.as_slice().map(|s| s.to_vec()))
+        .unwrap_or_default();
+    let has_ids = !ids_owned.is_empty();
 
     // Write CRYST1 from SimBox if present
-    if let Some(simbox) = &_frame.simbox {
+    if let Some(simbox) = frame.simbox_ref() {
         let lengths = simbox.lengths();
         writeln!(
             writer,
@@ -625,10 +631,14 @@ pub fn write_pdb_frame<W: Write>(writer: &mut W, _frame: &Frame) -> std::io::Res
 
     let mut serials = Vec::with_capacity(n);
     for i in 0..n {
-        let serial = ids_u32_slice.map(|ids| ids[i] as usize).unwrap_or(i + 1);
+        let serial = if has_ids {
+            ids_owned[i] as usize
+        } else {
+            i + 1
+        };
         serials.push(serial);
-        let elem_raw = elements_slice
-            .and_then(|elts| elts.get(i))
+        let elem_raw = elements_owned
+            .get(i)
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .unwrap_or("X");
@@ -642,26 +652,30 @@ pub fn write_pdb_frame<W: Write>(writer: &mut W, _frame: &Frame) -> std::io::Res
         )?;
     }
 
-    if let Some(bonds) = _frame.get("bonds") {
-        let bn = bonds.nrows().unwrap_or(0);
-        if bn > 0 {
-            let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    // Write CONECT records from bonds block
+    if frame.contains_block("bonds") {
+        let bond_data: Option<Result<Vec<Vec<usize>>, std::io::Error>> =
+            frame.visit_block("bonds", |bonds| {
+                let bn = bonds.nrows().unwrap_or(0);
+                if bn == 0 {
+                    return Ok(vec![Vec::new(); n]);
+                }
 
-            let (u32_i, u32_j) =
-                if let (Some(i), Some(j)) = (bonds.get_uint("atomi"), bonds.get_uint("atomj")) {
-                    (Some(i), Some(j))
-                } else {
-                    (None, None)
-                };
+                let i_arr = bonds
+                    .get_uint_view("atomi")
+                    .ok_or_else(|| err_mapper("Bonds block missing 'atomi' column"))?;
+                let j_arr = bonds
+                    .get_uint_view("atomj")
+                    .ok_or_else(|| err_mapper("Bonds block missing 'atomj' column"))?;
 
-            if let (Some(i_arr), Some(j_arr)) = (u32_i, u32_j) {
                 let i_slice = i_arr
                     .as_slice_memory_order()
-                    .ok_or_else(|| err_mapper("Non-contiguous bonds 'atom_i'/'i' column"))?;
+                    .ok_or_else(|| err_mapper("Non-contiguous bonds 'atomi' column"))?;
                 let j_slice = j_arr
                     .as_slice_memory_order()
-                    .ok_or_else(|| err_mapper("Non-contiguous bonds 'atom_j'/'j' column"))?;
+                    .ok_or_else(|| err_mapper("Non-contiguous bonds 'atomj' column"))?;
 
+                let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
                 for b in 0..bn {
                     let idx_i = i_slice[b] as usize;
                     let idx_j = j_slice[b] as usize;
@@ -671,12 +685,11 @@ pub fn write_pdb_frame<W: Write>(writer: &mut W, _frame: &Frame) -> std::io::Res
                     adj[idx_i].push(serials[idx_j]);
                     adj[idx_j].push(serials[idx_i]);
                 }
-            } else {
-                return Err(err_mapper(
-                    "Bonds block missing 'atom_i'/'atom_j' or 'i'/'j' columns",
-                ));
-            }
+                Ok(adj)
+            });
 
+        if let Some(adj_result) = bond_data {
+            let mut adj = adj_result?;
             for (atom_idx, neighbors) in adj.iter_mut().enumerate() {
                 if neighbors.is_empty() {
                     continue;

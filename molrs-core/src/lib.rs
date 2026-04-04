@@ -47,6 +47,8 @@ pub mod element;
 pub mod forcefield;
 pub mod grid;
 pub mod frame;
+pub mod frame_access;
+pub mod frame_view;
 pub mod gasteiger;
 pub mod gen3d;
 pub mod hydrogens;
@@ -79,6 +81,8 @@ pub use coarsegrain::CoarseGrain;
 pub use element::Element;
 pub use error::MolRsError;
 pub use frame::Frame;
+pub use frame_access::FrameAccess;
+pub use frame_view::FrameView;
 pub use grid::Grid;
 pub use gasteiger::{GasteigerCharges, compute_gasteiger_charges};
 pub use gen3d::{

@@ -33,6 +33,7 @@
 
 use crate::block::Block;
 use crate::frame::Frame;
+use crate::frame_access::FrameAccess;
 use crate::io::reader::{FrameIndex, FrameReader, ReadSeek, Reader, TrajReader};
 use crate::io::writer::{FrameWriter, Writer};
 use crate::types::{F, I};
@@ -641,155 +642,174 @@ impl<W: Write> Writer for LAMMPSDumpWriter<W> {
 
 impl<W: Write> FrameWriter for LAMMPSDumpWriter<W> {
     fn write_frame(&mut self, frame: &Frame) -> std::io::Result<()> {
-        let atoms = frame
-            .get("atoms")
-            .ok_or_else(|| err_mapper("Frame must contain 'atoms' block"))?;
-        let natoms = atoms.nrows().unwrap_or(0);
-
-        // -- Timestep --
-        let timestep = frame.meta.get("timestep").map_or("0", |s| s.as_str());
-        writeln!(self.writer, "ITEM: TIMESTEP")?;
-        writeln!(self.writer, "{}", timestep)?;
-
-        // -- Number of atoms --
-        writeln!(self.writer, "ITEM: NUMBER OF ATOMS")?;
-        writeln!(self.writer, "{}", natoms)?;
-
-        // -- Box bounds --
-        let box_str = frame
-            .meta
-            .get("box")
-            .ok_or_else(|| err_mapper("Frame metadata must contain 'box'"))?;
-        let default_origin = "0.0 0.0 0.0".to_string();
-        let origin_str = frame.meta.get("box_origin").unwrap_or(&default_origin);
-
-        let dims: Vec<f64> = box_str
-            .split_whitespace()
-            .map(|s| s.parse().map_err(err_mapper))
-            .collect::<Result<_, _>>()?;
-        let origin: Vec<f64> = origin_str
-            .split_whitespace()
-            .map(|s| s.parse().map_err(err_mapper))
-            .collect::<Result<_, _>>()?;
-
-        if dims.len() != 3 || origin.len() != 3 {
-            return Err(err_mapper("Invalid box dimensions in metadata"));
-        }
-
-        // Boundary flags
-        let boundary = frame.meta.get("boundary");
-        let pbc_str = boundary.map_or("pp pp pp", |s| s.as_str());
-
-        let has_tilt = frame.meta.contains_key("box_tilt");
-
-        if has_tilt {
-            let tilt_str = frame.meta.get("box_tilt").unwrap();
-            let tilts: Vec<f64> = tilt_str
-                .split_whitespace()
-                .map(|s| s.parse().map_err(err_mapper))
-                .collect::<Result<_, _>>()?;
-
-            if tilts.len() != 3 {
-                return Err(err_mapper("Invalid box_tilt in metadata"));
-            }
-
-            let (xy, xz, yz) = (tilts[0], tilts[1], tilts[2]);
-
-            // Convert actual limits to bound values for triclinic output
-            let xlo = origin[0];
-            let ylo = origin[1];
-            let zlo = origin[2];
-            let xhi = xlo + dims[0];
-            let yhi = ylo + dims[1];
-            let zhi = zlo + dims[2];
-
-            let xlo_bound = xlo + f64::min(0.0, f64::min(xy, f64::min(xz, xy + xz)));
-            let xhi_bound = xhi + f64::max(0.0, f64::max(xy, f64::max(xz, xy + xz)));
-            let ylo_bound = ylo + f64::min(0.0, yz);
-            let yhi_bound = yhi + f64::max(0.0, yz);
-
-            writeln!(self.writer, "ITEM: BOX BOUNDS xy xz yz {}", pbc_str)?;
-            writeln!(self.writer, "{} {} {}", xlo_bound, xhi_bound, xy)?;
-            writeln!(self.writer, "{} {} {}", ylo_bound, yhi_bound, xz)?;
-            writeln!(self.writer, "{} {} {}", zlo, zhi, yz)?;
-        } else {
-            let xlo = origin[0];
-            let ylo = origin[1];
-            let zlo = origin[2];
-            let xhi = xlo + dims[0];
-            let yhi = ylo + dims[1];
-            let zhi = zlo + dims[2];
-
-            writeln!(self.writer, "ITEM: BOX BOUNDS {}", pbc_str)?;
-            writeln!(self.writer, "{} {}", xlo, xhi)?;
-            writeln!(self.writer, "{} {}", ylo, yhi)?;
-            writeln!(self.writer, "{} {}", zlo, zhi)?;
-        }
-
-        // -- Atoms --
-        // Determine column ordering: id first, type second, then sorted remaining
-        let col_names: Vec<&str> = atoms.keys().collect();
-        let mut ordered: Vec<&str> = Vec::with_capacity(col_names.len());
-
-        if col_names.contains(&"id") {
-            ordered.push("id");
-        }
-        if col_names.contains(&"type") {
-            ordered.push("type");
-        }
-
-        let mut remaining: Vec<&str> = col_names
-            .iter()
-            .filter(|&&n| n != "id" && n != "type")
-            .copied()
-            .collect();
-        remaining.sort();
-        ordered.extend(remaining);
-
-        writeln!(self.writer, "ITEM: ATOMS {}", ordered.join(" "))?;
-
-        let col_types: Vec<ColumnType> = ordered.iter().map(|n| classify_column(n)).collect();
-
-        for row in 0..natoms {
-            for (ci, &name) in ordered.iter().enumerate() {
-                if ci > 0 {
-                    write!(self.writer, " ")?;
-                }
-                match col_types[ci] {
-                    ColumnType::Integer => {
-                        if let Some(arr) = atoms.get_int(name) {
-                            write!(self.writer, "{}", arr[row])?;
-                        } else if let Some(arr) = atoms.get_float(name) {
-                            // Fallback: column classified as int but stored as float
-                            write!(self.writer, "{}", arr[row] as I)?;
-                        } else {
-                            write!(self.writer, "0")?;
-                        }
-                    }
-                    ColumnType::Float => {
-                        if let Some(arr) = atoms.get_float(name) {
-                            write!(self.writer, "{:.6}", arr[row])?;
-                        } else if let Some(arr) = atoms.get_int(name) {
-                            // Fallback: column classified as float but stored as int
-                            write!(self.writer, "{:.6}", arr[row] as F)?;
-                        } else {
-                            write!(self.writer, "0.000000")?;
-                        }
-                    }
-                    ColumnType::String => {
-                        if let Some(arr) = atoms.get_string(name) {
-                            write!(self.writer, "{}", arr[row])?;
-                        } else {
-                            write!(self.writer, "X")?;
-                        }
-                    }
-                }
-            }
-            writeln!(self.writer)?;
-        }
-
-        Ok(())
+        write_lammps_dump_frame(&mut self.writer, frame)
     }
+}
+
+/// Write a single frame in LAMMPS dump format.
+///
+/// Accepts any type implementing [`FrameAccess`], including both [`Frame`] and
+/// [`FrameView`](crate::frame_view::FrameView).
+fn write_lammps_dump_frame<W: Write>(
+    writer: &mut W,
+    frame: &impl FrameAccess,
+) -> std::io::Result<()> {
+    let natoms = frame
+        .visit_block("atoms", |b| b.nrows().unwrap_or(0))
+        .ok_or_else(|| err_mapper("Frame must contain 'atoms' block"))?;
+
+    let meta = frame.meta_ref();
+
+    // -- Timestep --
+    let timestep = meta.get("timestep").map_or("0", |s| s.as_str());
+    writeln!(writer, "ITEM: TIMESTEP")?;
+    writeln!(writer, "{}", timestep)?;
+
+    // -- Number of atoms --
+    writeln!(writer, "ITEM: NUMBER OF ATOMS")?;
+    writeln!(writer, "{}", natoms)?;
+
+    // -- Box bounds --
+    let box_str = meta
+        .get("box")
+        .ok_or_else(|| err_mapper("Frame metadata must contain 'box'"))?;
+    let default_origin = "0.0 0.0 0.0".to_string();
+    let origin_str = meta.get("box_origin").unwrap_or(&default_origin);
+
+    let dims: Vec<f64> = box_str
+        .split_whitespace()
+        .map(|s| s.parse().map_err(err_mapper))
+        .collect::<Result<_, _>>()?;
+    let origin: Vec<f64> = origin_str
+        .split_whitespace()
+        .map(|s| s.parse().map_err(err_mapper))
+        .collect::<Result<_, _>>()?;
+
+    if dims.len() != 3 || origin.len() != 3 {
+        return Err(err_mapper("Invalid box dimensions in metadata"));
+    }
+
+    // Boundary flags
+    let boundary = meta.get("boundary");
+    let pbc_str = boundary.map_or("pp pp pp", |s| s.as_str());
+
+    let has_tilt = meta.contains_key("box_tilt");
+
+    if has_tilt {
+        let tilt_str = meta.get("box_tilt").unwrap();
+        let tilts: Vec<f64> = tilt_str
+            .split_whitespace()
+            .map(|s| s.parse().map_err(err_mapper))
+            .collect::<Result<_, _>>()?;
+
+        if tilts.len() != 3 {
+            return Err(err_mapper("Invalid box_tilt in metadata"));
+        }
+
+        let (xy, xz, yz) = (tilts[0], tilts[1], tilts[2]);
+
+        let xlo = origin[0];
+        let ylo = origin[1];
+        let zlo = origin[2];
+        let xhi = xlo + dims[0];
+        let yhi = ylo + dims[1];
+        let zhi = zlo + dims[2];
+
+        let xlo_bound = xlo + f64::min(0.0, f64::min(xy, f64::min(xz, xy + xz)));
+        let xhi_bound = xhi + f64::max(0.0, f64::max(xy, f64::max(xz, xy + xz)));
+        let ylo_bound = ylo + f64::min(0.0, yz);
+        let yhi_bound = yhi + f64::max(0.0, yz);
+
+        writeln!(writer, "ITEM: BOX BOUNDS xy xz yz {}", pbc_str)?;
+        writeln!(writer, "{} {} {}", xlo_bound, xhi_bound, xy)?;
+        writeln!(writer, "{} {} {}", ylo_bound, yhi_bound, xz)?;
+        writeln!(writer, "{} {} {}", zlo, zhi, yz)?;
+    } else {
+        let xlo = origin[0];
+        let ylo = origin[1];
+        let zlo = origin[2];
+        let xhi = xlo + dims[0];
+        let yhi = ylo + dims[1];
+        let zhi = zlo + dims[2];
+
+        writeln!(writer, "ITEM: BOX BOUNDS {}", pbc_str)?;
+        writeln!(writer, "{} {}", xlo, xhi)?;
+        writeln!(writer, "{} {}", ylo, yhi)?;
+        writeln!(writer, "{} {}", zlo, zhi)?;
+    }
+
+    // -- Atoms --
+    // Determine column ordering and write per-row data via visit_block
+    let atom_lines: Vec<String> = frame
+        .visit_block("atoms", |atoms| {
+            let col_names = atoms.column_keys();
+            let mut ordered: Vec<&str> = Vec::with_capacity(col_names.len());
+
+            if col_names.contains(&&"id") {
+                ordered.push("id");
+            }
+            if col_names.contains(&&"type") {
+                ordered.push("type");
+            }
+
+            let mut remaining: Vec<&str> = col_names
+                .iter()
+                .filter(|&&n| n != "id" && n != "type")
+                .copied()
+                .collect();
+            remaining.sort();
+            ordered.extend(remaining);
+
+            let header = format!("ITEM: ATOMS {}", ordered.join(" "));
+            let col_types: Vec<ColumnType> =
+                ordered.iter().map(|n| classify_column(n)).collect();
+
+            let mut lines = Vec::with_capacity(natoms + 1);
+            lines.push(header);
+
+            for row in 0..natoms {
+                let mut parts = Vec::with_capacity(ordered.len());
+                for (ci, &name) in ordered.iter().enumerate() {
+                    let s = match col_types[ci] {
+                        ColumnType::Integer => {
+                            if let Some(arr) = atoms.get_int_view(name) {
+                                format!("{}", arr[row])
+                            } else if let Some(arr) = atoms.get_float_view(name) {
+                                format!("{}", arr[row] as I)
+                            } else {
+                                "0".to_string()
+                            }
+                        }
+                        ColumnType::Float => {
+                            if let Some(arr) = atoms.get_float_view(name) {
+                                format!("{:.6}", arr[row])
+                            } else if let Some(arr) = atoms.get_int_view(name) {
+                                format!("{:.6}", arr[row] as F)
+                            } else {
+                                "0.000000".to_string()
+                            }
+                        }
+                        ColumnType::String => {
+                            if let Some(arr) = atoms.get_string_view(name) {
+                                arr[row].clone()
+                            } else {
+                                "X".to_string()
+                            }
+                        }
+                    };
+                    parts.push(s);
+                }
+                lines.push(parts.join(" "));
+            }
+            lines
+        })
+        .unwrap_or_default();
+
+    for line in &atom_lines {
+        writeln!(writer, "{}", line)?;
+    }
+
+    Ok(())
 }
 
 // ============================================================================
@@ -818,11 +838,17 @@ pub fn open_lammps_dump<P: AsRef<Path>>(
 }
 
 /// Write frames to a LAMMPS dump file.
-pub fn write_lammps_dump<P: AsRef<Path>>(path: P, frames: &[Frame]) -> std::io::Result<()> {
+///
+/// Accepts a slice of any type implementing [`FrameAccess`], including
+/// `&[Frame]`. Existing callers continue to work without changes.
+pub fn write_lammps_dump<P: AsRef<Path>, FA: FrameAccess>(
+    path: P,
+    frames: &[FA],
+) -> std::io::Result<()> {
     let file = File::create(path)?;
-    let mut writer = LAMMPSDumpWriter::new(file);
+    let mut writer = std::io::BufWriter::new(file);
     for frame in frames {
-        writer.write_frame(frame)?;
+        write_lammps_dump_frame(&mut writer, frame)?;
     }
     Ok(())
 }

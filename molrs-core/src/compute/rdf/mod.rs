@@ -11,7 +11,7 @@ mod result;
 
 pub use result::RDFResult;
 
-use crate::Frame;
+use crate::frame_access::FrameAccess;
 use crate::neighbors::NeighborList;
 use crate::region::simbox::SimBox;
 use crate::types::F;
@@ -116,23 +116,24 @@ impl Compute for RDF {
     type Args<'a> = &'a NeighborList;
     type Output = RDFResult;
 
-    fn compute(&self, frame: &Frame, neighbors: &NeighborList) -> Result<RDFResult, ComputeError> {
-        let simbox = match frame.simbox.as_ref() {
+    fn compute<FA: FrameAccess>(
+        &self,
+        frame: &FA,
+        neighbors: &NeighborList,
+    ) -> Result<RDFResult, ComputeError> {
+        let simbox = match frame.simbox_ref() {
             Some(sb) => std::borrow::Cow::Borrowed(sb),
             None => {
                 // Free-boundary: auto-generate bounding box from positions
-                let atoms = frame
-                    .get("atoms")
-                    .ok_or(ComputeError::MissingBlock { name: "atoms" })?;
-                let xs = atoms.get_float("x").ok_or(ComputeError::MissingColumn {
+                let xs = frame.get_float("atoms", "x").ok_or(ComputeError::MissingColumn {
                     block: "atoms",
                     col: "x",
                 })?;
-                let ys = atoms.get_float("y").ok_or(ComputeError::MissingColumn {
+                let ys = frame.get_float("atoms", "y").ok_or(ComputeError::MissingColumn {
                     block: "atoms",
                     col: "y",
                 })?;
-                let zs = atoms.get_float("z").ok_or(ComputeError::MissingColumn {
+                let zs = frame.get_float("atoms", "z").ok_or(ComputeError::MissingColumn {
                     block: "atoms",
                     col: "z",
                 })?;
@@ -160,6 +161,7 @@ impl Compute for RDF {
 mod tests {
     use super::super::util::get_f_slice;
     use super::*;
+    use crate::Frame;
     use crate::block::Block;
     use crate::neighbors::{LinkCell, NbListAlgo};
     use crate::region::simbox::SimBox;

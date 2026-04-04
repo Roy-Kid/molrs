@@ -1,12 +1,12 @@
 //! Moment of inertia tensor computation for clusters.
 
-use crate::Frame;
+use crate::frame_access::FrameAccess;
 use crate::types::F;
 
 use super::cluster::ClusterResult;
 use super::error::ComputeError;
 use super::traits::Compute;
-use super::util::{get_positions, mic_disp};
+use super::util::{get_positions, get_positions_generic, mic_disp};
 
 /// Computes the moment of inertia tensor for each cluster.
 ///
@@ -44,12 +44,15 @@ impl Compute for InertiaTensor {
     type Args<'a> = &'a ClusterResult;
     type Output = Vec<[[F; 3]; 3]>;
 
-    fn compute(
+    fn compute<FA: FrameAccess>(
         &self,
-        frame: &Frame,
+        frame: &FA,
         clusters: &ClusterResult,
     ) -> Result<Vec<[[F; 3]; 3]>, ComputeError> {
-        let (xs, ys, zs) = get_positions(frame)?;
+        let (xs_vec, ys_vec, zs_vec) = get_positions_generic(frame)?;
+        let xs = &xs_vec[..];
+        let ys = &ys_vec[..];
+        let zs = &zs_vec[..];
         let n = xs.len();
 
         if let Some(ref ms) = self.masses
@@ -61,7 +64,7 @@ impl Compute for InertiaTensor {
             });
         }
 
-        let simbox = frame.simbox.as_ref();
+        let simbox = frame.simbox_ref();
         let nc = clusters.num_clusters;
 
         // Compute centers of mass
@@ -101,6 +104,7 @@ impl Compute for InertiaTensor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Frame;
     use crate::block::Block;
     use crate::region::simbox::SimBox;
     use ndarray::{Array1 as A1, array};

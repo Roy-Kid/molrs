@@ -1,12 +1,12 @@
 //! Geometric cluster centers computed with minimum image convention.
 
-use crate::Frame;
+use crate::frame_access::FrameAccess;
 use crate::types::F;
 
 use super::cluster::ClusterResult;
 use super::error::ComputeError;
 use super::traits::Compute;
-use super::util::{get_positions, mic_disp};
+use super::util::{get_positions_generic, mic_disp};
 
 /// Computes the geometric center of each cluster using the minimum image
 /// convention (MIC) for periodic systems.
@@ -34,13 +34,16 @@ impl Compute for ClusterCenters {
     type Args<'a> = &'a ClusterResult;
     type Output = Vec<[F; 3]>;
 
-    fn compute(
+    fn compute<FA: FrameAccess>(
         &self,
-        frame: &Frame,
+        frame: &FA,
         clusters: &ClusterResult,
     ) -> Result<Vec<[F; 3]>, ComputeError> {
-        let (xs, ys, zs) = get_positions(frame)?;
-        let simbox = frame.simbox.as_ref();
+        let (xs_vec, ys_vec, zs_vec) = get_positions_generic(frame)?;
+        let xs = &xs_vec[..];
+        let ys = &ys_vec[..];
+        let zs = &zs_vec[..];
+        let simbox = frame.simbox_ref();
         let nc = clusters.num_clusters;
 
         let mut ref_pos = vec![[0.0 as F; 3]; nc];
@@ -84,8 +87,10 @@ impl Compute for ClusterCenters {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Frame;
     use crate::block::Block;
     use crate::compute::cluster::Cluster;
+    use crate::compute::util::get_positions;
     use crate::neighbors::{LinkCell, NbListAlgo};
     use crate::region::simbox::SimBox;
     use ndarray::{Array1 as A1, array};
@@ -106,7 +111,7 @@ mod tests {
     }
 
     fn clusters_via_nlist(frame: &Frame, cutoff: F) -> ClusterResult {
-        let (xs, ys, zs) = get_positions(frame).unwrap();
+        let (xs, ys, zs): (&[F], &[F], &[F]) = get_positions(frame).unwrap();
         let n = xs.len();
         let mut pos = ndarray::Array2::<F>::zeros((n, 3));
         for i in 0..n {

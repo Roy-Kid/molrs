@@ -1,6 +1,7 @@
 use crate::Block;
 use crate::Frame;
 use crate::block::BlockDtype;
+use crate::frame_access::FrameAccess;
 use crate::region::simbox::SimBox;
 use crate::types::F;
 use ndarray::array;
@@ -57,4 +58,30 @@ pub fn get_positions(frame: &Frame) -> Result<PositionSlices<'_>, ComputeError> 
     let ys = get_f_slice(atoms, "atoms", "y")?;
     let zs = get_f_slice(atoms, "atoms", "z")?;
     Ok((xs, ys, zs))
+}
+
+/// Owned position vectors: (x, y, z) each of length N.
+///
+/// Like [`get_positions`] but works with any [`FrameAccess`] implementor by
+/// copying data into owned `Vec`s.
+pub type PositionVecs = (Vec<F>, Vec<F>, Vec<F>);
+
+/// Extract x, y, z positions from the "atoms" block of any [`FrameAccess`] type.
+///
+/// Returns owned `Vec`s rather than borrowed slices, so it works uniformly with
+/// both `Frame` and `FrameView`.
+pub fn get_positions_generic(frame: &impl FrameAccess) -> Result<PositionVecs, ComputeError> {
+    let xs = frame.get_float("atoms", "x").ok_or(ComputeError::MissingColumn {
+        block: "atoms",
+        col: "x",
+    })?;
+    let ys = frame.get_float("atoms", "y").ok_or(ComputeError::MissingColumn {
+        block: "atoms",
+        col: "y",
+    })?;
+    let zs = frame.get_float("atoms", "z").ok_or(ComputeError::MissingColumn {
+        block: "atoms",
+        col: "z",
+    })?;
+    Ok((xs.iter().copied().collect(), ys.iter().copied().collect(), zs.iter().copied().collect()))
 }

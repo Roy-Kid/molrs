@@ -3,6 +3,7 @@ mod result;
 pub use result::MSDResult;
 
 use crate::Frame;
+use crate::frame_access::FrameAccess;
 use crate::types::F;
 use ndarray::Array1;
 
@@ -150,11 +151,41 @@ impl Compute for MSD {
     type Args<'a> = ();
     type Output = MSDResult;
 
-    fn compute(&self, frame: &Frame, _args: ()) -> Result<MSDResult, ComputeError> {
+    fn compute<FA: FrameAccess>(
+        &self,
+        frame: &FA,
+        _args: (),
+    ) -> Result<MSDResult, ComputeError> {
         if self.n_particles == 0 {
             return Err(ComputeError::MissingBlock { name: "atoms" });
         }
-        self.compute_single(frame)
+        // MSD::compute_single still takes &Frame. Since we need backward compat
+        // and MSD::feed/set_reference take &Frame, we keep compute_single as-is.
+        // For the trait method, we extract data via FrameAccess.
+        let (xs_vec, ys_vec, zs_vec) = super::util::get_positions_generic(frame)?;
+        let n = xs_vec.len();
+        if n != self.n_particles {
+            return Err(ComputeError::DimensionMismatch {
+                expected: self.n_particles,
+                got: n,
+            });
+        }
+
+        let mut per_particle = Array1::<F>::zeros(n);
+        let mut total: F = 0.0;
+
+        for i in 0..n {
+            let dx = xs_vec[i] - self.ref_x[i];
+            let dy = ys_vec[i] - self.ref_y[i];
+            let dz = zs_vec[i] - self.ref_z[i];
+            let d2 = dx * dx + dy * dy + dz * dz;
+            per_particle[i] = d2;
+            total += d2;
+        }
+
+        let mean = if n > 0 { total / n as F } else { 0.0 };
+
+        Ok(MSDResult { per_particle, mean })
     }
 }
 

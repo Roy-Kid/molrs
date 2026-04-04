@@ -1,4 +1,4 @@
-use crate::Frame;
+use crate::frame_access::FrameAccess;
 
 use super::error::ComputeError;
 use super::reducer::Reducer;
@@ -18,7 +18,11 @@ impl<C: Compute, R: Reducer<C::Output>> Accumulator<C, R> {
     }
 
     /// Compute on one frame and feed the result to the reducer.
-    pub fn feed(&mut self, frame: &Frame, args: C::Args<'_>) -> Result<(), ComputeError> {
+    pub fn feed(
+        &mut self,
+        frame: &impl FrameAccess,
+        args: C::Args<'_>,
+    ) -> Result<(), ComputeError> {
         let output = self.compute.compute(frame, args)?;
         self.reducer.feed(output);
         Ok(())
@@ -55,7 +59,11 @@ mod tests {
         type Args<'a> = ();
         type Output = f64;
 
-        fn compute(&self, _frame: &Frame, _args: ()) -> Result<f64, ComputeError> {
+        fn compute<FA: FrameAccess>(
+            &self,
+            _frame: &FA,
+            _args: (),
+        ) -> Result<f64, ComputeError> {
             Ok(self.0)
         }
     }

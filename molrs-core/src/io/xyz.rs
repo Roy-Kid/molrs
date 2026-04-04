@@ -1,5 +1,6 @@
 use crate::block::Block;
 use crate::frame::Frame;
+use crate::frame_access::FrameAccess;
 use crate::io::reader::{FrameIndex, FrameReader, Reader, TrajReader};
 use crate::io::writer::{FrameWriter, Writer};
 use crate::region::simbox::SimBox;
@@ -1015,104 +1016,177 @@ impl<W: Write> FrameWriter for XYZFrameWriter<W> {
     }
 }
 
-/// Write a single frame to the writer in Extended XYZ format
-pub fn write_xyz_frame<W: Write>(writer: &mut W, frame: &Frame) -> std::io::Result<()> {
-    // 1. Get atoms block
-    let atoms = match frame.get("atoms") {
-        Some(b) => b,
+/// Write a single frame to the writer in Extended XYZ format.
+///
+/// Accepts any type implementing [`FrameAccess`], including both [`Frame`] and
+/// [`FrameView`](crate::frame_view::FrameView). Existing callers passing `&Frame`
+/// continue to work without changes.
+pub fn write_xyz_frame<W: Write>(writer: &mut W, frame: &impl FrameAccess) -> std::io::Result<()> {
+    use crate::block::DType;
+
+    // 1. Build per-atom data from the atoms block via visit_block.
+    //    We collect everything we need into owned data structures inside the closure,
+    //    then write outside it.
+    struct AtomBlockData {
+        n: usize,
+        properties_str: String,
+        elements: Vec<String>,
+        /// Per-row, per-column values (excluding element). Outer = rows, inner = values.
+        row_values: Vec<Vec<String>>,
+    }
+
+    let atom_data: Option<AtomBlockData> = frame.visit_block("atoms", |atoms| {
+        let n = atoms.nrows().unwrap_or(0);
+
+        // Collect and sort keys
+        let mut keys = atoms.column_keys();
+        keys.sort_by(|a, b| {
+            let rank = |s: &str| match s {
+                "x" => 0,
+                "y" => 1,
+                "z" => 2,
+                _ => 3,
+            };
+            let ra = rank(a);
+            let rb = rank(b);
+            if ra != rb { ra.cmp(&rb) } else { a.cmp(b) }
+        });
+
+        // Build Properties string
+        let mut props_parts = Vec::new();
+        props_parts.push("species:S:1".to_string());
+
+        let has_xyz = keys.contains(&&"x") && keys.contains(&&"y") && keys.contains(&&"z");
+        if has_xyz {
+            props_parts.push("pos:R:3".to_string());
+        }
+
+        let dtype_to_char = |dt: DType| -> &'static str {
+            match dt {
+                DType::Float => "R",
+                DType::Int | DType::UInt | DType::U8 => "I",
+                DType::Bool => "L",
+                DType::String => "S",
+            }
+        };
+
+        let priority_keys = ["id", "mol"];
+        for pk in &priority_keys {
+            if keys.contains(pk) {
+                if let (Some(dt), Some(shape)) = (atoms.column_dtype(pk), atoms.column_shape(pk)) {
+                    let m: usize = shape.iter().skip(1).product();
+                    let m = if m == 0 { 1 } else { m };
+                    props_parts.push(format!("{}:{}:{}", pk, dtype_to_char(dt), m));
+                }
+            }
+        }
+
+        for k in &keys {
+            if *k == "x" || *k == "y" || *k == "z" || *k == "element" || priority_keys.contains(k)
+            {
+                continue;
+            }
+            if let (Some(dt), Some(shape)) = (atoms.column_dtype(k), atoms.column_shape(k)) {
+                let m: usize = shape.iter().skip(1).product();
+                let m = if m == 0 { 1 } else { m };
+                props_parts.push(format!("{}:{}:{}", k, dtype_to_char(dt), m));
+            }
+        }
+        let properties_str = props_parts.join(":");
+
+        // Read element symbols
+        let elements: Vec<String> = atoms
+            .get_string_view("element")
+            .and_then(|arr| arr.as_slice().map(|s| s.to_vec()))
+            .unwrap_or_else(|| vec!["X".to_string(); n]);
+
+        // Build per-row values
+        let mut row_values: Vec<Vec<String>> = Vec::with_capacity(n);
+        for i in 0..n {
+            let mut line_parts = Vec::new();
+            for k in &keys {
+                if *k == "element" {
+                    continue;
+                }
+                if let Some(dt) = atoms.column_dtype(k) {
+                    match dt {
+                        DType::Float => {
+                            if let Some(arr) = atoms.get_float_view(k) {
+                                let row = arr.index_axis(ndarray::Axis(0), i);
+                                for val in row.iter() {
+                                    line_parts.push(format!("{}", val));
+                                }
+                            }
+                        }
+                        DType::Int => {
+                            if let Some(arr) = atoms.get_int_view(k) {
+                                let row = arr.index_axis(ndarray::Axis(0), i);
+                                for val in row.iter() {
+                                    line_parts.push(format!("{}", val));
+                                }
+                            }
+                        }
+                        DType::Bool => {
+                            if let Some(arr) = atoms.get_bool_view(k) {
+                                let row = arr.index_axis(ndarray::Axis(0), i);
+                                for val in row.iter() {
+                                    line_parts
+                                        .push(if *val { "T" } else { "F" }.to_string());
+                                }
+                            }
+                        }
+                        DType::UInt => {
+                            if let Some(arr) = atoms.get_uint_view(k) {
+                                let row = arr.index_axis(ndarray::Axis(0), i);
+                                for val in row.iter() {
+                                    line_parts.push(format!("{}", val));
+                                }
+                            }
+                        }
+                        DType::U8 => {
+                            if let Some(arr) = atoms.get_u8_view(k) {
+                                let row = arr.index_axis(ndarray::Axis(0), i);
+                                for val in row.iter() {
+                                    line_parts.push(format!("{}", val));
+                                }
+                            }
+                        }
+                        DType::String => {
+                            if let Some(arr) = atoms.get_string_view(k) {
+                                let row = arr.index_axis(ndarray::Axis(0), i);
+                                for val in row.iter() {
+                                    line_parts.push(val.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            row_values.push(line_parts);
+        }
+
+        AtomBlockData {
+            n,
+            properties_str,
+            elements,
+            row_values,
+        }
+    });
+
+    let atom_data = match atom_data {
+        Some(d) => d,
         None => {
-            // Write 0 atoms
             writeln!(writer, "0")?;
             writeln!(writer)?;
             return Ok(());
         }
     };
 
-    let n = atoms.nrows().unwrap_or(0);
-    writeln!(writer, "{}", n)?;
+    writeln!(writer, "{}", atom_data.n)?;
 
-    // 2. Construct Properties string and comment
-    // Collect keys and sort them to be deterministic.
-    // Prioritize x, y, z.
-    let mut keys: Vec<&str> = atoms.keys().collect();
-    keys.sort_by(|a, b| {
-        // Custom sort: x, y, z first, then alphabetical
-        let rank_a = match *a {
-            "x" => 0,
-            "y" => 1,
-            "z" => 2,
-            _ => 3,
-        };
-        let rank_b = match *b {
-            "x" => 0,
-            "y" => 1,
-            "z" => 2,
-            _ => 3,
-        };
-        if rank_a != rank_b {
-            rank_a.cmp(&rank_b)
-        } else {
-            a.cmp(b)
-        }
-    });
-
-    let mut props_parts = Vec::new();
-    // Order: species, pos, id, mol, then others
-    props_parts.push("species:S:1".to_string());
-
-    // Check if x, y, z exist and add pos
-    let has_xyz = keys.contains(&"x") && keys.contains(&"y") && keys.contains(&"z");
-    if has_xyz {
-        props_parts.push("pos:R:3".to_string());
-    }
-
-    // Add other properties in a specific order: id, mol, then rest
-    let priority_keys = vec!["id", "mol"];
-    for priority_k in &priority_keys {
-        if keys.contains(priority_k)
-            && let Some(col) = atoms.get(priority_k)
-        {
-            let shape = col.shape();
-            let m: usize = shape.iter().skip(1).product();
-            let m = if m == 0 { 1 } else { m };
-            let type_char = match col.dtype() {
-                crate::block::DType::Float => "R",
-                crate::block::DType::Int | crate::block::DType::UInt | crate::block::DType::U8 => {
-                    "I"
-                }
-                crate::block::DType::Bool => "L",
-                crate::block::DType::String => "S",
-            };
-            props_parts.push(format!("{}:{}:{}", priority_k, type_char, m));
-        }
-    }
-
-    // Add remaining keys (excluding x, y, z, element, and already added priority keys)
-    for k in &keys {
-        if *k == "x" || *k == "y" || *k == "z" || *k == "element" || priority_keys.contains(k) {
-            continue;
-        }
-        if let Some(col) = atoms.get(k) {
-            let shape = col.shape();
-            let m: usize = shape.iter().skip(1).product();
-            let m = if m == 0 { 1 } else { m };
-            let type_char = match col.dtype() {
-                crate::block::DType::Float => "R",
-                crate::block::DType::Int | crate::block::DType::UInt | crate::block::DType::U8 => {
-                    "I"
-                }
-                crate::block::DType::Bool => "L",
-                crate::block::DType::String => "S",
-            };
-            props_parts.push(format!("{}:{}:{}", k, type_char, m));
-        }
-    }
-    let properties_str = props_parts.join(":");
-
-    // Construct full comment line
+    // 2. Construct comment line using FrameAccess for simbox and meta
     let mut comment_parts = Vec::new();
-    // Add Lattice (and Origin when non-zero) from SimBox if present
-    if let Some(simbox) = &frame.simbox {
+    if let Some(simbox) = frame.simbox_ref() {
         let h = simbox.h_view();
         let mut lattice_values = Vec::with_capacity(9);
         for i in 0..3 {
@@ -1127,8 +1201,7 @@ pub fn write_xyz_frame<W: Write>(writer: &mut W, frame: &Frame) -> std::io::Resu
             comment_parts.push(format!("Origin=\"{} {} {}\"", o[0], o[1], o[2]));
         }
     }
-    // Add other meta
-    for (k, v) in &frame.meta {
+    for (k, v) in frame.meta_ref() {
         if k == "Lattice" || k == "Origin" || k == "Properties" || k == "comment" || k == "elements"
         {
             continue;
@@ -1140,86 +1213,18 @@ pub fn write_xyz_frame<W: Write>(writer: &mut W, frame: &Frame) -> std::io::Resu
         };
         comment_parts.push(format!("{}={}", k, val_str));
     }
-
-    // Add Properties
-    comment_parts.push(format!("Properties={}", properties_str));
-
+    comment_parts.push(format!("Properties={}", atom_data.properties_str));
     writeln!(writer, "{}", comment_parts.join(" "))?;
 
     // 3. Write atom lines
-    // Helper to format a value from a column at row i
-    use crate::block::DType;
-
-    // Read element symbols from atoms["element"] column.
-    let elements: Vec<String> = atoms
-        .get_string("element")
-        .and_then(|arr| arr.as_slice().map(|s| s.to_vec()))
-        .unwrap_or_else(|| vec!["X".to_string(); n]);
-
-    for i in 0..n {
-        let mut line_parts = Vec::new();
-        for k in &keys {
-            // "element" is already written as the species column (first field)
-            if *k == "element" {
-                continue;
-            }
-            if let Some(col) = atoms.get(k) {
-                // Extract values based on dtype
-                match col.dtype() {
-                    DType::Float => {
-                        if let Some(arr) = col.as_float() {
-                            let row = arr.index_axis(ndarray::Axis(0), i);
-                            for val in row.iter() {
-                                line_parts.push(format!("{}", val));
-                            }
-                        }
-                    }
-                    DType::Int => {
-                        if let Some(arr) = col.as_int() {
-                            let row = arr.index_axis(ndarray::Axis(0), i);
-                            for val in row.iter() {
-                                line_parts.push(format!("{}", val));
-                            }
-                        }
-                    }
-                    DType::Bool => {
-                        if let Some(arr) = col.as_bool() {
-                            let row = arr.index_axis(ndarray::Axis(0), i);
-                            for val in row.iter() {
-                                line_parts.push(if *val { "T" } else { "F" }.to_string());
-                            }
-                        }
-                    }
-                    DType::UInt => {
-                        if let Some(arr) = col.as_uint() {
-                            let row = arr.index_axis(ndarray::Axis(0), i);
-                            for val in row.iter() {
-                                line_parts.push(format!("{}", val));
-                            }
-                        }
-                    }
-                    DType::U8 => {
-                        if let Some(arr) = col.as_u8() {
-                            let row = arr.index_axis(ndarray::Axis(0), i);
-                            for val in row.iter() {
-                                line_parts.push(format!("{}", val));
-                            }
-                        }
-                    }
-                    DType::String => {
-                        if let Some(arr) = col.as_string() {
-                            let row = arr.index_axis(ndarray::Axis(0), i);
-                            for val in row.iter() {
-                                line_parts.push(val.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // Prepend element symbol
-        let species = elements.get(i).cloned().unwrap_or_else(|| "X".to_string());
-        line_parts.insert(0, species);
+    for i in 0..atom_data.n {
+        let species = atom_data
+            .elements
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| "X".to_string());
+        let mut line_parts = vec![species];
+        line_parts.extend(atom_data.row_values[i].iter().cloned());
         writeln!(writer, "{}", line_parts.join(" "))?;
     }
 

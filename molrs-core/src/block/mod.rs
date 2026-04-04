@@ -31,7 +31,14 @@ mod column;
 mod dtype;
 mod error;
 
+pub mod access;
+pub mod block_view;
+pub mod column_view;
+
+pub use access::{BlockAccess, ColumnAccess};
+pub use block_view::BlockView;
 pub use column::Column;
+pub use column_view::ColumnView;
 pub use dtype::{BlockDtype, DType};
 pub use error::BlockError;
 

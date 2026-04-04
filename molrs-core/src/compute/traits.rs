@@ -1,4 +1,4 @@
-use crate::Frame;
+use crate::frame_access::FrameAccess;
 
 use super::error::ComputeError;
 
@@ -13,6 +13,10 @@ use super::error::ComputeError;
 ///
 /// `&self` is an immutable parameter container (bins, cutoffs, masses, etc.).
 /// Returns an owned result struct — no hidden mutable state.
+///
+/// The `frame` parameter accepts any type implementing [`FrameAccess`], which
+/// includes both [`Frame`] and [`FrameView`](crate::frame_view::FrameView).
+/// Existing callers passing `&Frame` continue to work without changes.
 pub trait Compute {
     /// Additional arguments beyond the Frame (e.g. `&NeighborList`, `&ClusterResult`).
     type Args<'a>;
@@ -20,5 +24,9 @@ pub trait Compute {
     type Output;
 
     /// Run the analysis on a single frame with the given arguments.
-    fn compute(&self, frame: &Frame, args: Self::Args<'_>) -> Result<Self::Output, ComputeError>;
+    fn compute<FA: FrameAccess>(
+        &self,
+        frame: &FA,
+        args: Self::Args<'_>,
+    ) -> Result<Self::Output, ComputeError>;
 }

@@ -1,12 +1,12 @@
 //! Mass-weighted cluster centers (center of mass) with MIC.
 
-use crate::Frame;
+use crate::frame_access::FrameAccess;
 use crate::types::F;
 
 use super::cluster::ClusterResult;
 use super::error::ComputeError;
 use super::traits::Compute;
-use super::util::{get_positions, mic_disp};
+use super::util::{get_positions_generic, mic_disp};
 
 /// Result of center-of-mass computation.
 #[derive(Debug, Clone)]
@@ -50,12 +50,15 @@ impl Compute for CenterOfMass {
     type Args<'a> = &'a ClusterResult;
     type Output = CenterOfMassResult;
 
-    fn compute(
+    fn compute<FA: FrameAccess>(
         &self,
-        frame: &Frame,
+        frame: &FA,
         clusters: &ClusterResult,
     ) -> Result<CenterOfMassResult, ComputeError> {
-        let (xs, ys, zs) = get_positions(frame)?;
+        let (xs_vec, ys_vec, zs_vec) = get_positions_generic(frame)?;
+        let xs = &xs_vec[..];
+        let ys = &ys_vec[..];
+        let zs = &zs_vec[..];
         let n = xs.len();
 
         if let Some(ref ms) = self.masses
@@ -67,7 +70,7 @@ impl Compute for CenterOfMass {
             });
         }
 
-        let simbox = frame.simbox.as_ref();
+        let simbox = frame.simbox_ref();
         let nc = clusters.num_clusters;
 
         let mut ref_pos = vec![[0.0 as F; 3]; nc];
@@ -115,6 +118,7 @@ impl Compute for CenterOfMass {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Frame;
     use crate::block::Block;
     use crate::region::simbox::SimBox;
     use ndarray::{Array1 as A1, array};

@@ -2,7 +2,7 @@ mod result;
 
 pub use result::ClusterResult;
 
-use crate::Frame;
+use crate::frame_access::FrameAccess;
 use crate::neighbors::NeighborList;
 use ndarray::Array1;
 
@@ -31,15 +31,14 @@ impl Compute for Cluster {
     type Args<'a> = &'a NeighborList;
     type Output = ClusterResult;
 
-    fn compute(
+    fn compute<FA: FrameAccess>(
         &self,
-        frame: &Frame,
+        frame: &FA,
         neighbors: &NeighborList,
     ) -> Result<ClusterResult, ComputeError> {
-        let atoms = frame
-            .get("atoms")
+        let n = frame
+            .visit_block("atoms", |b| b.nrows().unwrap_or(0))
             .ok_or(ComputeError::MissingBlock { name: "atoms" })?;
-        let n = atoms.nrows().unwrap_or(0);
 
         if n == 0 {
             return Ok(ClusterResult {
@@ -147,6 +146,7 @@ impl Compute for Cluster {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Frame;
     use crate::block::Block;
     use crate::neighbors::{LinkCell, NbListAlgo};
     use crate::region::simbox::SimBox;
