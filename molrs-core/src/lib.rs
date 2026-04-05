@@ -110,8 +110,7 @@ pub use io::lammps_dump::{open_lammps_dump, read_lammps_dump, write_lammps_dump}
 pub use io::pdb::{read_pdb_frame, write_pdb_frame};
 pub use io::xyz::{read_xyz_frame, read_xyz_traj, write_xyz_frame};
 pub use molrec::{
-    CellBox, MolRec, ObservableData, ObservableKind, ObservableRecord, RecordBox, SchemaValue,
-    Trajectory,
+    MolRec, ObservableData, ObservableKind, ObservableRecord, SchemaValue, Trajectory,
 };
 
 // Zarr I/O re-exports (only with "zarr" feature)

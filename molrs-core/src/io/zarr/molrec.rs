@@ -8,9 +8,7 @@ use std::sync::Arc;
 use serde_json::Value as JsonValue;
 #[cfg(feature = "filesystem")]
 use zarrs::array::data_type;
-use zarrs::array::data_type::{
-    Float32DataType, Float64DataType, Int64DataType, StringDataType,
-};
+use zarrs::array::data_type::{Float32DataType, Float64DataType, Int64DataType};
 #[cfg(feature = "filesystem")]
 use zarrs::array::ArrayBuilder;
 use zarrs::array::{Array, ArraySubset};
@@ -24,12 +22,12 @@ use zarrs::storage::ReadableWritableListableStorage;
 use crate::MolRsError;
 use crate::frame::Frame;
 #[cfg(not(feature = "filesystem"))]
-use crate::io::zarr::frame_io::{join_path, read_column, read_system};
+use crate::io::zarr::frame_io::{join_path, read_column, read_grid, read_system};
 #[cfg(feature = "filesystem")]
-use crate::io::zarr::frame_io::{join_path, read_column, read_system, write_column, write_system};
-use crate::molrec::{
-    CellBox, MolRec, ObservableData, ObservableKind, ObservableRecord, RecordBox, Trajectory,
+use crate::io::zarr::frame_io::{
+    join_path, read_column, read_grid, read_system, write_column, write_grid, write_system,
 };
+use crate::molrec::{MolRec, ObservableData, ObservableKind, ObservableRecord, Trajectory};
 use crate::types::F;
 
 /// Internal Zarr v3 backend state for MolRec.
@@ -77,10 +75,6 @@ impl MolRecZarrBackend {
         write_json_group(&store, &join_path(prefix, "parameters"), &molrec.parameters)?;
 
         write_system(&store, &join_path(prefix, "frame"), &molrec.frame)?;
-
-        if let Some(box_data) = &molrec.box_data {
-            write_record_box(&store, &join_path(prefix, "box"), box_data)?;
-        }
 
         if !molrec.observables.is_empty() {
             let observable_prefix = join_path(prefix, "observables");
@@ -136,13 +130,6 @@ impl MolRecZarrBackend {
         rec.meta = read_json_group(&self.store, &join_path(&self.prefix, "meta"))?;
         rec.method = read_json_group(&self.store, &join_path(&self.prefix, "method"))?;
         rec.parameters = read_json_group(&self.store, &join_path(&self.prefix, "parameters"))?;
-
-        let box_path = join_path(&self.prefix, "box");
-        if Node::open(&self.store, &box_path).is_ok() {
-            rec.box_data = Some(read_record_box(&self.store, &box_path)?);
-        } else {
-            rec.box_data = None;
-        }
 
         let observable_prefix = join_path(&self.prefix, "observables");
         if let Ok(node) = Node::open(&self.store, &observable_prefix) {
@@ -247,136 +234,6 @@ fn read_json_group(
 }
 
 #[cfg(feature = "filesystem")]
-fn write_record_box(
-    store: &ReadableWritableListableStorage,
-    path: &str,
-    box_data: &RecordBox,
-) -> Result<(), MolRsError> {
-    let mut attrs = serde_json::Map::new();
-    attrs.insert(
-        "time_dependent".into(),
-        JsonValue::Bool(matches!(box_data, RecordBox::Dynamic { .. })),
-    );
-    GroupBuilder::new()
-        .attributes(attrs)
-        .build(store.clone(), path)?
-        .store_metadata()?;
-
-    match box_data {
-        RecordBox::Static { cell } => {
-            let vectors: Vec<f32> = cell
-                .vectors
-                .iter()
-                .flat_map(|row| row.iter().map(|&v| v as f32))
-                .collect();
-            write_f32_array(store, &format!("{}/vectors", path), &[3, 3], &vectors)?;
-            let origin: Vec<f32> = cell.origin.iter().map(|&v| v as f32).collect();
-            write_f32_array(store, &format!("{}/origin", path), &[3], &origin)?;
-            write_string_array(store, &format!("{}/boundary", path), &[3], &cell.boundary)?;
-        }
-        RecordBox::Dynamic { cells } => {
-            let nt = cells.len() as u64;
-            let vectors: Vec<f32> = cells
-                .iter()
-                .flat_map(|cell| {
-                    cell.vectors
-                        .iter()
-                        .flat_map(|row| row.iter().map(|&v| v as f32))
-                })
-                .collect();
-            write_f32_array(store, &format!("{}/vectors", path), &[nt, 3, 3], &vectors)?;
-            let origin: Vec<f32> = cells
-                .iter()
-                .flat_map(|cell| cell.origin.iter().map(|&v| v as f32))
-                .collect();
-            write_f32_array(store, &format!("{}/origin", path), &[nt, 3], &origin)?;
-            let boundary: Vec<String> = cells
-                .iter()
-                .flat_map(|cell| cell.boundary.iter().cloned())
-                .collect();
-            write_string_array(store, &format!("{}/boundary", path), &[nt, 3], &boundary)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn read_record_box(
-    store: &ReadableWritableListableStorage,
-    path: &str,
-) -> Result<RecordBox, MolRsError> {
-    let group = zarrs::group::Group::open(store.clone(), path)?;
-    let dynamic = group
-        .attributes()
-        .get("time_dependent")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let vectors_arr = Array::open(store.clone(), &format!("{}/vectors", path))?;
-    let origin_arr = Array::open(store.clone(), &format!("{}/origin", path))?;
-    let boundary_arr = Array::open(store.clone(), &format!("{}/boundary", path))?;
-
-    if !dynamic {
-        let vectors = read_f32_values(vectors_arr, &[3, 3])?;
-        let origin = read_f32_values(origin_arr, &[3])?;
-        let boundary = read_string_values(boundary_arr, &[3])?;
-        return Ok(RecordBox::Static {
-            cell: CellBox {
-                vectors: [
-                    [vectors[0] as F, vectors[1] as F, vectors[2] as F],
-                    [vectors[3] as F, vectors[4] as F, vectors[5] as F],
-                    [vectors[6] as F, vectors[7] as F, vectors[8] as F],
-                ],
-                origin: [origin[0] as F, origin[1] as F, origin[2] as F],
-                boundary: [
-                    boundary[0].clone(),
-                    boundary[1].clone(),
-                    boundary[2].clone(),
-                ],
-            },
-        });
-    }
-
-    let shape = vectors_arr.shape().to_vec();
-    let nt = shape.first().copied().unwrap_or(0) as usize;
-    let vectors = read_f32_values(vectors_arr, &[shape[0], 3, 3])?;
-    let origin = read_f32_values(origin_arr, &[shape[0], 3])?;
-    let boundary = read_string_values(boundary_arr, &[shape[0], 3])?;
-    let mut cells = Vec::with_capacity(nt);
-    for i in 0..nt {
-        let v_off = i * 9;
-        let o_off = i * 3;
-        let b_off = i * 3;
-        cells.push(CellBox {
-            vectors: [
-                [
-                    vectors[v_off] as F,
-                    vectors[v_off + 1] as F,
-                    vectors[v_off + 2] as F,
-                ],
-                [
-                    vectors[v_off + 3] as F,
-                    vectors[v_off + 4] as F,
-                    vectors[v_off + 5] as F,
-                ],
-                [
-                    vectors[v_off + 6] as F,
-                    vectors[v_off + 7] as F,
-                    vectors[v_off + 8] as F,
-                ],
-            ],
-            origin: [origin[o_off] as F, origin[o_off + 1] as F, origin[o_off + 2] as F],
-            boundary: [
-                boundary[b_off].clone(),
-                boundary[b_off + 1].clone(),
-                boundary[b_off + 2].clone(),
-            ],
-        });
-    }
-    Ok(RecordBox::Dynamic { cells })
-}
-
-#[cfg(feature = "filesystem")]
 fn write_trajectory(
     store: &ReadableWritableListableStorage,
     path: &str,
@@ -448,7 +305,6 @@ fn read_trajectory(
         frames,
         step,
         time,
-        box_data: None,
     })
 }
 
@@ -466,6 +322,7 @@ fn write_observable(
         JsonValue::String(match observable.kind {
             ObservableKind::Scalar => "scalar".into(),
             ObservableKind::Vector => "vector".into(),
+            ObservableKind::Grid => "grid".into(),
         }),
     );
     attrs.insert(
@@ -504,6 +361,7 @@ fn write_observable(
 
     match &observable.data {
         ObservableData::Column(column) => write_column(store, &format!("{}/data", path), column)?,
+        ObservableData::Grid(grid) => write_grid(store, &format!("{}/data", path), grid)?,
     }
 
     Ok(())
@@ -522,6 +380,7 @@ fn read_observable(
     {
         "scalar" => ObservableKind::Scalar,
         "vector" => ObservableKind::Vector,
+        "grid" => ObservableKind::Grid,
         other => {
             return Err(MolRsError::zarr(format!(
                 "unsupported observable kind '{}'",
@@ -550,7 +409,11 @@ fn read_observable(
         .unwrap_or_default();
 
     let data_path = format!("{}/data", path);
-    let data = ObservableData::Column(read_column(store, &data_path)?);
+    let data = if kind == ObservableKind::Grid {
+        ObservableData::Grid(read_grid(store, &data_path)?)
+    } else {
+        ObservableData::Column(read_column(store, &data_path)?)
+    };
 
     Ok(ObservableRecord {
         name: attrs
@@ -611,41 +474,6 @@ fn write_i64_array(
     Ok(())
 }
 
-#[cfg(feature = "filesystem")]
-fn write_string_array(
-    store: &ReadableWritableListableStorage,
-    path: &str,
-    shape: &[u64],
-    data: &[String],
-) -> Result<(), MolRsError> {
-    let arr = ArrayBuilder::new(shape.to_vec(), shape.to_vec(), data_type::string(), "")
-        .build(store.clone(), path)?;
-    arr.store_metadata()?;
-    arr.store_array_subset(&ArraySubset::new_with_shape(shape.to_vec()), data)?;
-    Ok(())
-}
-
-fn read_f32_values<
-    TStorage: ?Sized + zarrs::storage::ReadableWritableListableStorageTraits + 'static,
->(
-    arr: Array<TStorage>,
-    shape: &[u64],
-) -> Result<Vec<f32>, MolRsError> {
-    let subset = ArraySubset::new_with_shape(shape.to_vec());
-    let dt = arr.data_type();
-    if dt.is::<Float32DataType>() {
-        arr.retrieve_array_subset(&subset).map_err(zerr)
-    } else if dt.is::<Float64DataType>() {
-        let data: Vec<f64> = arr.retrieve_array_subset(&subset).map_err(zerr)?;
-        Ok(data.into_iter().map(|v| v as f32).collect())
-    } else {
-        Err(MolRsError::zarr(format!(
-            "expected float array, got {:?}",
-            dt
-        )))
-    }
-}
-
 fn read_float_values<
     TStorage: ?Sized + zarrs::storage::ReadableWritableListableStorageTraits + 'static,
 >(
@@ -680,24 +508,6 @@ fn read_i64_values<
     } else {
         Err(MolRsError::zarr(format!(
             "expected int64 array, got {:?}",
-            dt
-        )))
-    }
-}
-
-fn read_string_values<
-    TStorage: ?Sized + zarrs::storage::ReadableWritableListableStorageTraits + 'static,
->(
-    arr: Array<TStorage>,
-    shape: &[u64],
-) -> Result<Vec<String>, MolRsError> {
-    let subset = ArraySubset::new_with_shape(shape.to_vec());
-    let dt = arr.data_type();
-    if dt.is::<StringDataType>() {
-        arr.retrieve_array_subset(&subset).map_err(zerr)
-    } else {
-        Err(MolRsError::zarr(format!(
-            "expected string array, got {:?}",
             dt
         )))
     }

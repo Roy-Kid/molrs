@@ -46,7 +46,10 @@ use frame::{PyFrame, PyGrid};
 mod io;
 
 mod molrec;
-use molrec::{PyMolRec, PyObservables, PyScalarObservable, PyTrajectory, PyVectorObservable};
+use molrec::{
+    PyGridObservable, PyMolRec, PyObservables, PyScalarObservable, PyTrajectory,
+    PyVectorObservable,
+};
 
 mod region;
 use region::{PyHollowSphere, PyRegion, PySphere};
@@ -117,6 +120,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyObservables>()?;
     m.add_class::<PyScalarObservable>()?;
     m.add_class::<PyVectorObservable>()?;
+    m.add_class::<PyGridObservable>()?;
 
     // Regions
     m.add_class::<PySphere>()?;
