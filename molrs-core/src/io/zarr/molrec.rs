@@ -22,12 +22,12 @@ use zarrs::storage::ReadableWritableListableStorage;
 use crate::MolRsError;
 use crate::frame::Frame;
 #[cfg(not(feature = "filesystem"))]
-use crate::io::zarr::frame_io::{join_path, read_column, read_system};
+use crate::io::zarr::frame_io::{join_path, read_column, read_grid, read_system};
 #[cfg(feature = "filesystem")]
-use crate::io::zarr::frame_io::{join_path, read_column, read_system, write_column, write_system};
-use crate::molrec::{
-    CellBox, MolRec, ObservableData, ObservableKind, ObservableRecord, RecordBox, Trajectory,
+use crate::io::zarr::frame_io::{
+    join_path, read_column, read_grid, read_system, write_column, write_grid, write_system,
 };
+use crate::molrec::{MolRec, ObservableData, ObservableKind, ObservableRecord, Trajectory};
 use crate::types::F;
 
 /// Internal Zarr v3 backend state for MolRec.
@@ -75,10 +75,6 @@ impl MolRecZarrBackend {
         write_json_group(&store, &join_path(prefix, "parameters"), &molrec.parameters)?;
 
         write_system(&store, &join_path(prefix, "frame"), &molrec.frame)?;
-
-        if let Some(box_data) = &molrec.box_data {
-            write_record_box(&store, &join_path(prefix, "box"), box_data)?;
-        }
 
         if !molrec.observables.is_empty() {
             let observable_prefix = join_path(prefix, "observables");
@@ -130,13 +126,6 @@ impl MolRecZarrBackend {
         rec.meta = read_json_group(&self.store, &join_path(&self.prefix, "meta"))?;
         rec.method = read_json_group(&self.store, &join_path(&self.prefix, "method"))?;
         rec.parameters = read_json_group(&self.store, &join_path(&self.prefix, "parameters"))?;
-
-        let box_path = join_path(&self.prefix, "box");
-        if Node::open(&self.store, &box_path).is_ok() {
-            rec.box_data = Some(read_record_box(&self.store, &box_path)?);
-        } else {
-            rec.box_data = None;
-        }
 
         let observable_prefix = join_path(&self.prefix, "observables");
         if let Ok(node) = Node::open(&self.store, &observable_prefix) {
@@ -241,6 +230,7 @@ fn read_json_group(
 }
 
 #[cfg(feature = "filesystem")]
+<<<<<<< HEAD
 fn write_record_box(
     store: &ReadableWritableListableStorage,
     path: &str,
@@ -375,6 +365,8 @@ fn read_record_box(
 }
 
 #[cfg(feature = "filesystem")]
+=======
+>>>>>>> dev
 fn write_trajectory(
     store: &ReadableWritableListableStorage,
     path: &str,
@@ -451,7 +443,6 @@ fn read_trajectory(
         frames,
         step,
         time,
-        box_data: None,
     })
 }
 
@@ -469,6 +460,7 @@ fn write_observable(
         JsonValue::String(match observable.kind {
             ObservableKind::Scalar => "scalar".into(),
             ObservableKind::Vector => "vector".into(),
+            ObservableKind::Grid => "grid".into(),
         }),
     );
     attrs.insert(
@@ -507,6 +499,7 @@ fn write_observable(
 
     match &observable.data {
         ObservableData::Column(column) => write_column(store, &format!("{}/data", path), column)?,
+        ObservableData::Grid(grid) => write_grid(store, &format!("{}/data", path), grid)?,
     }
 
     Ok(())
@@ -525,6 +518,7 @@ fn read_observable(
     {
         "scalar" => ObservableKind::Scalar,
         "vector" => ObservableKind::Vector,
+        "grid" => ObservableKind::Grid,
         other => {
             return Err(MolRsError::zarr(format!(
                 "unsupported observable kind '{}'",
@@ -553,7 +547,11 @@ fn read_observable(
         .unwrap_or_default();
 
     let data_path = format!("{}/data", path);
-    let data = ObservableData::Column(read_column(store, &data_path)?);
+    let data = if kind == ObservableKind::Grid {
+        ObservableData::Grid(read_grid(store, &data_path)?)
+    } else {
+        ObservableData::Column(read_column(store, &data_path)?)
+    };
 
     Ok(ObservableRecord {
         name: attrs
@@ -614,41 +612,6 @@ fn write_i64_array(
     Ok(())
 }
 
-#[cfg(feature = "filesystem")]
-fn write_string_array(
-    store: &ReadableWritableListableStorage,
-    path: &str,
-    shape: &[u64],
-    data: &[String],
-) -> Result<(), MolRsError> {
-    let arr = ArrayBuilder::new(shape.to_vec(), shape.to_vec(), data_type::string(), "")
-        .build(store.clone(), path)?;
-    arr.store_metadata()?;
-    arr.store_array_subset(&ArraySubset::new_with_shape(shape.to_vec()), data)?;
-    Ok(())
-}
-
-fn read_f32_values<
-    TStorage: ?Sized + zarrs::storage::ReadableWritableListableStorageTraits + 'static,
->(
-    arr: Array<TStorage>,
-    shape: &[u64],
-) -> Result<Vec<f32>, MolRsError> {
-    let subset = ArraySubset::new_with_shape(shape.to_vec());
-    let dt = arr.data_type();
-    if dt.is::<Float32DataType>() {
-        arr.retrieve_array_subset(&subset).map_err(zerr)
-    } else if dt.is::<Float64DataType>() {
-        let data: Vec<f64> = arr.retrieve_array_subset(&subset).map_err(zerr)?;
-        Ok(data.into_iter().map(|v| v as f32).collect())
-    } else {
-        Err(MolRsError::zarr(format!(
-            "expected float array, got {:?}",
-            dt
-        )))
-    }
-}
-
 fn read_float_values<
     TStorage: ?Sized + zarrs::storage::ReadableWritableListableStorageTraits + 'static,
 >(
@@ -683,24 +646,6 @@ fn read_i64_values<
     } else {
         Err(MolRsError::zarr(format!(
             "expected int64 array, got {:?}",
-            dt
-        )))
-    }
-}
-
-fn read_string_values<
-    TStorage: ?Sized + zarrs::storage::ReadableWritableListableStorageTraits + 'static,
->(
-    arr: Array<TStorage>,
-    shape: &[u64],
-) -> Result<Vec<String>, MolRsError> {
-    let subset = ArraySubset::new_with_shape(shape.to_vec());
-    let dt = arr.data_type();
-    if dt.is::<StringDataType>() {
-        arr.retrieve_array_subset(&subset).map_err(zerr)
-    } else {
-        Err(MolRsError::zarr(format!(
-            "expected string array, got {:?}",
             dt
         )))
     }
