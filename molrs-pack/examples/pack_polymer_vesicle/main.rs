@@ -19,9 +19,9 @@ use std::path::PathBuf;
 
 use molrs::element::Element;
 use molrs::hydrogens::add_hydrogens;
-use molrs_io::pdb::read_pdb_frame;
 use molrs::molgraph::{Atom, AtomId, MolGraph};
 use molrs::types::F;
+use molrs_io::pdb::read_pdb_frame;
 use molrs_pack::{
     InsideBoxConstraint, InsideSphereConstraint, Molpack, OutsideSphereConstraint, ProgressHandler,
     RegionConstraint, Target, TorsionMcHook, XYZHandler,
@@ -316,7 +316,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut target = Target::from_coords(&coords, &radii, 1)
             .with_name(format!("PE_{i}"))
             .with_constraint(InsideSphereConstraint::new(10.0, origin))
-            .with_hook(hook);
+            .with_relaxer(hook);
         target.elements = elements.iter().map(|s| s.into()).collect();
         targets.push(target);
     }

@@ -31,13 +31,13 @@ pub mod euler;
 pub mod frame;
 pub mod gencan;
 pub mod handler;
-pub mod hook;
 pub mod initial;
 pub mod movebad;
 mod numerics;
 pub mod objective;
 pub mod packer;
 mod random;
+pub mod relaxer;
 pub mod target;
 pub mod validation;
 
@@ -54,9 +54,14 @@ pub use frame::{compute_mol_ids, context_to_frame, finalize_frame, frame_to_coor
 pub use handler::{
     EarlyStopHandler, Handler, NullHandler, PhaseInfo, ProgressHandler, StepInfo, XYZHandler,
 };
-pub use hook::{Hook, HookRunner, TorsionMcHook, compute_excluded_pairs, self_avoidance_penalty};
 pub use molrs::Element;
 pub use molrs::types::F;
 pub use packer::{Molpack, PackResult};
+pub use relaxer::Relaxer as Hook;
+pub use relaxer::RelaxerRunner as HookRunner;
+pub use relaxer::TorsionMcRelaxer as TorsionMcHook;
+pub use relaxer::{
+    Relaxer, RelaxerRunner, TorsionMcRelaxer, compute_excluded_pairs, self_avoidance_penalty,
+};
 pub use target::{CenteringMode, Target};
 pub use validation::{ValidationReport, ViolationMetrics, validate_from_targets};

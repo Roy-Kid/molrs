@@ -2,7 +2,7 @@
 
 use crate::constraint::{AtomConstraint, MoleculeConstraint};
 use crate::frame::frame_to_coords_and_elements;
-use crate::hook::Hook;
+use crate::relaxer::Relaxer;
 use molrs::types::F;
 
 /// Centering behavior for structure coordinates.
@@ -57,8 +57,8 @@ pub struct Target {
     pub constrain_rotation: [Option<(F, F)>; 3],
     /// If Some, this molecule is fixed (one copy, placed at the given location).
     pub fixed_at: Option<FixedPlacement>,
-    /// Per-target in-loop hooks (e.g. torsion MC). Called in order each iteration.
-    pub hooks: Vec<Box<dyn Hook>>,
+    /// Per-target in-loop relaxers (e.g. torsion MC). Called in order each iteration.
+    pub relaxers: Vec<Box<dyn Relaxer>>,
 }
 
 impl Target {
@@ -108,7 +108,7 @@ impl Target {
             centering: CenteringMode::Auto,
             constrain_rotation: [None, None, None],
             fixed_at: None,
-            hooks: Vec::new(),
+            relaxers: Vec::new(),
         }
     }
 
@@ -145,18 +145,18 @@ impl Target {
         self
     }
 
-    /// Attach an in-loop hook for this target.
+    /// Attach an in-loop relaxer for this target.
     ///
-    /// Multiple hooks can be attached (called in order).
-    /// Hooks require `count == 1` because all copies share reference coords.
+    /// Multiple relaxers can be attached (called in order).
+    /// Relaxers require `count == 1` because all copies share reference coords.
     ///
     /// Mirrors `with_constraint()` for the constraint system.
-    pub fn with_hook(mut self, hook: impl Hook + 'static) -> Self {
+    pub fn with_relaxer(mut self, relaxer: impl Relaxer + 'static) -> Self {
         assert!(
             self.count <= 1,
-            "hooks require count == 1 (all copies share ref coords)"
+            "relaxers require count == 1 (all copies share ref coords)"
         );
-        self.hooks.push(Box::new(hook));
+        self.relaxers.push(Box::new(relaxer));
         self
     }
 

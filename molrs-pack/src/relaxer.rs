@@ -1,14 +1,14 @@
-//! Per-target in-loop hook system for molecular packing.
+//! Per-target in-loop relaxer system for molecular packing.
 //!
-//! Hooks modify the reference geometry (shape of the molecule itself) during
+//! Relaxers modify the reference geometry (shape of the molecule itself) during
 //! packing, complementing the constraint system which modifies the objective
-//! function. The two-level split (`Hook` → `HookRunner`) separates immutable
+//! function. The two-level split (`Relaxer` → `RelaxerRunner`) separates immutable
 //! configuration (stored on `Target`) from mutable runtime state (created
 //! inside `pack()`).
 //!
-//! # Built-in hooks
+//! # Built-in relaxers
 //!
-//! - [`TorsionMcHook`]: Monte Carlo torsion angle sampling for flexible molecules.
+//! - [`TorsionMcRelaxer`]: Monte Carlo torsion angle sampling for flexible molecules.
 
 use molrs::molgraph::MolGraph;
 use molrs::rotatable::{RotatableBond, atom_id_to_index, detect_rotatable_bonds_with_downstream};
@@ -22,46 +22,46 @@ use crate::random::uniform01_core;
 
 // ── Traits ──────────────────────────────────────────────────────────────────
 
-/// Per-target in-loop hook. Stored on `Target` (immutable config).
+/// Per-target in-loop relaxer. Stored on `Target` (immutable config).
 /// Creates a stateful runner inside `pack()`.
 ///
 /// Analogous to `BuiltinConstraint` in the constraint system:
 /// - Constraints modify the objective function (penalties on atom positions)
-/// - Hooks modify the reference geometry (shape of the molecule itself)
-pub trait Hook: Send + Sync + CloneHook {
-    /// Create a stateful runner for this hook.
+/// - Relaxers modify the reference geometry (shape of the molecule itself)
+pub trait Relaxer: Send + Sync + CloneRelaxer {
+    /// Create a stateful runner for this relaxer.
     /// Called once at the start of `pack()`.
-    fn build(&self, ref_coords: &[[F; 3]]) -> Box<dyn HookRunner>;
+    fn build(&self, ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner>;
 }
 
 /// Clone-box helper for trait objects.
-pub trait CloneHook {
-    fn clone_box(&self) -> Box<dyn Hook>;
+pub trait CloneRelaxer {
+    fn clone_box(&self) -> Box<dyn Relaxer>;
 }
 
-impl<T: Hook + Clone + 'static> CloneHook for T {
-    fn clone_box(&self) -> Box<dyn Hook> {
+impl<T: Relaxer + Clone + 'static> CloneRelaxer for T {
+    fn clone_box(&self) -> Box<dyn Relaxer> {
         Box::new(self.clone())
     }
 }
 
-impl Clone for Box<dyn Hook> {
+impl Clone for Box<dyn Relaxer> {
     fn clone(&self) -> Self {
         self.clone_box()
     }
 }
 
-impl std::fmt::Debug for Box<dyn Hook> {
+impl std::fmt::Debug for Box<dyn Relaxer> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Box<dyn Hook>")
+        f.write_str("Box<dyn Relaxer>")
     }
 }
 
-/// Runtime state for a hook. Created by `Hook::build()`, used inside `pack()`.
+/// Runtime state for a relaxer. Created by `Relaxer::build()`, used inside `pack()`.
 ///
 /// Analogous to calling `BuiltinConstraint::value()`/`gradient()` during evaluation,
 /// but stateful (MC acceptance counters, temperature schedule, etc.).
-pub trait HookRunner: Send {
+pub trait RelaxerRunner: Send {
     /// Called between movebad and pgencan in each iteration.
     ///
     /// - `coords`: current reference coords for this molecule type
@@ -84,11 +84,11 @@ pub trait HookRunner: Send {
     }
 }
 
-// ── TorsionMcHook ───────────────────────────────────────────────────────────
+// ── TorsionMcRelaxer ───────────────────────────────────────────────────────────
 
-/// MC torsion angle sampling hook.
+/// MC torsion angle sampling relaxer.
 ///
-/// Analogous to `InsideSphereConstraint` — a concrete implementation of `Hook`.
+/// Analogous to `InsideSphereConstraint` — a concrete implementation of `Relaxer`.
 /// Picks random rotatable bonds and applies random torsion rotations,
 /// accepting or rejecting via Metropolis criterion.
 ///
@@ -100,7 +100,7 @@ pub trait HookRunner: Send {
 /// repulsion penalty. Atom pairs that are 1-2 or 1-3 bonded neighbors are
 /// excluded from the penalty (they are naturally close due to bond geometry).
 #[derive(Debug, Clone)]
-pub struct TorsionMcHook {
+pub struct TorsionMcRelaxer {
     /// Pre-detected rotatable bonds with downstream atom sets.
     pub bonds: Vec<RotatableBond>,
     /// Max rotation per step (radians). Default: π/6.
@@ -117,7 +117,7 @@ pub struct TorsionMcHook {
     excluded_pairs: HashSet<(usize, usize)>,
 }
 
-impl TorsionMcHook {
+impl TorsionMcRelaxer {
     /// Create from a `MolGraph`.
     ///
     /// Rotatable bonds are detected automatically from the graph topology
@@ -163,9 +163,9 @@ impl TorsionMcHook {
     }
 }
 
-impl Hook for TorsionMcHook {
-    fn build(&self, _ref_coords: &[[F; 3]]) -> Box<dyn HookRunner> {
-        Box::new(TorsionMcRunner {
+impl Relaxer for TorsionMcRelaxer {
+    fn build(&self, _ref_coords: &[[F; 3]]) -> Box<dyn RelaxerRunner> {
+        Box::new(TorsionMcRelaxerRunner {
             bonds: self.bonds.clone(),
             max_delta: self.max_delta,
             steps: self.steps,
@@ -227,9 +227,9 @@ pub fn compute_excluded_pairs(graph: &MolGraph) -> HashSet<(usize, usize)> {
     excluded
 }
 
-// ── TorsionMcRunner ─────────────────────────────────────────────────────────
+// ── TorsionMcRelaxerRunner ─────────────────────────────────────────────────────────
 
-struct TorsionMcRunner {
+struct TorsionMcRelaxerRunner {
     bonds: Vec<RotatableBond>,
     max_delta: F,
     steps: usize,
@@ -276,7 +276,7 @@ pub fn self_avoidance_penalty(
     penalty
 }
 
-impl HookRunner for TorsionMcRunner {
+impl RelaxerRunner for TorsionMcRelaxerRunner {
     fn on_iter(
         &mut self,
         coords: &[[F; 3]],
@@ -540,7 +540,7 @@ mod tests {
     #[test]
     fn test_new_detects_rotatable_bonds() {
         let (g, _) = chain(5);
-        let hook = TorsionMcHook::new(&g);
+        let hook = TorsionMcRelaxer::new(&g);
         assert_eq!(hook.bonds.len(), 2);
         assert_eq!(hook.steps, 10);
     }
@@ -548,7 +548,9 @@ mod tests {
     #[test]
     fn test_runner_modifies_zigzag() {
         let (g, coords) = chain(5);
-        let hook = TorsionMcHook::new(&g).with_temperature(1.0).with_steps(5);
+        let hook = TorsionMcRelaxer::new(&g)
+            .with_temperature(1.0)
+            .with_steps(5);
 
         let mut runner = hook.build(&coords);
         let mut rng = rand::rng();
@@ -603,7 +605,9 @@ mod tests {
     #[test]
     fn test_self_avoidance_penalty_disabled_when_radius_zero() {
         let (g, coords) = chain(5);
-        let hook = TorsionMcHook::new(&g).with_temperature(0.0).with_steps(5);
+        let hook = TorsionMcRelaxer::new(&g)
+            .with_temperature(0.0)
+            .with_steps(5);
 
         // radius=0.0 (default), evaluate always returns 0 → all moves accepted
         let mut runner = hook.build(&coords);
@@ -618,7 +622,7 @@ mod tests {
         // The evaluate closure returns 0 (no external penalty), so only
         // self-avoidance penalty drives acceptance.
         let (g, coords) = chain(5);
-        let hook = TorsionMcHook::new(&g)
+        let hook = TorsionMcRelaxer::new(&g)
             .with_self_avoidance(1.0)
             .with_temperature(0.0) // greedy: only accept improvements
             .with_steps(50);

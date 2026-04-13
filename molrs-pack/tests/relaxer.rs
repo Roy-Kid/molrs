@@ -1,5 +1,5 @@
-//! Tests for the per-target hook system and TorsionMcHook.
-//! The 13 unit tests inside hook.rs (mod tests) are preserved; these are
+//! Tests for the per-target relaxer system and TorsionMcRelaxer.
+//! The 13 unit tests inside relaxer.rs (mod tests) are preserved; these are
 //! integration tests exercising the public API.
 
 use molrs::molgraph::{Atom, MolGraph};
@@ -109,15 +109,15 @@ fn runner_acceptance_rate_between_0_and_1() {
 fn target_with_hook_requires_count_1() {
     let (graph, coords, radii) = chain(5, 1.5);
     let hook = TorsionMcHook::new(&graph);
-    let _target = Target::from_coords(&coords, &radii, 1).with_hook(hook);
+    let _target = Target::from_coords(&coords, &radii, 1).with_relaxer(hook);
 }
 
 #[test]
-#[should_panic(expected = "hooks require count == 1")]
+#[should_panic(expected = "relaxers require count == 1")]
 fn target_with_hook_panics_for_count_gt_1() {
     let (graph, coords, radii) = chain(5, 1.5);
     let hook = TorsionMcHook::new(&graph);
-    let _target = Target::from_coords(&coords, &radii, 2).with_hook(hook);
+    let _target = Target::from_coords(&coords, &radii, 2).with_relaxer(hook);
 }
 
 // ── packing with hooks ─────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ fn pack_with_torsion_hook_in_box() {
             [0.0, 0.0, 0.0],
             [20.0, 20.0, 20.0],
         ))
-        .with_hook(hook);
+        .with_relaxer(hook);
 
     let result = Molpack::new()
         .add_handler(NullHandler)
@@ -160,7 +160,7 @@ fn pack_with_torsion_hook_in_sphere() {
     let target = Target::from_coords(&coords, &radii, 1)
         .with_name("polymer")
         .with_constraint(InsideSphereConstraint::new(15.0, [0.0, 0.0, 0.0]))
-        .with_hook(hook);
+        .with_relaxer(hook);
 
     let result = Molpack::new()
         .add_handler(NullHandler)
@@ -185,7 +185,7 @@ fn pack_hook_with_regular_target() {
     let chain_target = Target::from_coords(&chain_coords, &chain_radii, 1)
         .with_name("chain")
         .with_constraint(constraint.clone())
-        .with_hook(TorsionMcHook::new(&graph).with_steps(5));
+        .with_relaxer(TorsionMcHook::new(&graph).with_steps(5));
 
     let point_target = Target::from_coords(&[[0.0, 0.0, 0.0]], &[1.0], 3)
         .with_name("points")

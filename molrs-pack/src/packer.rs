@@ -12,10 +12,10 @@ use crate::error::PackError;
 use crate::euler::{compcart, eulerfixed};
 use crate::gencan::{GencanParams, GencanWorkspace, pgencan};
 use crate::handler::{Handler, PhaseInfo, StepInfo};
-use crate::hook::HookRunner;
 use crate::initial::{SwapState, init_xcart_from_x, initial};
 use crate::movebad::{MoveBadConfig, movebad};
 use crate::numerics::objective_small_floor;
+use crate::relaxer::RelaxerRunner;
 use crate::target::{CenteringMode, Target};
 
 /// Result of a packing run.
@@ -413,17 +413,17 @@ impl Molpack {
             h.on_initial(&sys);
         }
 
-        // Build hook runners from target hooks (HookRunner carries mutable MC state).
-        // Each entry: (type_index, Vec<Box<dyn HookRunner>>).
-        let mut hook_runners: Vec<(usize, Vec<Box<dyn HookRunner>>)> = free_targets
+        // Build relaxer runners from target relaxers (RelaxerRunner carries mutable MC state).
+        // Each entry: (type_index, Vec<Box<dyn RelaxerRunner>>).
+        let mut relaxer_runners: Vec<(usize, Vec<Box<dyn RelaxerRunner>>)> = free_targets
             .iter()
             .enumerate()
-            .filter(|(_, t)| !t.hooks.is_empty())
+            .filter(|(_, t)| !t.relaxers.is_empty())
             .map(|(i, t)| {
                 let base = sys.idfirst[i];
                 let na = sys.natoms[i];
                 let ref_slice = &sys.coor[base..base + na];
-                let runners = t.hooks.iter().map(|h| h.build(ref_slice)).collect();
+                let runners = t.relaxers.iter().map(|r| r.build(ref_slice)).collect();
                 (i, runners)
             })
             .collect();
@@ -558,9 +558,9 @@ impl Molpack {
                     sys.radius.copy_from_slice(&sys.work.radiuswork);
                 }
 
-                // Hook MC block: run per-target hooks between movebad and pgencan.
-                // Each hook modifies the reference coords (coor) for its type.
-                for (itype, runners) in hook_runners.iter_mut() {
+                // Relaxer MC block: run per-target relaxers between movebad and pgencan.
+                // Each relaxer modifies the reference coords (coor) for its type.
+                for (itype, runners) in relaxer_runners.iter_mut() {
                     if !is_all && *itype != phase {
                         continue;
                     }
@@ -631,7 +631,7 @@ impl Molpack {
                 fimp_prev = fimp;
 
                 if !self.handlers.is_empty() {
-                    let hook_acceptance: Vec<(usize, F)> = hook_runners
+                    let hook_acceptance: Vec<(usize, F)> = relaxer_runners
                         .iter()
                         .flat_map(|(itype, runners)| {
                             runners.iter().map(move |r| (*itype, r.acceptance_rate()))
