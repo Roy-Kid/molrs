@@ -32,3 +32,10 @@ f64 = ["molrs/f64"]
 i64 = ["molrs/i64"]
 u64 = ["molrs/u64"]
 filesystem = ["molrs_io/filesystem"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "pack_end_to_end"
+harness = false

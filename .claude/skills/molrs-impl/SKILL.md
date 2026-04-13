@@ -56,6 +56,20 @@ Write minimal code to pass all tests:
 - `Constraint`: accumulate TRUE gradient with `+=`
 - Run tests — they should all PASS (GREEN).
 
+### Phase 3 — special case: hot-path refactors
+
+When Phase 3 is an incremental refactor of a performance-critical monolith (e.g. `molrs-pack` objective/packer split, `molrs-ff` kernel extraction, `molrs-core` neighbor rewrite), the TDD cycle pairs with a **bench cycle**. Each extracted pure function ships as a **single atomic commit** containing:
+
+1. `#[cfg(bench)] #[inline(never)] fn F_sentinel(...)` holding the pre-extraction body in the origin module.
+2. A unit test pinning behavior (extracted fn vs. sentinel, or against a reference).
+3. A criterion microbench of the extracted function.
+4. A criterion microbench of the caller (catches indirection / vtable cost).
+5. The extraction itself.
+
+Gates (hard): extracted ≤ +1% vs. sentinel; caller ≤ +2%. Do not batch several extractions into one commit — localization of regressions becomes impossible.
+
+End-to-end benches for the crate exist as a **catastrophic-regression alarm** (> +10% blocks merge), never as the per-extraction gate. See the `molrs-perf` skill § "Benchmarking during refactors" for the full discipline. The `molrs-optimizer` agent (Phase 4) enforces this checklist; if sentinel + microbench + caller microbench are missing, the review is blocked.
+
 ## Phase 4 — Review & Refactor (TDD — IMPROVE)
 
 Spawn agents in parallel:
