@@ -13,12 +13,12 @@
 use crate::frame::PyFrame;
 use crate::helpers::{io_error_to_pyerr, molrs_error_to_pyerr, smiles_error_to_pyerr};
 use crate::molgraph::PyAtomistic;
-use molrs::io::chgcar::read_chgcar;
-use molrs::io::cube::{read_cube, write_cube};
-use molrs::io::lammps_data::{read_lammps_data, write_lammps_data};
-use molrs::io::lammps_dump::{read_lammps_dump, write_lammps_dump};
-use molrs::io::pdb::{read_pdb_frame, write_pdb_frame};
-use molrs::io::xyz::{read_xyz_frame, read_xyz_traj, write_xyz_frame};
+use molrs_io::chgcar::read_chgcar;
+use molrs_io::cube::{read_cube, write_cube};
+use molrs_io::lammps_data::{read_lammps_data, write_lammps_data};
+use molrs_io::lammps_dump::{read_lammps_dump, write_lammps_dump};
+use molrs_io::pdb::{read_pdb_frame, write_pdb_frame};
+use molrs_io::xyz::{read_xyz_frame, read_xyz_traj, write_xyz_frame};
 use pyo3::prelude::*;
 use std::fs::File;
 use std::io::BufWriter;
@@ -326,7 +326,7 @@ pub fn write_lammps_traj(path: &str, frames: Vec<PyRef<'_, PyFrame>>) -> PyResul
 /// 3
 #[pyclass(name = "SmilesIR", unsendable)]
 pub struct PySmilesIR {
-    inner: molrs::smiles::SmilesIR,
+    inner: molrs_smiles::SmilesIR,
     input: String,
 }
 
@@ -368,7 +368,7 @@ impl PySmilesIR {
     /// >>> mol.n_atoms
     /// 6
     fn to_atomistic(&self) -> PyResult<PyAtomistic> {
-        let mol = molrs::smiles::to_atomistic(&self.inner).map_err(smiles_error_to_pyerr)?;
+        let mol = molrs_smiles::to_atomistic(&self.inner).map_err(smiles_error_to_pyerr)?;
         Ok(PyAtomistic { inner: mol })
     }
 
@@ -409,7 +409,7 @@ impl PySmilesIR {
 /// 3
 #[pyfunction]
 pub fn parse_smiles(smiles: &str) -> PyResult<PySmilesIR> {
-    let ir = molrs::smiles::parse_smiles(smiles).map_err(smiles_error_to_pyerr)?;
+    let ir = molrs_smiles::parse_smiles(smiles).map_err(smiles_error_to_pyerr)?;
     Ok(PySmilesIR {
         inner: ir,
         input: smiles.to_owned(),
