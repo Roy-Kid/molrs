@@ -521,15 +521,7 @@ impl Molpack {
 
             // Initialize flast = unscaled f before gencanloop
             // (Packmol lines 796-803: compute bestf/flast with unscaled radii)
-            let mut flast = {
-                sys.work.radiuswork.copy_from_slice(&sys.radius);
-                for i in 0..sys.ntotat {
-                    sys.radius[i] = sys.radius_ini[i];
-                }
-                let v = sys.evaluate(&xwork, EvalMode::FOnly, None).f_total;
-                sys.radius.copy_from_slice(&sys.work.radiuswork);
-                v
-            };
+            let mut flast = evaluate_unscaled(&mut sys, &xwork).0;
 
             // fimp from previous iteration — used for movebad gate (Packmol packmol.f90 line 798).
             // Initialized to 1e99 so movebad is NOT called on the first iteration.
@@ -550,12 +542,7 @@ impl Molpack {
                     );
                     // Reset flast to the post-movebad f value so fimp is measured
                     // relative to movebad's starting point.
-                    sys.work.radiuswork.copy_from_slice(&sys.radius);
-                    for i in 0..sys.ntotat {
-                        sys.radius[i] = sys.radius_ini[i];
-                    }
-                    flast = sys.evaluate(&xwork, EvalMode::FOnly, None).f_total;
-                    sys.radius.copy_from_slice(&sys.work.radiuswork);
+                    flast = evaluate_unscaled(&mut sys, &xwork).0;
                 }
 
                 // Relaxer MC block: run per-target relaxers between movebad and pgencan.
@@ -607,14 +594,7 @@ impl Molpack {
 
                 // Compute statistics with unscaled radii
                 // (Packmol lines 833-841: radiuswork + computef + restore)
-                sys.work.radiuswork.copy_from_slice(&sys.radius);
-                for i in 0..sys.ntotat {
-                    sys.radius[i] = sys.radius_ini[i];
-                }
-                let fx_unscaled = sys.evaluate(&xwork, EvalMode::FOnly, None).f_total;
-                let fdist = sys.fdist;
-                let frest = sys.frest;
-                sys.radius.copy_from_slice(&sys.work.radiuswork);
+                let (fx_unscaled, fdist, frest) = evaluate_unscaled(&mut sys, &xwork);
 
                 // fimp: percentage improvement in unscaled f from last iteration
                 // Packmol line 846: if(flast>0) fimp = -100*(fx-flast)/flast
@@ -748,5 +728,89 @@ fn reference_coords(target: &Target) -> &[[F; 3]] {
                 &target.ref_coords
             }
         }
+    }
+}
+
+/// Evaluate the packing objective once under **unscaled** radii (`radius_ini`),
+/// restoring the caller's `radius` values on return.
+///
+/// On return, `sys.fdist` / `sys.frest` / `sys.fdist_atom` / `sys.frest_atom`
+/// reflect the unscaled evaluation (the radius-dependent inner state); only
+/// `sys.radius` itself is rolled back to what it was on entry.
+///
+/// Returns `(f_total, fdist, frest)` from the unscaled evaluation — the exact
+/// triple the packer's main loop feeds to `flast` / `fimp` / handler `StepInfo`.
+///
+/// Pulled out of `pack()` in phase A.4.1 to de-duplicate three inline copies
+/// of the same swap-evaluate-restore dance (Packmol `computef` emulation).
+pub fn evaluate_unscaled(sys: &mut PackContext, xwork: &[F]) -> (F, F, F) {
+    sys.work.radiuswork.copy_from_slice(&sys.radius);
+    for i in 0..sys.ntotat {
+        sys.radius[i] = sys.radius_ini[i];
+    }
+    let f_total = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
+    let fdist = sys.fdist;
+    let frest = sys.frest;
+    sys.radius.copy_from_slice(&sys.work.radiuswork);
+    (f_total, fdist, frest)
+}
+
+/// Sentinel: byte-identical pre-extraction body of `evaluate_unscaled`, kept as
+/// a `#[inline(never)]` comparison target for the per-extraction microbench
+/// gate (see `molrs-perf` skill § "Benchmarking during refactors"). The
+/// extracted function's microbench gates at ≤ +1% vs. this sentinel.
+///
+/// DELETE after one Phase A refactor cycle stabilizes on main (per the skill's
+/// "delete F_sentinel after the next refactor cycle" rule). The microbench
+/// itself stays permanently as a future-regression guard.
+#[inline(never)]
+#[allow(dead_code)]
+pub fn evaluate_unscaled_sentinel(sys: &mut PackContext, xwork: &[F]) -> (F, F, F) {
+    sys.work.radiuswork.copy_from_slice(&sys.radius);
+    for i in 0..sys.ntotat {
+        sys.radius[i] = sys.radius_ini[i];
+    }
+    let f_total = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
+    let fdist = sys.fdist;
+    let frest = sys.frest;
+    sys.radius.copy_from_slice(&sys.work.radiuswork);
+    (f_total, fdist, frest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins `evaluate_unscaled` to return the same `(f_total, fdist, frest)`
+    /// triple as `evaluate_unscaled_sentinel` on an identical PackContext,
+    /// and to leave `sys.radius` in the same post-call state.
+    ///
+    /// Uses a minimal hand-built PackContext (no constraints, no pair terms):
+    /// with zero restraints and zero pair interactions, `evaluate()` returns
+    /// `(0, 0, 0)` deterministically — still exercising the full
+    /// swap-evaluate-restore dance, which is what the extraction moved.
+    #[test]
+    fn evaluate_unscaled_matches_sentinel_on_empty_context() {
+        fn build(ntotat: usize, scaled: F, unscaled: F) -> PackContext {
+            let mut sys = PackContext::new(ntotat, 0, 0);
+            sys.radius.fill(scaled);
+            sys.radius_ini.fill(unscaled);
+            sys.work.radiuswork.resize(ntotat, 0.0);
+            sys
+        }
+        let xwork: Vec<F> = Vec::new();
+
+        let mut a = build(4, 0.75, 1.5);
+        let mut b = build(4, 0.75, 1.5);
+
+        let out_fn = evaluate_unscaled(&mut a, &xwork);
+        let out_sent = evaluate_unscaled_sentinel(&mut b, &xwork);
+
+        assert_eq!(out_fn, out_sent, "extracted fn vs sentinel: tuple mismatch");
+        assert_eq!(a.radius, b.radius, "post-call radius mismatch");
+        assert!(
+            a.radius.iter().all(|&r| (r - 0.75).abs() < 1e-15),
+            "radius not restored to pre-call scaled value"
+        );
     }
 }
