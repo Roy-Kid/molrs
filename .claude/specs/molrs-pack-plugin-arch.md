@@ -26,7 +26,7 @@
     - [x] **A.4.3** 抽 inner loop body → `fn run_iteration(loop_idx, ..., &mut sys, ..., &mut rng) -> IterOutcome`（Continue / Converged / EarlyStop）；落 `run_iteration_sentinel` + `benches/run_iteration.rs`（fn + caller 两组）+ 单元测试（空 context 上 fn == sentinel）；`SwapState` 提升 `pub`（bench 需要）；**先于 A.4.2 落**是因为外层 phase body 在 inner loop 抽出后变得 trivial，顺序反过来可以把复杂的一次性做完
     - [x] **A.4.2** 抽 main loop 外层 for 循环 body → `fn run_phase(phase, ntype, ntype_with_fixed, total_phases, max_loops, discale, precision, disable_movebad, &mb_cfg, &gp, &mut sys, &mut x, &mut swap, &mut relaxers, &mut handlers, &mut ws, &mut rng) -> PhaseOutcome`（Continue/Converged — 仅 all-type converged 才打破外层）；落 `run_phase_sentinel` + `benches/run_phase.rs`（fn + caller 两组）+ 单元测试（空 context trivially Converged）；外层 123 行塌缩到 13 行 match-scaffold；gate：fn +0.44%（过 ≤+1%），caller -0.86%（过 ≤+2%），e2e mixture 481→472 ms p=0.24（无变化）；113 tests pass（+1 新测试）
     - [ ] **A.4.4** 进一步拆 setup / geometric prefit（如果仍需要）
-- [ ] **A.5** 把 `PackContext::evaluate` 的签名固化为 `trait Objective`；`impl Objective for PackContext`
+- [x] **A.5** 把 `PackContext::evaluate` 的签名固化为 `pub trait Objective { fn evaluate(&mut self, x, mode, grad) -> EvalOutput; fn fdist(&self); fn frest(&self); fn ncf(&self); fn ncg(&self); fn reset_eval_counters(&mut self); }`；`impl Objective for PackContext` 纯转发；单测 `dyn_objective_matches_inherent_evaluate`（trait dispatch 与直接调用 byte-identical）。纯加性改动，不动 call site；A.6 里才把 `pgencan` 入参换成 `&mut dyn Objective`（那一步需要完整 sentinel + 微基准）
 - [ ] **A.6** `pgencan` 入参 `&mut PackContext` → `&mut dyn Objective`
 - [ ] **A.7** 验收：所有现有测试通过；Packmol 等价回归 0 失败；微基准 gate 满足 §10；`pack_end_to_end.rs` 未触发 +10% 灾难警报
 
@@ -54,6 +54,7 @@
 - `A.4.1` — 抽 `evaluate_unscaled` 去三处重复；落 sentinel + `benches/evaluate_unscaled.rs` + 单元测试（首个走完 extract-bench loop 全纪律的 commit）；fn gate -3.4%、caller gate +1.1%、e2e 467→484 ms（p=0.08, 噪声内）
 - `A.4.3` — 抽 inner loop body → `run_iteration`（140 行移到纯函数）；落 `run_iteration_sentinel` + `benches/run_iteration.rs` + 空-context 单元测试；`SwapState` pub 化；fn gate -2.4%（过 ≤+1%），caller gate -0.3%（过 ≤+2%），e2e 484→481 ms p=0.57（无变化）；112 tests pass（+1 新测试）；先于 A.4.2 — phase body 在此之后变 thin wrapper
 - `A.4.2` — 抽 outer phase body → `run_phase`（123 行 → 13 行 match-scaffold）；落 `run_phase_sentinel` + `benches/run_phase.rs` + 空-context 单元测试；新增 `PhaseOutcome { Continue, Converged }`；gate：fn +0.44%（过 ≤+1%），caller -0.86%（过 ≤+2%），e2e mixture 481→472 ms p=0.24（无变化）；113 tests pass（+1 新测试）；`pack()` 主循环现在是纯 scaffold
+- `A.5` — 加 `pub trait Objective` + `impl Objective for PackContext`（纯 inline 转发到既有方法）；单测 `dyn_objective_matches_inherent_evaluate` 固定 dyn dispatch 与直接调用等价；114 tests pass（+1）；**非抽取**（无代码移动）故不带 sentinel / 微基准；A.6 rewire `pgencan` 时再落完整 extract-bench
 
 ---
 
