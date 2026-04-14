@@ -44,7 +44,7 @@
   - 保留 `constrain_rot` / `rot_bound` / gencan 投影 bounds（唯一真正的硬约束语义）
   - 单元测试：15 struct 各自 `Restraint::fg` vs 数值梯度（ε=1e-5，tol=1e-3）；与 rewrite 前 inherent method 在相同参数下数值等价
   - 验收：所有现有 tests + `examples_batch` Packmol 等价回归通过；`pack_end_to_end/mixture` 不超过 +5%（若超过且 ≤ +10% 硬门禁，落 `PackedRestraint` fast-path follow-up）
-- [ ] **B.0b** Region trait（§6.1）：`pub trait Region { contains; signed_distance; }` + `And`/`Or`/`Not` 组合子 + blanket `impl<R: Region + 'static> Restraint for FromRegion<R>`；用于 `InsideSphereRegion.and(OutsideSphereRegion)` 形式的几何交并运算
+- [x] **B.0b** Region trait（§6.1）：`pub trait Region { contains; signed_distance; signed_distance_grad (default FD); bounding_box (default None); }` + `And`/`Or`/`Not` 组合子（chain-rule 解析梯度）+ `RegionExt` 扩展 trait（`.and()`/`.or()`/`.not()` 链式语法）+ blanket `impl<R: Region + 'static> Restraint for FromRegion<R>`（quadratic exterior penalty `scale2 * max(0, d)²`）+ 3 具体 Region（`InsideBoxRegion` / `InsideSphereRegion` / `OutsideSphereRegion`，各自解析梯度 + bounding_box）；12 单元测试（boolean algebra / de Morgan / signed_distance sign / FromRegion gradient vs FD）全过；纯加性，不碰 hot path
 - [ ] **B.2** 便捷静态方法（**不是** builder pattern）：如 `InsideBoxRestraint::from_simbox(&simbox)` / `InsideCubeRestraint::from_origin(origin, side)` 等纯构造 helper
 - [ ] **B.3** `Molpack::add_restraint(impl Restraint + Clone + 'static)` — 内部实现 = 遍历 `targets` 各调一次 `target.with_restraint(r.clone())`，不开新存储路径
 - [~] **B.4** ~~deprecate 老 `add_restraint`~~ — **取消**：`Molpack` 上从未有过 `add_restraint` 公开方法，无要 deprecate 的老 API

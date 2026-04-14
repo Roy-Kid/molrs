@@ -36,6 +36,7 @@ mod numerics;
 pub mod objective;
 pub mod packer;
 mod random;
+pub mod region;
 pub mod relaxer;
 pub mod restraint;
 pub mod target;
@@ -51,6 +52,10 @@ pub use handler::{
 pub use molrs::Element;
 pub use molrs::types::F;
 pub use packer::{Molpack, PackResult};
+pub use region::{
+    And, BBox, FromRegion, InsideBoxRegion, InsideSphereRegion, Not, Or, OutsideSphereRegion,
+    Region, RegionExt,
+};
 pub use relaxer::Relaxer as Hook;
 pub use relaxer::RelaxerRunner as HookRunner;
 pub use relaxer::TorsionMcRelaxer as TorsionMcHook;
