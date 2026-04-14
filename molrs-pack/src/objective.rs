@@ -794,6 +794,21 @@ pub trait Objective {
     /// Zero the function / gradient counters. GENCAN calls this at the
     /// start of each outer iteration.
     fn reset_eval_counters(&mut self);
+
+    /// Fill `l` and `u` (each of length `x.len()` at the `pgencan` entry)
+    /// with per-variable bounds. The default implementation sets every
+    /// variable to `[-1e20, +1e20]` (effectively unbounded); `PackContext`
+    /// overrides it to add the Euler-angle bounds implied by
+    /// `constrain_rotation`.
+    ///
+    /// Landed in A.6 so `pgencan` no longer needs `&mut PackContext` for
+    /// anything beyond evaluation — bounds construction is now behind the
+    /// trait too.
+    fn bounds(&self, l: &mut [F], u: &mut [F]) {
+        debug_assert_eq!(l.len(), u.len(), "bounds: l/u length mismatch");
+        l.fill(-1.0e20);
+        u.fill(1.0e20);
+    }
 }
 
 impl Objective for PackContext {
@@ -825,6 +840,35 @@ impl Objective for PackContext {
     #[inline]
     fn reset_eval_counters(&mut self) {
         PackContext::reset_eval_counters(self);
+    }
+
+    /// Port of `gencan::build_bounds` (pre-A.6). COM variables (first `n/2`)
+    /// stay `[-1e20, +1e20]`; Euler variables (last `n/2`) inherit
+    /// `rot_bound` when `constrain_rot` is set for the owning type /
+    /// molecule / axis.
+    fn bounds(&self, l: &mut [F], u: &mut [F]) {
+        debug_assert_eq!(l.len(), u.len(), "bounds: l/u length mismatch");
+        let n = l.len();
+        l.fill(-1.0e20);
+        u.fill(1.0e20);
+        let mut i = n / 2;
+        for itype in 0..self.ntype {
+            if !self.comptype[itype] {
+                continue;
+            }
+            for _imol in 0..self.nmols[itype] {
+                for axis in 0..3 {
+                    if self.constrain_rot[itype][axis] {
+                        let center = self.rot_bound[itype][axis][0];
+                        let half_width = self.rot_bound[itype][axis][1].abs();
+                        l[i] = center - half_width;
+                        u[i] = center + half_width;
+                    }
+                    i += 1;
+                }
+            }
+        }
+        debug_assert_eq!(i, n);
     }
 }
 

@@ -51,3 +51,7 @@ harness = false
 [[bench]]
 name = "run_phase"
 harness = false
+
+[[bench]]
+name = "objective_dispatch"
+harness = false

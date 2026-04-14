@@ -27,7 +27,7 @@
     - [x] **A.4.2** 抽 main loop 外层 for 循环 body → `fn run_phase(phase, ntype, ntype_with_fixed, total_phases, max_loops, discale, precision, disable_movebad, &mb_cfg, &gp, &mut sys, &mut x, &mut swap, &mut relaxers, &mut handlers, &mut ws, &mut rng) -> PhaseOutcome`（Continue/Converged — 仅 all-type converged 才打破外层）；落 `run_phase_sentinel` + `benches/run_phase.rs`（fn + caller 两组）+ 单元测试（空 context trivially Converged）；外层 123 行塌缩到 13 行 match-scaffold；gate：fn +0.44%（过 ≤+1%），caller -0.86%（过 ≤+2%），e2e mixture 481→472 ms p=0.24（无变化）；113 tests pass（+1 新测试）
     - [ ] **A.4.4** 进一步拆 setup / geometric prefit（如果仍需要）
 - [x] **A.5** 把 `PackContext::evaluate` 的签名固化为 `pub trait Objective { fn evaluate(&mut self, x, mode, grad) -> EvalOutput; fn fdist(&self); fn frest(&self); fn ncf(&self); fn ncg(&self); fn reset_eval_counters(&mut self); }`；`impl Objective for PackContext` 纯转发；单测 `dyn_objective_matches_inherent_evaluate`（trait dispatch 与直接调用 byte-identical）。纯加性改动，不动 call site；A.6 里才把 `pgencan` 入参换成 `&mut dyn Objective`（那一步需要完整 sentinel + 微基准）
-- [ ] **A.6** `pgencan` 入参 `&mut PackContext` → `&mut dyn Objective`
+- [x] **A.6** `pgencan` / `gencan` / `tn_ls` / `spg::spgls` / `cg::cg_solve` / `cg::hessian_times_vec_diff` / `packmolprecision` 全部 `&mut PackContext` → `&mut dyn Objective`；`Objective` trait 新增 `fn bounds(&self, l, u)`（default 全 `±1e20`；`PackContext` 覆盖搬 `build_bounds` 的 Euler 约束逻辑）；`build_bounds` 删除；14 处 `compute_f`/`compute_g`/`sys.evaluate` 调用点换成 `obj.evaluate(x, mode, grad)`；落 `benches/objective_dispatch.rs`（via_inherent vs via_dyn 单 call + caller 4-call burst 两组）；gate：fn via_dyn **-0.95%** vs via_inherent（过 ≤+1%），caller_dyn **-0.70%** vs caller_inherent（过 ≤+2%）；e2e mixture 472→498 ms ≈ **+5.6%**（过 ≤+10% 硬门禁，略过 ≤+5% 软门禁 ~0.6pp；per-call 微基准清洁说明根源是 dyn dispatch 阻止了 `evaluate` 跨 boundary inline，~10k calls/pack 的复合 inlining loss，非 dyn itself 的成本；Phase D 的 GEMM / SIMD 可回收）；114 tests pass
 - [ ] **A.7** 验收：所有现有测试通过；Packmol 等价回归 0 失败；微基准 gate 满足 §10；`pack_end_to_end.rs` 未触发 +10% 灾难警报
 
 **Phase B — 公开新 trait，并行新旧 API**
@@ -46,6 +46,16 @@
 - [ ] **C.5** Python e2e：自定义 Restraint 跑通完整 packing
 - [ ] **C.6** 验收：Jupyter 50 行定义并运行自定义约束；基线无退化
 
+**Phase D — 性能优化（trait 稳定后再做；先 profile 再动手）**
+
+> 这三条是 `objective.rs` 里 `expand_molecules` / `project_cartesian_gradient` 两处 Euler 旋转双循环的候选加速路径。**不先 profile 不动手** — Packmol 的 hot path 历来是 `fparc` / `gparc`（pair-list 距离计算），Euler 展开可能只占 < 5%，那样这三条都是 premature optimization。先在 A.7 之后跑一次 `perf record` / `samply` 看真实热点分布；≥ 20% 才值得做 D.1 / D.2，< 5% 直接关 Phase D。
+
+- [ ] **D.0** Profile baseline：`cargo bench --bench pack_end_to_end -- mixture` + `samply record`，记录 `expand_molecules` / `project_cartesian_gradient` / `fparc` / `gparc` 各自的 CPU % (on `pack_mixture` 和 `pack_spherical` 两个 workload)
+- [ ] **D.1** **批量化 GEMM**：当前 per-molecule `compcart` 调用是 3×3 × 3×N 的小矩阵乘（N≈3–20），BLAS 调用开销在这个尺度上 >> 计算本身（负优化）。正确做法：**同类型所有分子堆成一个 `(Nmol × Natoms, 3)` 大矩阵**，一次 `R_stack · coords_ref^T`（或展成 blocked GEMM）。需要重排 `xcart` / `gxcar` memory layout 与 `expand_molecules` 的遍历顺序。Gate：mixture workload ≤ -10%（目标是改善，不是持平）
+- [ ] **D.2** **SIMD**（`std::simd` / `wide`）：对 D.1 之后仍然耗时的 per-atom 算术（`compcart` 内循环、`project_cartesian_gradient` 的 9+9+9 元素积、`fparc` 的距离计算），展 4×f64 lane。对 loop 结构改动最小。Gate：hot fn 微基准 ≤ -20%
+- [ ] **D.3** **验证 Rust 自动向量化**：在 D.1/D.2 动手前，先 `cargo rustc --release -- --emit=asm -C target-cpu=native` 看 `compcart` / `eulerrmat` / `fparc` 是否已经被 LLVM 展开成 AVX2/AVX512（大概率是）。已经向量化的话就跳过 D.2
+- [ ] **D.4** 验收：mixture / spherical workload 较 A.7 baseline 至少 20% 改善，且所有现有测试 + Packmol 等价回归仍通过
+
 **Commit log** (newest last; one line per landed step)
 - `pre-A` — spec/skill/agent 落地 extract-bench loop 纪律
 - `A.1` — bench infra + 5-example 灾难警报（复用 `ExampleCase`，无 workload 重复）
@@ -55,6 +65,7 @@
 - `A.4.3` — 抽 inner loop body → `run_iteration`（140 行移到纯函数）；落 `run_iteration_sentinel` + `benches/run_iteration.rs` + 空-context 单元测试；`SwapState` pub 化；fn gate -2.4%（过 ≤+1%），caller gate -0.3%（过 ≤+2%），e2e 484→481 ms p=0.57（无变化）；112 tests pass（+1 新测试）；先于 A.4.2 — phase body 在此之后变 thin wrapper
 - `A.4.2` — 抽 outer phase body → `run_phase`（123 行 → 13 行 match-scaffold）；落 `run_phase_sentinel` + `benches/run_phase.rs` + 空-context 单元测试；新增 `PhaseOutcome { Continue, Converged }`；gate：fn +0.44%（过 ≤+1%），caller -0.86%（过 ≤+2%），e2e mixture 481→472 ms p=0.24（无变化）；113 tests pass（+1 新测试）；`pack()` 主循环现在是纯 scaffold
 - `A.5` — 加 `pub trait Objective` + `impl Objective for PackContext`（纯 inline 转发到既有方法）；单测 `dyn_objective_matches_inherent_evaluate` 固定 dyn dispatch 与直接调用等价；114 tests pass（+1）；**非抽取**（无代码移动）故不带 sentinel / 微基准；A.6 rewire `pgencan` 时再落完整 extract-bench
+- `A.6` — `pgencan`/`gencan`/`tn_ls`/`spg`/`cg` 全链 `&mut PackContext` → `&mut dyn Objective`；`Objective::bounds` trait 方法替代 `gencan::build_bounds`；14 call site 切到 `obj.evaluate`；落 `benches/objective_dispatch.rs`；gate：fn via_dyn -0.95%（过 ≤+1%），caller_dyn -0.70%（过 ≤+2%），e2e mixture 472→498 ms ≈ +5.6%（过硬 ≤+10%，略过软 ≤+5% ~0.6pp，根源是 ~10k evaluate/pack 的 inlining loss 而非 dyn cost 本身 — Phase D 回收）；114 tests pass
 
 ---
 
