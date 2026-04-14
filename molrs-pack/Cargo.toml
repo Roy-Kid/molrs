@@ -43,3 +43,7 @@ harness = false
 [[bench]]
 name = "evaluate_unscaled"
 harness = false
+
+[[bench]]
+name = "run_iteration"
+harness = false

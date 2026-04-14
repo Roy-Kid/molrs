@@ -528,143 +528,34 @@ impl Molpack {
             let mut fimp_prev = F::INFINITY;
 
             for loop_idx in 0..max_loops {
-                // movebad: Packmol triggers when radscale==1.0 AND fimp<=10.0
-                // (packmol.f90 line 815). fimp here is from the PREVIOUS iteration.
-                // After movebad, reset flast to the post-movebad f (Packmol line 821).
-                if !self.disable_movebad && radscale == 1.0 && fimp_prev <= 10.0 {
-                    movebad(
-                        &mut xwork,
-                        &mut sys,
-                        self.precision,
-                        &movebad_cfg,
-                        &mut rng,
-                        &mut gencan_workspace,
-                    );
-                    // Reset flast to the post-movebad f value so fimp is measured
-                    // relative to movebad's starting point.
-                    flast = evaluate_unscaled(&mut sys, &xwork).0;
-                }
-
-                // Relaxer MC block: run per-target relaxers between movebad and pgencan.
-                // Each relaxer modifies the reference coords (coor) for its type.
-                for (itype, runners) in relaxer_runners.iter_mut() {
-                    if !is_all && *itype != phase {
-                        continue;
-                    }
-
-                    let base = sys.idfirst[*itype];
-                    let na = sys.natoms[*itype];
-
-                    for runner in runners.iter_mut() {
-                        let saved: Vec<[F; 3]> = sys.coor[base..base + na].to_vec();
-                        let f_before = sys.evaluate(&xwork, EvalMode::FOnly, None).f_total;
-
-                        let result = runner.on_iter(
-                            &saved,
-                            f_before,
-                            &mut |trial: &[[F; 3]]| {
-                                sys.coor[base..base + na].copy_from_slice(trial);
-                                let f = sys.evaluate(&xwork, EvalMode::FOnly, None).f_total;
-                                sys.coor[base..base + na].copy_from_slice(&saved);
-                                f
-                            },
-                            &mut rng,
-                        );
-
-                        if let Some(new_coords) = result {
-                            sys.coor[base..base + na].copy_from_slice(&new_coords);
-                        }
-                    }
-                }
-
-                // GENCAN on working x (compact for per-type, full for all-type)
-                sys.reset_eval_counters();
-                let res = pgencan(
-                    &mut xwork,
-                    &mut sys,
-                    &gencan_params,
+                let outcome = run_iteration(
+                    loop_idx,
+                    max_loops,
+                    is_all,
+                    phase,
+                    phase_info,
                     self.precision,
+                    self.disable_movebad,
+                    &movebad_cfg,
+                    &gencan_params,
+                    &mut sys,
+                    &mut xwork,
+                    &mut swap,
+                    &mut flast,
+                    &mut fimp_prev,
+                    &mut radscale,
+                    &mut relaxer_runners,
+                    &mut self.handlers,
                     &mut gencan_workspace,
+                    &mut rng,
                 );
-
-                // Save compact results back to swap (for restore later)
-                if !is_all {
-                    swap.save_type(phase, &xwork, &sys);
-                }
-
-                // Compute statistics with unscaled radii
-                // (Packmol lines 833-841: radiuswork + computef + restore)
-                let (fx_unscaled, fdist, frest) = evaluate_unscaled(&mut sys, &xwork);
-
-                // fimp: percentage improvement in unscaled f from last iteration
-                // Packmol line 846: if(flast>0) fimp = -100*(fx-flast)/flast
-                let mut fimp = if flast > 0.0 {
-                    -100.0 * (fx_unscaled - flast) / flast
-                } else if fx_unscaled < objective_small_floor() {
-                    100.0 // already converged
-                } else {
-                    F::INFINITY
-                };
-                // Packmol lines 848-849: clamp to [-99.99, 99.99]
-                fimp = fimp.clamp(-99.99, 99.99);
-                flast = fx_unscaled;
-                fimp_prev = fimp;
-
-                if !self.handlers.is_empty() {
-                    let hook_acceptance: Vec<(usize, F)> = relaxer_runners
-                        .iter()
-                        .flat_map(|(itype, runners)| {
-                            runners.iter().map(move |r| (*itype, r.acceptance_rate()))
-                        })
-                        .collect();
-
-                    let step_info = StepInfo {
-                        loop_idx,
-                        max_loops,
-                        phase: phase_info,
-                        fdist,
-                        frest,
-                        improvement_pct: fimp,
-                        radscale,
-                        precision: self.precision,
-                        hook_acceptance,
-                    };
-                    for h in self.handlers.iter_mut() {
-                        h.on_step(&step_info, &sys);
-                    }
-
-                    if self.handlers.iter().any(|h| h.should_stop()) {
-                        log::debug!("  Early stop requested at loop {loop_idx}");
+                match outcome {
+                    IterOutcome::Continue => {}
+                    IterOutcome::Converged => {
+                        converged = true;
                         break;
                     }
-                }
-
-                log::debug!(
-                    "    loop={loop_idx} f={:.4e} fdist={:.4e} frest={:.4e} radscale={:.4} fimp={:.2}% ncf={} ncg={} inform={}",
-                    res.f,
-                    fdist,
-                    frest,
-                    radscale,
-                    fimp,
-                    sys.ncf(),
-                    sys.ncg(),
-                    res.inform
-                );
-
-                // Check convergence
-                if fdist < self.precision && frest < self.precision {
-                    converged = true;
-                    log::debug!("  Converged at phase {phase} loop {loop_idx}");
-                    break;
-                }
-
-                // Radii reduction schedule (Packmol lines 940-948):
-                //   if (fdist<precision && fimp<10%) || fimp<2%: reduce radscale
-                if radscale > 1.0 && (fimp < 2.0 || (fdist < self.precision && fimp < 10.0)) {
-                    radscale = (0.9 * radscale).max(1.0);
-                    for i in 0..sys.ntotat {
-                        sys.radius[i] = sys.radius_ini[i].max(0.9 * sys.radius[i]);
-                    }
+                    IterOutcome::EarlyStop => break,
                 }
             }
 
@@ -777,6 +668,312 @@ pub fn evaluate_unscaled_sentinel(sys: &mut PackContext, xwork: &[F]) -> (F, F, 
     (f_total, fdist, frest)
 }
 
+/// Outcome of one main-loop iteration inside a packing phase.
+///
+/// Pulled out of `pack()` in phase A.4.3 to isolate the ~140-line per-iteration
+/// body that runs movebad → relaxers → pgencan → radii schedule. `Continue`
+/// means "run the next iteration"; `Converged` means the convergence predicate
+/// fired inside this iteration; `EarlyStop` means a `Handler::should_stop()`
+/// returned true.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IterOutcome {
+    Continue,
+    Converged,
+    EarlyStop,
+}
+
+/// Run one iteration of a packing phase's main loop.
+///
+/// Matches Packmol's per-iteration sequence in `app/packmol.f90` lines 815-948:
+///
+/// 1. `movebad` when `radscale == 1.0` and previous `fimp <= 10%` (unless
+///    disabled).
+/// 2. Per-target relaxer MC block.
+/// 3. `pgencan` on the working coordinate vector.
+/// 4. Unscaled-radii statistics (`fdist` / `frest` / `fimp`).
+/// 5. Handler `on_step` notification; early stop if any handler opts in.
+/// 6. Convergence check (`fdist < precision && frest < precision`).
+/// 7. Radii reduction schedule (only when `radscale > 1.0`).
+///
+/// The function takes each piece of mutable outer-loop state by `&mut` so the
+/// caller (the outer phase for-loop in `pack()`) retains ownership across
+/// iterations.
+#[allow(clippy::too_many_arguments)]
+pub fn run_iteration(
+    loop_idx: usize,
+    max_loops: usize,
+    is_all: bool,
+    phase: usize,
+    phase_info: PhaseInfo,
+    precision: F,
+    disable_movebad: bool,
+    movebad_cfg: &MoveBadConfig,
+    gencan_params: &GencanParams,
+    sys: &mut PackContext,
+    xwork: &mut Vec<F>,
+    swap: &mut SwapState,
+    flast: &mut F,
+    fimp_prev: &mut F,
+    radscale: &mut F,
+    relaxer_runners: &mut Vec<(usize, Vec<Box<dyn RelaxerRunner>>)>,
+    handlers: &mut [Box<dyn Handler>],
+    gencan_workspace: &mut GencanWorkspace,
+    rng: &mut SmallRng,
+) -> IterOutcome {
+    // movebad: Packmol triggers when radscale==1.0 AND fimp<=10.0
+    // (packmol.f90 line 815). fimp here is from the PREVIOUS iteration.
+    // After movebad, reset flast to the post-movebad f (Packmol line 821).
+    if !disable_movebad && *radscale == 1.0 && *fimp_prev <= 10.0 {
+        movebad(xwork, sys, precision, movebad_cfg, rng, gencan_workspace);
+        // Reset flast to the post-movebad f value so fimp is measured
+        // relative to movebad's starting point.
+        *flast = evaluate_unscaled(sys, xwork).0;
+    }
+
+    // Relaxer MC block: run per-target relaxers between movebad and pgencan.
+    // Each relaxer modifies the reference coords (coor) for its type.
+    for (itype, runners) in relaxer_runners.iter_mut() {
+        if !is_all && *itype != phase {
+            continue;
+        }
+
+        let base = sys.idfirst[*itype];
+        let na = sys.natoms[*itype];
+
+        for runner in runners.iter_mut() {
+            let saved: Vec<[F; 3]> = sys.coor[base..base + na].to_vec();
+            let f_before = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
+
+            let result = runner.on_iter(
+                &saved,
+                f_before,
+                &mut |trial: &[[F; 3]]| {
+                    sys.coor[base..base + na].copy_from_slice(trial);
+                    let f = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
+                    sys.coor[base..base + na].copy_from_slice(&saved);
+                    f
+                },
+                rng,
+            );
+
+            if let Some(new_coords) = result {
+                sys.coor[base..base + na].copy_from_slice(&new_coords);
+            }
+        }
+    }
+
+    // GENCAN on working x (compact for per-type, full for all-type)
+    sys.reset_eval_counters();
+    let res = pgencan(xwork, sys, gencan_params, precision, gencan_workspace);
+
+    // Save compact results back to swap (for restore later)
+    if !is_all {
+        swap.save_type(phase, xwork, sys);
+    }
+
+    // Compute statistics with unscaled radii
+    // (Packmol lines 833-841: radiuswork + computef + restore)
+    let (fx_unscaled, fdist, frest) = evaluate_unscaled(sys, xwork);
+
+    // fimp: percentage improvement in unscaled f from last iteration
+    // Packmol line 846: if(flast>0) fimp = -100*(fx-flast)/flast
+    let mut fimp = if *flast > 0.0 {
+        -100.0 * (fx_unscaled - *flast) / *flast
+    } else if fx_unscaled < objective_small_floor() {
+        100.0 // already converged
+    } else {
+        F::INFINITY
+    };
+    // Packmol lines 848-849: clamp to [-99.99, 99.99]
+    fimp = fimp.clamp(-99.99, 99.99);
+    *flast = fx_unscaled;
+    *fimp_prev = fimp;
+
+    if !handlers.is_empty() {
+        let hook_acceptance: Vec<(usize, F)> = relaxer_runners
+            .iter()
+            .flat_map(|(itype, runners)| runners.iter().map(move |r| (*itype, r.acceptance_rate())))
+            .collect();
+
+        let step_info = StepInfo {
+            loop_idx,
+            max_loops,
+            phase: phase_info,
+            fdist,
+            frest,
+            improvement_pct: fimp,
+            radscale: *radscale,
+            precision,
+            hook_acceptance,
+        };
+        for h in handlers.iter_mut() {
+            h.on_step(&step_info, sys);
+        }
+
+        if handlers.iter().any(|h| h.should_stop()) {
+            log::debug!("  Early stop requested at loop {loop_idx}");
+            return IterOutcome::EarlyStop;
+        }
+    }
+
+    log::debug!(
+        "    loop={loop_idx} f={:.4e} fdist={:.4e} frest={:.4e} radscale={:.4} fimp={:.2}% ncf={} ncg={} inform={}",
+        res.f,
+        fdist,
+        frest,
+        *radscale,
+        fimp,
+        sys.ncf(),
+        sys.ncg(),
+        res.inform
+    );
+
+    // Check convergence
+    if fdist < precision && frest < precision {
+        log::debug!("  Converged at phase {phase} loop {loop_idx}");
+        return IterOutcome::Converged;
+    }
+
+    // Radii reduction schedule (Packmol lines 940-948):
+    //   if (fdist<precision && fimp<10%) || fimp<2%: reduce radscale
+    if *radscale > 1.0 && (fimp < 2.0 || (fdist < precision && fimp < 10.0)) {
+        *radscale = (0.9 * *radscale).max(1.0);
+        for i in 0..sys.ntotat {
+            sys.radius[i] = sys.radius_ini[i].max(0.9 * sys.radius[i]);
+        }
+    }
+
+    IterOutcome::Continue
+}
+
+/// Sentinel: byte-identical pre-extraction body of `run_iteration`, kept as a
+/// `#[inline(never)]` comparison target for the per-extraction microbench gate
+/// (see `molrs-perf` skill § "Benchmarking during refactors"). The extracted
+/// function gates at ≤ +1% vs. this sentinel; the caller microbench gates at
+/// ≤ +2% vs. its sentinel variant.
+///
+/// DELETE after one Phase A refactor cycle stabilizes on main. The microbench
+/// itself stays permanently as a future-regression guard.
+#[inline(never)]
+#[allow(dead_code, clippy::too_many_arguments)]
+pub fn run_iteration_sentinel(
+    loop_idx: usize,
+    max_loops: usize,
+    is_all: bool,
+    phase: usize,
+    phase_info: PhaseInfo,
+    precision: F,
+    disable_movebad: bool,
+    movebad_cfg: &MoveBadConfig,
+    gencan_params: &GencanParams,
+    sys: &mut PackContext,
+    xwork: &mut Vec<F>,
+    swap: &mut SwapState,
+    flast: &mut F,
+    fimp_prev: &mut F,
+    radscale: &mut F,
+    relaxer_runners: &mut Vec<(usize, Vec<Box<dyn RelaxerRunner>>)>,
+    handlers: &mut [Box<dyn Handler>],
+    gencan_workspace: &mut GencanWorkspace,
+    rng: &mut SmallRng,
+) -> IterOutcome {
+    if !disable_movebad && *radscale == 1.0 && *fimp_prev <= 10.0 {
+        movebad(xwork, sys, precision, movebad_cfg, rng, gencan_workspace);
+        *flast = evaluate_unscaled(sys, xwork).0;
+    }
+
+    for (itype, runners) in relaxer_runners.iter_mut() {
+        if !is_all && *itype != phase {
+            continue;
+        }
+
+        let base = sys.idfirst[*itype];
+        let na = sys.natoms[*itype];
+
+        for runner in runners.iter_mut() {
+            let saved: Vec<[F; 3]> = sys.coor[base..base + na].to_vec();
+            let f_before = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
+
+            let result = runner.on_iter(
+                &saved,
+                f_before,
+                &mut |trial: &[[F; 3]]| {
+                    sys.coor[base..base + na].copy_from_slice(trial);
+                    let f = sys.evaluate(xwork, EvalMode::FOnly, None).f_total;
+                    sys.coor[base..base + na].copy_from_slice(&saved);
+                    f
+                },
+                rng,
+            );
+
+            if let Some(new_coords) = result {
+                sys.coor[base..base + na].copy_from_slice(&new_coords);
+            }
+        }
+    }
+
+    sys.reset_eval_counters();
+    let res = pgencan(xwork, sys, gencan_params, precision, gencan_workspace);
+
+    if !is_all {
+        swap.save_type(phase, xwork, sys);
+    }
+
+    let (fx_unscaled, fdist, frest) = evaluate_unscaled(sys, xwork);
+
+    let mut fimp = if *flast > 0.0 {
+        -100.0 * (fx_unscaled - *flast) / *flast
+    } else if fx_unscaled < objective_small_floor() {
+        100.0
+    } else {
+        F::INFINITY
+    };
+    fimp = fimp.clamp(-99.99, 99.99);
+    *flast = fx_unscaled;
+    *fimp_prev = fimp;
+
+    if !handlers.is_empty() {
+        let hook_acceptance: Vec<(usize, F)> = relaxer_runners
+            .iter()
+            .flat_map(|(itype, runners)| runners.iter().map(move |r| (*itype, r.acceptance_rate())))
+            .collect();
+
+        let step_info = StepInfo {
+            loop_idx,
+            max_loops,
+            phase: phase_info,
+            fdist,
+            frest,
+            improvement_pct: fimp,
+            radscale: *radscale,
+            precision,
+            hook_acceptance,
+        };
+        for h in handlers.iter_mut() {
+            h.on_step(&step_info, sys);
+        }
+
+        if handlers.iter().any(|h| h.should_stop()) {
+            return IterOutcome::EarlyStop;
+        }
+    }
+
+    let _ = res;
+
+    if fdist < precision && frest < precision {
+        return IterOutcome::Converged;
+    }
+
+    if *radscale > 1.0 && (fimp < 2.0 || (fdist < precision && fimp < 10.0)) {
+        *radscale = (0.9 * *radscale).max(1.0);
+        for i in 0..sys.ntotat {
+            sys.radius[i] = sys.radius_ini[i].max(0.9 * sys.radius[i]);
+        }
+    }
+
+    IterOutcome::Continue
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -812,5 +1009,116 @@ mod tests {
             a.radius.iter().all(|&r| (r - 0.75).abs() < 1e-15),
             "radius not restored to pre-call scaled value"
         );
+    }
+
+    /// Pins `run_iteration` and `run_iteration_sentinel` to identical outcomes
+    /// + identical post-call state on a minimal empty-molecule context.
+    ///
+    /// With `ntotmol=0`, `xwork` is empty and `pgencan` returns a trivial
+    /// result without iterating; `evaluate_unscaled` returns `(0, 0, 0)`; the
+    /// convergence branch fires (`fdist=0 < precision`) and both variants
+    /// return `IterOutcome::Converged`. `movebad` is suppressed via
+    /// `disable_movebad = true` and relaxers / handlers are empty — the body
+    /// still threads through the full pgencan + unscaled + fimp sequence that
+    /// was extracted.
+    #[test]
+    fn run_iteration_matches_sentinel_on_empty_context() {
+        fn build() -> (PackContext, Vec<F>, SwapState, GencanWorkspace) {
+            let ntotat = 4;
+            let mut sys = PackContext::new(ntotat, 0, 0);
+            sys.radius.fill(0.75);
+            sys.radius_ini.fill(1.5);
+            sys.work.radiuswork.resize(ntotat, 0.0);
+            let x: Vec<F> = Vec::new();
+            let swap = SwapState::init(&x, &sys);
+            let ws = GencanWorkspace::new();
+            (sys, x, swap, ws)
+        }
+        let phase_info = PhaseInfo {
+            phase: 0,
+            total_phases: 1,
+            molecule_type: None,
+        };
+        let movebad_cfg = MoveBadConfig {
+            movefrac: 0.05,
+            maxmove_per_type: &[],
+            movebadrandom: false,
+            gencan_maxit: 20,
+        };
+        let gencan_params = GencanParams::default();
+
+        let (mut sys_a, mut xwork_a, mut swap_a, mut ws_a) = build();
+        let (mut sys_b, mut xwork_b, mut swap_b, mut ws_b) = build();
+
+        let mut flast_a = 0.0_f64;
+        let mut fimp_prev_a = F::INFINITY;
+        let mut radscale_a = 1.0_f64;
+        let mut runners_a: Vec<(usize, Vec<Box<dyn RelaxerRunner>>)> = Vec::new();
+        let mut handlers_a: Vec<Box<dyn Handler>> = Vec::new();
+        let mut rng_a = SmallRng::seed_from_u64(42);
+
+        let out_fn = run_iteration(
+            0,
+            10,
+            true,
+            0,
+            phase_info,
+            0.01,
+            true,
+            &movebad_cfg,
+            &gencan_params,
+            &mut sys_a,
+            &mut xwork_a,
+            &mut swap_a,
+            &mut flast_a,
+            &mut fimp_prev_a,
+            &mut radscale_a,
+            &mut runners_a,
+            &mut handlers_a,
+            &mut ws_a,
+            &mut rng_a,
+        );
+
+        let mut flast_b = 0.0_f64;
+        let mut fimp_prev_b = F::INFINITY;
+        let mut radscale_b = 1.0_f64;
+        let mut runners_b: Vec<(usize, Vec<Box<dyn RelaxerRunner>>)> = Vec::new();
+        let mut handlers_b: Vec<Box<dyn Handler>> = Vec::new();
+        let mut rng_b = SmallRng::seed_from_u64(42);
+
+        let out_sent = run_iteration_sentinel(
+            0,
+            10,
+            true,
+            0,
+            phase_info,
+            0.01,
+            true,
+            &movebad_cfg,
+            &gencan_params,
+            &mut sys_b,
+            &mut xwork_b,
+            &mut swap_b,
+            &mut flast_b,
+            &mut fimp_prev_b,
+            &mut radscale_b,
+            &mut runners_b,
+            &mut handlers_b,
+            &mut ws_b,
+            &mut rng_b,
+        );
+
+        assert_eq!(out_fn, out_sent, "fn vs sentinel: outcome mismatch");
+        assert_eq!(
+            out_fn,
+            IterOutcome::Converged,
+            "expected trivial convergence"
+        );
+        assert_eq!(flast_a, flast_b, "flast drift");
+        assert_eq!(fimp_prev_a, fimp_prev_b, "fimp_prev drift");
+        assert_eq!(radscale_a, radscale_b, "radscale drift");
+        assert_eq!(sys_a.radius, sys_b.radius, "radius drift");
+        assert_eq!(sys_a.fdist, sys_b.fdist, "fdist drift");
+        assert_eq!(sys_a.frest, sys_b.frest, "frest drift");
     }
 }

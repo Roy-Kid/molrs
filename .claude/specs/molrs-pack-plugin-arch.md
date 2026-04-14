@@ -23,8 +23,8 @@
 - [x] **A.3** rename：`hook.rs` 的 `Hook`/`HookRunner`/`TorsionMcHook`/`TorsionMcRunner` → `Relaxer`/`RelaxerRunner`/`TorsionMcRelaxer`/`TorsionMcRelaxerRunner`；`Target::hooks` → `relaxers`、`with_hook` → `with_relaxer`；文件 `hook.rs` → `relaxer.rs`、`tests/hook.rs` → `tests/relaxer.rs`；trait/struct 名字保 `pub use ... as Hook/HookRunner/TorsionMcHook` 兼容别名（方法名 `with_relaxer` 无别名，更新 5 个测试 + 1 example 调用点）
 - [ ] **A.4** 拆 `packer.rs` → `phase/{per_type, geometric_prefit, main_loop}.rs`；**每抽一个 phase 函数都落 sentinel + 函数微基准 + 调用方微基准**（首次真正应用 extract-bench loop）
     - [x] **A.4.1** 抽 `evaluate_unscaled(sys, xwork) -> (f, fdist, frest)`（消除三处 `radiuswork` swap-evaluate-restore 重复）；落 `evaluate_unscaled_sentinel` + `benches/evaluate_unscaled.rs`（fn + caller 两组微基准）；gate：fn -3.4% vs sentinel（远过 ≤+1%），caller +1.1%（过 ≤+2%）
-    - [ ] **A.4.2** 抽 main loop 外层 for 循环 body → `fn run_phase(...)`（per-type + all-type 共用）
-    - [ ] **A.4.3** 抽 inner loop body → `fn run_iteration(...)`
+    - [x] **A.4.3** 抽 inner loop body → `fn run_iteration(loop_idx, ..., &mut sys, ..., &mut rng) -> IterOutcome`（Continue / Converged / EarlyStop）；落 `run_iteration_sentinel` + `benches/run_iteration.rs`（fn + caller 两组）+ 单元测试（空 context 上 fn == sentinel）；`SwapState` 提升 `pub`（bench 需要）；**先于 A.4.2 落**是因为外层 phase body 在 inner loop 抽出后变得 trivial，顺序反过来可以把复杂的一次性做完
+    - [ ] **A.4.2** 抽 main loop 外层 for 循环 body → `fn run_phase(...)`（per-type + all-type 共用；在 A.4.3 之后此步变为薄壳）
     - [ ] **A.4.4** 进一步拆 setup / geometric prefit（如果仍需要）
 - [ ] **A.5** 把 `PackContext::evaluate` 的签名固化为 `trait Objective`；`impl Objective for PackContext`
 - [ ] **A.6** `pgencan` 入参 `&mut PackContext` → `&mut dyn Objective`
@@ -52,6 +52,7 @@
 - `A.2` — `Restraint` → `BuiltinConstraint` 重命名；`pub use ... as Restraint` 保 API；`pack_mixture` 478→482 ms（噪声内）
 - `A.3` — `Hook`/`HookRunner`/`TorsionMcHook` → `Relaxer`/`RelaxerRunner`/`TorsionMcRelaxer`；`hook.rs` → `relaxer.rs`；trait 别名保 API；`pack_mixture` 472→480 ms（噪声内，p>0.05）
 - `A.4.1` — 抽 `evaluate_unscaled` 去三处重复；落 sentinel + `benches/evaluate_unscaled.rs` + 单元测试（首个走完 extract-bench loop 全纪律的 commit）；fn gate -3.4%、caller gate +1.1%、e2e 467→484 ms（p=0.08, 噪声内）
+- `A.4.3` — 抽 inner loop body → `run_iteration`（140 行移到纯函数）；落 `run_iteration_sentinel` + `benches/run_iteration.rs` + 空-context 单元测试；`SwapState` pub 化；fn gate -2.4%（过 ≤+1%），caller gate -0.3%（过 ≤+2%），e2e 484→481 ms p=0.57（无变化）；112 tests pass（+1 新测试）；先于 A.4.2 — phase body 在此之后变 thin wrapper
 
 ---
 
