@@ -17,8 +17,7 @@ permissions:
 #      │                   │                ├─ publish-ff                      │
 #      │                   │                └─ publish-embed ──────────────────┘
 #      ├─ publish-wasm
-#      ├─ build-wheels (ubuntu/macos/windows) ─┐
-#      └─ build-sdist ──────────────────────────┴─ publish-python
+#      └─ publish-python  (maturin publish, manylinux, trusted publishing)
 
 jobs:
   ci:
@@ -157,52 +156,17 @@ jobs:
         working-directory: molrs-wasm/pkg
         run: npm publish --access public --provenance
 
-  # ── Python wheels (PyPI) ─────────────────────────────────────────────────────
-
-  build-wheels:
-    needs: ci
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          working-directory: molrs-python
-          args: --release --out dist
-          manylinux: auto
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.os }}
-          path: molrs-python/dist
-
-  build-sdist:
-    needs: ci
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          working-directory: molrs-python
-          args: --out dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sdist
-          path: molrs-python/dist
+  # ── Python (PyPI, maturin trusted publishing) ───────────────────────────────
 
   publish-python:
-    needs: [build-wheels, build-sdist]
+    needs: ci
     runs-on: ubuntu-latest
     environment: pypi
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
         with:
-          path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist
-          verbose: true
+          command: publish
+          working-directory: molrs-python
+          args: --no-sdist
+          manylinux: auto
