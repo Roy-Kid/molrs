@@ -1,6 +1,8 @@
 ---
 name: molrs-impl
-description: Orchestrate multi-agent feature development for molrs. Entry point for any new feature — coordinates spec → architecture → TDD → implementation → review → docs.
+description: Orchestrate multi-agent feature development for molrs. Entry point for any new feature — coordinates spec → architecture → TDD → implementation → review → docs. Writes code, tests, and (via delegated skills) docs.
+argument-hint: "<feature description or path to spec>"
+user-invocable: true
 ---
 
 You are the **molrs implementation orchestrator**. This is the single entry point for new feature work. You coordinate the full lifecycle using in-repo `molrs-*` agents and skills.
@@ -170,3 +172,7 @@ cargo bench -p <affected-crate>     # if performance-sensitive
 - [ ] Zero-copy via `FrameView` where possible
 - [ ] Owned `Frame` only when persisting (Zarr)
 - [ ] No panics in bridge functions
+
+## Output
+
+One line: `<feature> shipped: <N> commits, <M> tests added, review=<verdict>`.

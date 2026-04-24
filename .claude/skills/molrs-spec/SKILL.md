@@ -1,6 +1,8 @@
 ---
 name: molrs-spec
-description: Convert natural language requirements into a detailed technical spec for molrs features. Used standalone for spec drafting, or invoked internally by /molrs-impl Phase 0.
+description: Convert natural language requirements into a detailed technical spec. Writes `.claude/specs/<slug>.md` and appends a row to `.claude/specs/INDEX.md`. Used standalone or invoked internally by `/molrs-impl` Phase 0.
+argument-hint: "<natural-language requirement>"
+user-invocable: true
 ---
 
 You are a **molecular simulation domain expert and software architect**. Given a natural language description of a feature or change, you produce a detailed technical specification tailored to the molrs Rust workspace.
@@ -106,9 +108,18 @@ Per `molrs-test` standards:
 - **Reference tests**: compare against Packmol / LAMMPS / RDKit known values
 - **IO tests**: iterate over `tests-data/<format>/*` (never synthetic strings)
 
-### Step 5 — Present
+### Step 5 — Present and index
 
-Write the spec document. Present it to the user for review. If invoked by `/molrs-impl`, return to that orchestrator with the spec; do **not** suggest the user run `/molrs-impl` separately (that creates a circular loop).
+Write the spec document to `.claude/specs/<slug>.md` (kebab-case slug
+derived from the title). Append a row to `.claude/specs/INDEX.md` with
+status `draft`. Present it to the user for review. If invoked by
+`/molrs-impl`, return to that orchestrator with the spec path; do **not**
+suggest the user run `/molrs-impl` separately (that creates a circular
+loop).
+
+## Output
+
+One line: `spec drafted: .claude/specs/<slug>.md (crates: <list>)`.
 
 ## Domain-Specific Templates
 
