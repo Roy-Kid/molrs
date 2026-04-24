@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_column_access_on_column() {
-        let col = Column::Float(Array1::from_vec(vec![1.0 as F, 2.0]).into_dyn());
+        let col = Column::from_float(Array1::from_vec(vec![1.0 as F, 2.0]).into_dyn());
         assert!(ColumnAccess::as_float_view(&col).is_some());
         assert!(ColumnAccess::as_int_view(&col).is_none());
         assert_eq!(ColumnAccess::nrows(&col), Some(2));
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_column_access_on_column_view() {
-        let col = Column::Int(Array1::from_vec(vec![1 as I, 2, 3]).into_dyn());
+        let col = Column::from_int(Array1::from_vec(vec![1 as I, 2, 3]).into_dyn());
         let view = ColumnView::from(&col);
         assert!(ColumnAccess::as_int_view(&view).is_some());
         assert!(ColumnAccess::as_float_view(&view).is_none());

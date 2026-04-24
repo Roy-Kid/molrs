@@ -675,43 +675,45 @@ fn json_to_pyobject(py: Python<'_>, value: &SchemaValue) -> PyResult<Py<PyAny>> 
 
 fn py_any_to_column(value: &Bound<'_, PyAny>) -> PyResult<Column> {
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, f32>>() {
-        return Ok(Column::Float(arr.as_array().mapv(|v| v as F).into_dyn()));
+        return Ok(Column::from_float(arr.as_array().mapv(|v| v as F).into_dyn()));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, f64>>() {
-        return Ok(Column::Float(arr.as_array().mapv(|v| v as F).into_dyn()));
+        return Ok(Column::from_float(arr.as_array().mapv(|v| v as F).into_dyn()));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, i32>>() {
-        return Ok(Column::Int(arr.as_array().mapv(|v| v as I).into_dyn()));
+        return Ok(Column::from_int(arr.as_array().mapv(|v| v as I).into_dyn()));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, i64>>() {
-        return Ok(Column::Int(arr.as_array().mapv(|v| v as I).into_dyn()));
+        return Ok(Column::from_int(arr.as_array().mapv(|v| v as I).into_dyn()));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, u32>>() {
-        return Ok(Column::UInt(arr.as_array().mapv(|v| v as U).into_dyn()));
+        return Ok(Column::from_uint(arr.as_array().mapv(|v| v as U).into_dyn()));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, u64>>() {
-        return Ok(Column::UInt(arr.as_array().mapv(|v| v as U).into_dyn()));
+        return Ok(Column::from_uint(arr.as_array().mapv(|v| v as U).into_dyn()));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, bool>>() {
-        return Ok(Column::Bool(arr.as_array().to_owned().into_dyn()));
+        return Ok(Column::from_bool(arr.as_array().to_owned().into_dyn()));
     }
     if let Ok(strings) = value.extract::<Vec<String>>() {
-        return Ok(Column::String(ArrayD::from_shape_vec(IxDyn(&[strings.len()]), strings).unwrap()));
+        return Ok(Column::from_string(
+            ArrayD::from_shape_vec(IxDyn(&[strings.len()]), strings).unwrap(),
+        ));
     }
     if let Ok(v) = value.extract::<f64>() {
-        return Ok(Column::Float(ArrayD::from_elem(IxDyn(&[]), v as F)));
+        return Ok(Column::from_float(ArrayD::from_elem(IxDyn(&[]), v as F)));
     }
     if let Ok(v) = value.extract::<i64>() {
-        return Ok(Column::Int(ArrayD::from_elem(IxDyn(&[]), v as I)));
+        return Ok(Column::from_int(ArrayD::from_elem(IxDyn(&[]), v as I)));
     }
     if let Ok(v) = value.extract::<u64>() {
-        return Ok(Column::UInt(ArrayD::from_elem(IxDyn(&[]), v as U)));
+        return Ok(Column::from_uint(ArrayD::from_elem(IxDyn(&[]), v as U)));
     }
     if let Ok(v) = value.extract::<bool>() {
-        return Ok(Column::Bool(ArrayD::from_elem(IxDyn(&[]), v)));
+        return Ok(Column::from_bool(ArrayD::from_elem(IxDyn(&[]), v)));
     }
     if let Ok(v) = value.extract::<String>() {
-        return Ok(Column::String(ArrayD::from_elem(IxDyn(&[]), v)));
+        return Ok(Column::from_string(ArrayD::from_elem(IxDyn(&[]), v)));
     }
     Err(PyTypeError::new_err(
         "observable data must be a supported numpy array, scalar, or list[str]",
@@ -746,16 +748,21 @@ fn observable_data_to_pyobject(py: Python<'_>, data: &ObservableData) -> PyResul
 
 fn column_to_pyobject(py: Python<'_>, column: &Column) -> PyResult<Py<PyAny>> {
     match column {
+        // .mapv through ColumnHolder's Deref produces an owned ArrayD<NpF>.
         Column::Float(array) => Ok(array
-            .clone()
+            .array()
             .mapv(|v| v as NpF)
             .into_pyarray(py)
             .into_any()
             .unbind()),
-        Column::Int(array) => Ok(array.clone().into_pyarray(py).into_any().unbind()),
-        Column::UInt(array) => Ok(array.clone().into_pyarray(py).into_any().unbind()),
-        Column::Bool(array) => Ok(array.clone().into_pyarray(py).into_any().unbind()),
-        Column::U8(array) => Ok(array.clone().into_pyarray(py).into_any().unbind()),
+        // For non-Float columns the caller expects an owned numpy array, so we
+        // deep-clone the inner ArrayD out of the holder. `.array().clone()`
+        // takes &ArrayD<T> and calls ArrayD::clone (deep-copy), detaching from
+        // any foreign-backed holder as a side effect.
+        Column::Int(array) => Ok(array.array().clone().into_pyarray(py).into_any().unbind()),
+        Column::UInt(array) => Ok(array.array().clone().into_pyarray(py).into_any().unbind()),
+        Column::Bool(array) => Ok(array.array().clone().into_pyarray(py).into_any().unbind()),
+        Column::U8(array) => Ok(array.array().clone().into_pyarray(py).into_any().unbind()),
         Column::String(array) => {
             if array.ndim() == 0 {
                 let value = array.iter().next().cloned().unwrap_or_default();

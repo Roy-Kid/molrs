@@ -1,50 +1,71 @@
 ---
 name: molrs-review
-description: Comprehensive code review aggregating architecture, performance, documentation, scientific correctness, and FFI safety. Use after writing code or during PR review.
-argument-hint: "[path or module]"
+description: Aggregate multi-axis code review. Fans out to architect, optimizer, documenter, scientist, ffi-safety agents in parallel and renders a single severity report. Does not edit code.
+argument-hint: "[path or module — defaults to `git diff --name-only HEAD`]"
 user-invocable: true
 ---
 
-Review code for: $ARGUMENTS
+# molrs-review
 
-If no path given, review all files modified in `git diff --name-only HEAD`.
+Read `CLAUDE.md` for molrs conventions. This skill orchestrates a review;
+rules for each axis live in the paired reference skills, which the
+corresponding agent loads. Do NOT duplicate rule text here.
 
-## Workflow
+## Procedure
 
-Spawn the relevant `molrs-*` agents in parallel. Each agent applies its corresponding skill's standards and reports findings. Do NOT duplicate the rule lists here — they live in the skills.
+1. **Scope** — `$ARGUMENTS` if given, else `git diff --name-only HEAD`.
+   Drop files outside the workspace (generated artifacts, `target/`,
+   `pkg/`).
 
-| Dimension | Agent | Skill (standards) | When to invoke |
-|---|---|---|---|
-| Architecture | `molrs-architect` | `molrs-arch` | Always |
-| Performance | `molrs-optimizer` | `molrs-perf` | Hot-path code (potentials, neighbors, GENCAN inner loop) |
-| Documentation | `molrs-documenter` | `molrs-doc` | Public API touched |
-| Scientific correctness | `molrs-scientist` | `molrs-science` | Physics touched (potentials, integrators, constraints) |
-| FFI safety | (inline review) | `molrs-ffi` | `molrs-cxxapi` touched |
+2. **Dispatch in parallel** — spawn all applicable agents in a single
+   message. Conditional axes skip silently if no matching files:
 
-For code-quality and immutability dimensions that do not have dedicated agents, apply inline:
+   | Agent | Paired skill | When to invoke |
+   |---|---|---|
+   | `molrs-architect` | `molrs-arch` | Always |
+   | `molrs-tester` | `molrs-test` | Always |
+   | `molrs-optimizer` | `molrs-perf` | Hot-path code (`molrs-ff/potential/**`, `molrs-core/neighbors/**`, `molrs-pack/objective.rs`, `molrs-pack/packer.rs`) |
+   | `molrs-documenter` | `molrs-doc` | Any `pub` item added or changed |
+   | `molrs-scientist` | `molrs-science` | Physics touched (potentials, integrators, constraints, stereo) |
+   | `molrs-ffi-safety` | `molrs-ffi` | Any change under `molrs-cxxapi/`, `molrs-python/src/`, `molrs-wasm/src/`, `molrs-capi/` |
+   | `molrs-docs-engineer` | `molrs-docs` | PyO3/wasm-bindgen bindings added or renamed, or any `docs/**` change |
 
-- **Code quality**: functions < 50 lines, files < 800 lines, nesting ≤ 4 levels, descriptive naming, `cargo clippy` clean, `cargo fmt` compliant
-- **Immutability**: input Frame/Block not mutated; clone before modification; owned vs borrowed semantics correct
+   Inline checks (no dedicated agent):
+
+   - **Code quality** — functions < 50 lines, files < 800 lines, nesting
+     ≤ 4 levels, `cargo clippy` clean, `cargo fmt` compliant.
+   - **Immutability** — input Frame/Block not mutated; clone before
+     modification; owned vs borrowed semantics correct.
+
+3. **Aggregate** — collect agent outputs (each agent emits
+   `[SEVERITY] file:line — message` lines). Render the severity table
+   below.
 
 ## Severity
 
-- **CRITICAL** — safety / architecture violation. Block merge.
-- **HIGH** — missing tests, performance regression, wrong physics.
+- **CRITICAL** — safety / architecture violation, wrong physics, FFI
+  panic risk. Block merge.
+- **HIGH** — missing tests, performance regression, wrong units.
 - **MEDIUM** — style, documentation gaps.
 - **LOW** — nice to have.
 
-## Output Format
+## Output
 
 ```
 CODE REVIEW: <path>
 
-ARCHITECTURE:    <findings from molrs-architect>
-PERFORMANCE:     <findings from molrs-optimizer>
-DOCUMENTATION:   <findings from molrs-documenter>
-SCIENCE:         <findings from molrs-scientist>
-FFI SAFETY:      <inline review against molrs-ffi skill, if applicable>
-CODE QUALITY:    <inline checklist results>
-IMMUTABILITY:    <inline checklist results>
+ARCHITECTURE:   <findings>
+TESTING:        <findings>
+PERFORMANCE:    <findings | skipped: no hot-path files>
+DOCUMENTATION:  <findings | skipped: no pub API touched>
+SCIENCE:        <findings | skipped: no physics touched>
+FFI SAFETY:     <findings | skipped: no FFI surface touched>
+DOCS SYSTEM:    <findings | skipped: no bindings/docs touched>
+CODE QUALITY:   <inline checklist>
+IMMUTABILITY:   <inline checklist>
 
 SUMMARY: N CRITICAL, N HIGH, N MEDIUM, N LOW
+VERDICT: APPROVE | REQUEST CHANGES | BLOCK
 ```
+
+End with a one-line recap: `reviewed <N> files, <axes-run> agents, <verdict>`.

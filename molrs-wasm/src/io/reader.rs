@@ -270,7 +270,7 @@ impl PdbReader {
 /// ```
 #[wasm_bindgen(js_name = LAMMPSReader)]
 pub struct LammpsReader {
-    inner: LAMMPSDataReader<Cursor<Vec<u8>>>,
+    content: Vec<u8>,
     cached_len: Option<usize>,
 }
 
@@ -289,9 +289,8 @@ impl LammpsReader {
     /// ```
     #[wasm_bindgen(constructor)]
     pub fn new(content: &str) -> LammpsReader {
-        let bytes = content.as_bytes().to_vec();
         LammpsReader {
-            inner: LAMMPSDataReader::new(Cursor::new(bytes)),
+            content: content.as_bytes().to_vec(),
             cached_len: None,
         }
     }
@@ -324,8 +323,12 @@ impl LammpsReader {
             return Ok(None);
         }
 
-        let rs_frame = self
-            .inner
+        // Build a fresh rs reader each call: `FrameReader::read_frame` is a
+        // single-shot cursor API (sets `returned=true` after first call), so
+        // reusing `inner` across `len()` and `read(0)` returned None on the
+        // second call. PDBReader already uses this pattern — mirror it here.
+        let mut reader = LAMMPSDataReader::new(Cursor::new(self.content.as_slice()));
+        let rs_frame = reader
             .read_frame()
             .map_err(|e| JsValue::from_str(&format!("LAMMPS read error: {}", e)))?;
 
@@ -510,6 +513,24 @@ impl SdfReader {
 mod tests {
     use super::*;
     use wasm_bindgen_test::*;
+
+    #[wasm_bindgen_test]
+    fn test_lammps_reader_len_then_read() {
+        // Regression: `len()` used to call `read(0)` which flipped the
+        // inner reader's `returned` flag, causing a subsequent `read(0)`
+        // from the lazy FrameProvider in reader.ts to return None
+        // ("lammps reader returned no frame at step 0").
+        let data = "LAMMPS data\n\n\
+                    2 atoms\n1 atom types\n\n\
+                    0.0 10.0 xlo xhi\n0.0 10.0 ylo yhi\n0.0 10.0 zlo zhi\n\n\
+                    Atoms\n\n\
+                    1 1 1.0 2.0 3.0\n2 1 4.0 5.0 6.0\n";
+        let mut reader = LammpsReader::new(data);
+        assert_eq!(reader.len().expect("len"), 1);
+        let frame = reader.read(0).expect("read").expect("frame");
+        let atoms = frame.get_block("atoms").expect("atoms");
+        assert_eq!(atoms.copy_col_f("x").expect("x").length(), 2);
+    }
 
     #[wasm_bindgen_test]
     fn test_pdb_reader() {

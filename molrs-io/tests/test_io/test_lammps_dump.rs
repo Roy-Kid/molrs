@@ -22,11 +22,32 @@ use molrs_io::lammps_dump::{read_lammps_dump, write_lammps_dump};
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Position column names the lammps dump reader may produce.
-const POS_COLS: &[&str] = &["x", "xs", "xu", "xsu", "ix"];
+fn has_xyz(atoms: &molrs::block::Block) -> bool {
+    atoms.get_float("x").is_some()
+        && atoms.get_float("y").is_some()
+        && atoms.get_float("z").is_some()
+}
 
-fn has_any_pos_col(atoms: &molrs::block::Block) -> bool {
-    POS_COLS.iter().any(|col| atoms.get_float(col).is_some())
+fn has_xu(atoms: &molrs::block::Block) -> bool {
+    atoms.get_float("xu").is_some()
+        && atoms.get_float("yu").is_some()
+        && atoms.get_float("zu").is_some()
+}
+
+fn has_xs(atoms: &molrs::block::Block) -> bool {
+    atoms.get_float("xs").is_some()
+        && atoms.get_float("ys").is_some()
+        && atoms.get_float("zs").is_some()
+}
+
+fn has_xsu(atoms: &molrs::block::Block) -> bool {
+    atoms.get_float("xsu").is_some()
+        && atoms.get_float("ysu").is_some()
+        && atoms.get_float("zsu").is_some()
+}
+
+fn has_any_coordinate_triplet(atoms: &molrs::block::Block) -> bool {
+    has_xyz(atoms) || has_xu(atoms) || has_xs(atoms) || has_xsu(atoms)
 }
 
 fn all_lammps_dump_files() -> Vec<std::path::PathBuf> {
@@ -64,7 +85,7 @@ fn all_lammps_bad_files() -> Vec<std::path::PathBuf> {
 // ---------------------------------------------------------------------------
 
 /// Every LAMMPS dump file must parse (returning ≥ 1 frame with ≥ 1 atom).
-/// Position columns vary by file: x/xs/xu/xsu/ix are all valid.
+/// Readers preserve whatever coordinate triplet the dump provides.
 #[test]
 fn test_all_lammps_dump_files_parse() {
     for path in all_lammps_dump_files() {
@@ -86,11 +107,10 @@ fn test_all_lammps_dump_files_parse() {
                 i
             );
             assert!(
-                has_any_pos_col(atoms),
-                "{:?}: frame {} missing any position column ({:?})",
+                has_any_coordinate_triplet(atoms),
+                "{:?}: frame {} missing any supported coordinate triplet",
                 path,
-                i,
-                POS_COLS
+                i
             );
         }
     }
@@ -168,7 +188,8 @@ fn test_lenient_atom_duplicated_id() {
     // Erroring is also acceptable.
 }
 
-/// nacl.lammpstrj has 512 atoms and uses scaled coordinates (xs ys zs).
+/// nacl.lammpstrj has 512 atoms and preserves native xs/ys/zs without
+/// synthesizing x/y/z.
 #[test]
 fn test_nacl_scaled_coords() {
     let path = crate::test_data::get_test_data_path("lammps/nacl.lammpstrj");
@@ -178,7 +199,11 @@ fn test_nacl_scaled_coords() {
     assert_eq!(atoms.nrows().unwrap(), 512, "NaCl has 512 atoms");
     assert!(
         atoms.get_float("xs").is_some(),
-        "nacl uses scaled coords (xs column)"
+        "native scaled coord columns should be preserved"
+    );
+    assert!(
+        atoms.get_float("x").is_none(),
+        "reader should not synthesize x/y/z from scaled coordinates"
     );
 }
 

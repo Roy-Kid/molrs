@@ -1004,6 +1004,139 @@ ITEM: ATOMS id type x y z vx vy vz q c_pe
     }
 
     #[test]
+    fn test_preserves_unwrapped_coords_without_synthesizing_xyz() {
+        let dump = "\
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+2
+ITEM: BOX BOUNDS pp pp pp
+0.0 10.0
+0.0 10.0
+0.0 10.0
+ITEM: ATOMS id type xu yu zu
+1 1 1.0 2.0 3.0
+2 1 4.0 5.0 6.0
+";
+        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let frame = reader.read_frame().unwrap().expect("parse");
+        let atoms = frame.get("atoms").expect("atoms");
+
+        let x = atoms.get_float("xu").expect("xu");
+        let y = atoms.get_float("yu").expect("yu");
+        let z = atoms.get_float("zu").expect("zu");
+
+        assert_eq!(x.iter().copied().collect::<Vec<_>>(), vec![1.0, 4.0]);
+        assert_eq!(y.iter().copied().collect::<Vec<_>>(), vec![2.0, 5.0]);
+        assert_eq!(z.iter().copied().collect::<Vec<_>>(), vec![3.0, 6.0]);
+        assert!(
+            atoms.get_float("x").is_none(),
+            "reader should not synthesize x/y/z from xu/yu/zu"
+        );
+    }
+
+    #[test]
+    fn test_preserves_scaled_coords_without_synthesizing_xyz() {
+        let dump = "\
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+2
+ITEM: BOX BOUNDS pp pp pp
+1.0 11.0
+2.0 22.0
+3.0 43.0
+ITEM: ATOMS id type xs ys zs
+1 1 0.0 0.0 0.0
+2 1 0.5 0.5 0.5
+";
+        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let frame = reader.read_frame().unwrap().expect("parse");
+        let atoms = frame.get("atoms").expect("atoms");
+
+        let x = atoms.get_float("xs").expect("xs");
+        let y = atoms.get_float("ys").expect("ys");
+        let z = atoms.get_float("zs").expect("zs");
+
+        assert_eq!(x.iter().copied().collect::<Vec<_>>(), vec![0.0, 0.5]);
+        assert_eq!(y.iter().copied().collect::<Vec<_>>(), vec![0.0, 0.5]);
+        assert_eq!(z.iter().copied().collect::<Vec<_>>(), vec![0.0, 0.5]);
+        assert!(
+            atoms.get_float("x").is_none(),
+            "reader should preserve source columns only"
+        );
+    }
+
+    #[test]
+    fn test_preserves_triclinic_scaled_coords_as_read() {
+        let dump = "\
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+1
+ITEM: BOX BOUNDS xy xz yz pp pp pp
+0.0 14.0 1.5
+0.0 23.5 2.5
+0.0 30.0 3.5
+ITEM: ATOMS id type xs ys zs
+1 1 0.25 0.5 0.75
+";
+        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let frame = reader.read_frame().unwrap().expect("parse");
+        let atoms = frame.get("atoms").expect("atoms");
+
+        let x = atoms.get_float("xs").expect("xs");
+        let y = atoms.get_float("ys").expect("ys");
+        let z = atoms.get_float("zs").expect("zs");
+
+        assert!((x[0] - 0.25).abs() < 1e-6);
+        assert!((y[0] - 0.5).abs() < 1e-6);
+        assert!((z[0] - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_preserves_mixed_scaled_and_real_coords() {
+        let dump = "\
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+1
+ITEM: BOX BOUNDS pp pp pp
+0.0 10.0
+0.0 10.0
+0.0 10.0
+ITEM: ATOMS id type xs yu zu
+1 1 0.5 5.0 5.0
+";
+        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let frame = reader.read_frame().unwrap().expect("mixed coords parse");
+        let atoms = frame.get("atoms").expect("atoms");
+        assert_eq!(atoms.get_float("xs").expect("xs")[0], 0.5);
+        assert_eq!(atoms.get_float("yu").expect("yu")[0], 5.0);
+        assert_eq!(atoms.get_float("zu").expect("zu")[0], 5.0);
+    }
+
+    #[test]
+    fn test_allows_frames_without_coordinate_columns() {
+        let dump = "\
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+1
+ITEM: BOX BOUNDS pp pp pp
+0.0 10.0
+0.0 10.0
+0.0 10.0
+ITEM: ATOMS id type q
+1 1 -0.5
+";
+        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let frame = reader.read_frame().unwrap().expect("parse");
+        let atoms = frame.get("atoms").expect("atoms");
+        assert_eq!(atoms.get_float("q").expect("q")[0], -0.5);
+    }
+
+    #[test]
     fn test_empty_input() {
         let mut reader = LAMMPSDumpReader::new(cursor(""));
         assert!(reader.read_frame().unwrap().is_none());

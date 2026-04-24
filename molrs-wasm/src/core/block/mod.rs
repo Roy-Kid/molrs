@@ -349,6 +349,32 @@ impl Block {
         })?
     }
 
+    /// Allocate a zero-filled float column at `key` with the given shape.
+    ///
+    /// Pair with [`viewColF`](Block::view_col_f) for zero-copy writes from JS:
+    ///
+    /// ```js
+    /// block.createColF("x", [N]);            // allocate
+    /// const view = block.viewColF("x");      // zero-copy view into the column
+    /// for (let i = 0; i < N; i++) view[i] = src[i]; // direct write
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Column name
+    /// * `shape` - Shape of the column (e.g. `[N]` for 1D, `[N, 3]` for Nx3)
+    ///
+    /// # Errors
+    ///
+    /// Throws if the shape is empty, or if the leading dimension conflicts
+    /// with existing columns in this block.
+    #[wasm_bindgen(js_name = createColF)]
+    pub fn create_col_f(&mut self, key: &str, shape: Box<[usize]>) -> Result<(), JsValue> {
+        let dims: Vec<usize> = shape.into_vec();
+        let arr = ndarray::ArrayD::<F>::zeros(ndarray::IxDyn(&dims));
+        self.insert_col(key, arr)
+    }
+
     // ---- I32 ----
 
     /// Set a signed integer column from an `Int32Array`.
@@ -422,6 +448,21 @@ impl Block {
                 .map(Int32Array::from)
                 .ok_or_else(|| col_err(key, "i32"))
         })?
+    }
+
+    /// Allocate a zero-filled i32 column at `key` with the given shape.
+    ///
+    /// See [`createColF`](Block::create_col_f) for the zero-copy write pattern.
+    ///
+    /// # Errors
+    ///
+    /// Throws if the shape is empty, or if the leading dimension conflicts
+    /// with existing columns.
+    #[wasm_bindgen(js_name = createColI32)]
+    pub fn create_col_i32(&mut self, key: &str, shape: Box<[usize]>) -> Result<(), JsValue> {
+        let dims: Vec<usize> = shape.into_vec();
+        let arr = ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&dims));
+        self.insert_col(key, arr)
     }
 
     // ---- U32 ----
@@ -500,6 +541,21 @@ impl Block {
                 .map(Uint32Array::from)
                 .ok_or_else(|| col_err(key, "u32"))
         })?
+    }
+
+    /// Allocate a zero-filled u32 column at `key` with the given shape.
+    ///
+    /// See [`createColF`](Block::create_col_f) for the zero-copy write pattern.
+    ///
+    /// # Errors
+    ///
+    /// Throws if the shape is empty, or if the leading dimension conflicts
+    /// with existing columns.
+    #[wasm_bindgen(js_name = createColU32)]
+    pub fn create_col_u32(&mut self, key: &str, shape: Box<[usize]>) -> Result<(), JsValue> {
+        let dims: Vec<usize> = shape.into_vec();
+        let arr = ndarray::ArrayD::<u32>::zeros(ndarray::IxDyn(&dims));
+        self.insert_col(key, arr)
     }
 
     // ---- Str ----
@@ -686,5 +742,65 @@ mod tests {
         let frame = Frame::new();
         let block = frame.create_block("atoms").unwrap();
         assert!(block.copy_col_f("nonexistent").is_err());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_create_col_f_then_write_via_view_is_zero_copy() {
+        let frame = Frame::new();
+        let mut block = frame.create_block("atoms").unwrap();
+
+        block
+            .create_col_f("x", vec![3_usize].into_boxed_slice())
+            .unwrap();
+        assert_eq!(block.nrows().unwrap(), 3);
+
+        let view = block.view_col_f("x").unwrap();
+        view.set_index(0, 1.0);
+        view.set_index(1, 2.0);
+        view.set_index(2, 3.0);
+
+        let copied = block.copy_col_f("x").unwrap();
+        assert_eq!(copied.length(), 3);
+        assert!((copied.get_index(0) - 1.0).abs() < 1e-9);
+        assert!((copied.get_index(2) - 3.0).abs() < 1e-9);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_create_col_i32_then_write_via_view_is_zero_copy() {
+        let frame = Frame::new();
+        let mut block = frame.create_block("atoms").unwrap();
+
+        block
+            .create_col_i32("charge", vec![2_usize].into_boxed_slice())
+            .unwrap();
+
+        let view = block.view_col_i32("charge").unwrap();
+        view.set_index(0, 1);
+        view.set_index(1, -1);
+
+        let copied = block.copy_col_i32("charge").unwrap();
+        assert_eq!(copied.get_index(0), 1);
+        assert_eq!(copied.get_index(1), -1);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_create_col_u32_matrix_shape_preserved() {
+        let frame = Frame::new();
+        let mut block = frame.create_block("bonds").unwrap();
+
+        // 2D shape: 2 rows, 2 cols.
+        block
+            .create_col_u32("ij", vec![2_usize, 2_usize].into_boxed_slice())
+            .unwrap();
+        assert_eq!(block.nrows().unwrap(), 2);
+
+        let view = block.view_col_u32("ij").unwrap();
+        assert_eq!(view.length(), 4);
+        view.set_index(0, 10);
+        view.set_index(3, 40);
+
+        let copied = block.copy_col_u32("ij").unwrap();
+        assert_eq!(copied.get_index(0), 10);
+        assert_eq!(copied.get_index(3), 40);
     }
 }

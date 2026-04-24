@@ -129,28 +129,7 @@ impl<'a> BlockView<'a> {
         let mut block = Block::new();
         for (&key, col_view) in &self.map {
             let col: Column = col_view.to_owned();
-            // Insert the owned column directly. We replicate the dtype dispatch
-            // to use Block::insert with the correct generic type.
-            match col {
-                Column::Float(a) => {
-                    let _ = block.insert(key, a);
-                }
-                Column::Int(a) => {
-                    let _ = block.insert(key, a);
-                }
-                Column::Bool(a) => {
-                    let _ = block.insert(key, a);
-                }
-                Column::UInt(a) => {
-                    let _ = block.insert(key, a);
-                }
-                Column::U8(a) => {
-                    let _ = block.insert(key, a);
-                }
-                Column::String(a) => {
-                    let _ = block.insert(key, a);
-                }
-            }
+            let _ = block.insert_column(key, col);
         }
         block
     }

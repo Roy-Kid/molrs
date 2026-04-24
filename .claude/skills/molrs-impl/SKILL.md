@@ -77,11 +77,12 @@ Spawn agents in parallel:
 | Agent | When |
 |---|---|
 | `molrs-architect` | Always — re-verify dependency flow & boundary rules |
+| `molrs-tester` | Always — coverage ≥ 80%, edge cases, pattern checklist |
 | `molrs-optimizer` | Performance-sensitive code (potentials, neighbors, hot loops) |
 | `molrs-documenter` | Public API additions/changes |
 | `molrs-scientist` | Anything touching physics (force fields, integrators, constraints) |
-
-For FFI changes (`molrs-cxxapi`): consult `molrs-ffi` skill checklist directly.
+| `molrs-ffi-safety` | Any change under `molrs-cxxapi/`, `molrs-python/src/`, `molrs-wasm/src/`, `molrs-capi/` |
+| `molrs-docs-engineer` | PyO3/wasm-bindgen bindings added or renamed (`.pyi` sync needed) |
 
 Address findings, then:
 
@@ -94,7 +95,13 @@ Verify coverage ≥ 80%.
 
 ## Phase 5 — Documentation
 
-If public API was added or changed, apply `molrs-doc` standards (docstring tiers, units, references). The `molrs-documenter` agent (already invoked Phase 4) will have flagged gaps.
+If public API was added or changed, apply `molrs-doc` standards (docstring
+tiers, units, references). The `molrs-documenter` agent (already invoked
+Phase 4) will have flagged rustdoc gaps.
+
+If bindings (PyO3, wasm-bindgen) or `docs/**` were touched, run `/molrs-docs`
+— the `molrs-docs-engineer` agent handles `.pyi` sync, Zensical content, and
+README updates.
 
 ## Phase 6 — Integration Verification
 
@@ -115,11 +122,26 @@ cargo bench -p <affected-crate>     # if performance-sensitive
 | 2b | `molrs-scientist` | `molrs-scientist` | New physics |
 | 3 | (self) | — | Always |
 | 4a | `molrs-architect` | `molrs-architect` | Always |
-| 4b | `molrs-optimizer` | `molrs-optimizer` | Performance-sensitive |
-| 4c | `molrs-documenter` | `molrs-documenter` | Public API touched |
-| 4d | `molrs-scientist` | `molrs-scientist` | Physics touched |
+| 4b | `molrs-tester` | `molrs-tester` | Always |
+| 4c | `molrs-optimizer` | `molrs-optimizer` | Performance-sensitive |
+| 4d | `molrs-documenter` | `molrs-documenter` | Public API touched |
+| 4e | `molrs-scientist` | `molrs-scientist` | Physics touched |
+| 4f | `molrs-ffi-safety` | `molrs-ffi-safety` | `molrs-cxxapi` / `molrs-python/src` / `molrs-wasm/src` / `molrs-capi` touched |
+| 4g | `molrs-docs-engineer` | `molrs-docs-engineer` | PyO3/wasm-bindgen bindings touched |
 | 5 | `molrs-doc` (skill) | — | Public API touched |
+| 5b | `molrs-docs` (skill) | — | Bindings or `docs/**` touched |
 | 6 | (self) | — | Always |
+
+## Related workflow skills (not invoked from here)
+
+- `/molrs-fix <bug>` — minimal-diff bug fix, not a feature; use instead of
+  `/molrs-impl` for bugs.
+- `/molrs-refactor <scope>` — restructure without behavior change; use for
+  reshaping without a new spec.
+- `/molrs-debug <symptom>` — diagnose only, never edits; run before
+  `/molrs-fix` when the root cause is unclear.
+- `/molrs-note <decision>` — capture an evolving convention into
+  `.claude/NOTES.md`.
 
 ## Crate-Specific Checklists
 

@@ -37,7 +37,7 @@ pub mod column_view;
 
 pub use access::{BlockAccess, ColumnAccess};
 pub use block_view::BlockView;
-pub use column::Column;
+pub use column::{Column, ColumnHolder};
 pub use column_view::ColumnView;
 pub use dtype::{BlockDtype, DType};
 pub use error::BlockError;
@@ -172,6 +172,41 @@ impl Block {
         }
 
         let col = T::into_column(arr);
+        self.map.insert(key, col);
+        Ok(())
+    }
+
+    /// Insert a pre-built [`Column`] under `key`, validating axis-0 length.
+    ///
+    /// This is the zero-copy insert path: the caller owns a [`Column`]
+    /// (which internally holds an `Arc<ArrayD<T>>`) and hands it over
+    /// without unwrapping the Arc. Useful when moving a column between
+    /// blocks or re-inserting a clone.
+    pub fn insert_column(&mut self, key: impl Into<String>, col: Column) -> Result<(), BlockError> {
+        let key = key.into();
+        let shape = col.shape();
+
+        if shape.is_empty() {
+            return Err(BlockError::RankZero { key });
+        }
+
+        let len0 = shape[0];
+
+        match self.nrows {
+            None => {
+                self.nrows = Some(len0);
+            }
+            Some(expected) => {
+                if len0 != expected {
+                    return Err(BlockError::RaggedAxis0 {
+                        key,
+                        expected,
+                        got: len0,
+                    });
+                }
+            }
+        }
+
         self.map.insert(key, col);
         Ok(())
     }
@@ -470,7 +505,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::Float(merged)
+                    Column::from_float(merged)
                 }
                 (Column::Int(a), Column::Int(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -479,7 +514,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::Int(merged)
+                    Column::from_int(merged)
                 }
                 (Column::UInt(a), Column::UInt(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -488,7 +523,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::UInt(merged)
+                    Column::from_uint(merged)
                 }
                 (Column::U8(a), Column::U8(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -497,7 +532,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::U8(merged)
+                    Column::from_u8(merged)
                 }
                 (Column::Bool(a), Column::Bool(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -506,7 +541,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::Bool(merged)
+                    Column::from_bool(merged)
                 }
                 (Column::String(a), Column::String(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -515,7 +550,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::String(merged)
+                    Column::from_string(merged)
                 }
                 _ => unreachable!("dtype mismatch already checked"),
             };
