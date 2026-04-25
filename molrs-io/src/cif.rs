@@ -601,7 +601,7 @@ fn handle_loop<R: BufRead>(src: &mut LineSource<R>, frame: &mut FrameInProgress)
             row.push(tok);
         }
         if is_atom_loop {
-            for (key, val) in keys.iter().zip(row.into_iter()) {
+            for (key, val) in keys.iter().zip(row) {
                 frame.atom_cols.get_mut(key).unwrap().push(val);
             }
         }
