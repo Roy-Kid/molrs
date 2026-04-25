@@ -23,7 +23,7 @@ u64 = ["molrs/u64", "molrs-ffi/u64"]
 [dependencies]
 molrs = { path = "../molrs-core", package = "molcrafts-molrs-core", version = "0.0.12", default-features = false }
 molrs-ff = { path = "../molrs-ff", package = "molcrafts-molrs-ff", version = "0.0.12" }
-molrs-smiles = { path = "../molrs-smiles", package = "molcrafts-molrs-smiles", version = "0.0.12" }
+molrs-io = { path = "../molrs-io", package = "molcrafts-molrs-io", version = "0.0.12", features = ["smiles"] }
 molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.0.12" }
 slotmap = "1.0"
 ndarray = "0.17"
