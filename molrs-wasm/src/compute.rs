@@ -41,7 +41,12 @@ use wasm_bindgen::prelude::*;
 
 use molrs::topology::{Topology as RsTopology, TopologyRingInfo as RsTopologyRingInfo};
 
-use molrs_compute::center_of_mass::{CenterOfMass as RsCenterOfMass, COMResult as RsCOMResult};
+use molrs::neighbors::{
+    LinkCell as RsLinkCell, NbListAlgo, NeighborList as RsNeighborList,
+    NeighborQuery as RsNeighborQuery, QueryMode,
+};
+use molrs::types::F;
+use molrs_compute::center_of_mass::{COMResult as RsCOMResult, CenterOfMass as RsCenterOfMass};
 use molrs_compute::cluster::{Cluster as RsCluster, ClusterResult as RsClusterResult};
 use molrs_compute::cluster_centers::ClusterCenters as RsClusterCenters;
 use molrs_compute::gyration_tensor::GyrationTensor as RsGyrationTensor;
@@ -53,11 +58,6 @@ use molrs_compute::radius_of_gyration::RadiusOfGyration as RsRadiusOfGyration;
 use molrs_compute::rdf::{RDF as RsRDF, RDFResult as RsRDFResult};
 use molrs_compute::result::{ComputeResult, DescriptorRow};
 use molrs_compute::traits::Compute;
-use molrs::neighbors::{
-    LinkCell as RsLinkCell, NbListAlgo, NeighborList as RsNeighborList,
-    NeighborQuery as RsNeighborQuery, QueryMode,
-};
-use molrs::types::F;
 
 use crate::core::frame::Frame;
 use crate::core::types::JsFloatArray;
@@ -1696,12 +1696,7 @@ impl WasmKMeans {
     ///
     /// Throws if `k > n_rows`, `n_dims == 0`, the length does not match
     /// `n_rows * n_dims`, or any element is non-finite.
-    pub fn fit(
-        &self,
-        coords: &[F],
-        n_rows: usize,
-        n_dims: usize,
-    ) -> Result<Int32Array, JsValue> {
+    pub fn fit(&self, coords: &[F], n_rows: usize, n_dims: usize) -> Result<Int32Array, JsValue> {
         if n_dims != 2 {
             return Err(JsValue::from_str(
                 "KMeans wasm binding supports n_dims=2 only (PCA-score input)",

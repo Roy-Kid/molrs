@@ -3,8 +3,8 @@ use std::rc::Rc;
 
 use molrs::block::Column;
 use molrs::molrec::{
-    MolRec as CoreMolRec, ObservableData, ObservableKind, ObservableRecord,
-    SchemaValue, Trajectory as CoreTrajectory,
+    MolRec as CoreMolRec, ObservableData, ObservableKind, ObservableRecord, SchemaValue,
+    Trajectory as CoreTrajectory,
 };
 use molrs::types::{F, I, U};
 use ndarray::{ArrayD, IxDyn};
@@ -113,10 +113,11 @@ impl PyTrajectory {
 
     #[getter]
     fn step<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArrayDyn<i64>>> {
-        self.inner
-            .step
-            .as_ref()
-            .map(|step| ArrayD::from_shape_vec(IxDyn(&[step.len()]), step.clone()).unwrap().into_pyarray(py))
+        self.inner.step.as_ref().map(|step| {
+            ArrayD::from_shape_vec(IxDyn(&[step.len()]), step.clone())
+                .unwrap()
+                .into_pyarray(py)
+        })
     }
 
     #[getter]
@@ -190,13 +191,18 @@ impl PyMolRec {
 
     #[getter]
     fn trajectory(&self) -> PyResult<Option<PyTrajectory>> {
-        Ok(self.inner.borrow().trajectory.as_ref().map(|traj| PyTrajectory {
-            inner: CoreTrajectory {
-                frames: traj.frames.clone(),
-                step: traj.step.clone(),
-                time: traj.time.clone(),
-            },
-        }))
+        Ok(self
+            .inner
+            .borrow()
+            .trajectory
+            .as_ref()
+            .map(|traj| PyTrajectory {
+                inner: CoreTrajectory {
+                    frames: traj.frames.clone(),
+                    step: traj.step.clone(),
+                    time: traj.time.clone(),
+                },
+            }))
     }
 
     #[getter]
@@ -645,7 +651,10 @@ fn py_any_to_json(value: &Bound<'_, PyAny>) -> PyResult<SchemaValue> {
 fn json_to_pyobject(py: Python<'_>, value: &SchemaValue) -> PyResult<Py<PyAny>> {
     match value {
         JsonValue::Null => Ok(py.None()),
-        JsonValue::Bool(v) => Ok(pyo3::types::PyBool::new(py, *v).to_owned().into_any().unbind()),
+        JsonValue::Bool(v) => Ok(pyo3::types::PyBool::new(py, *v)
+            .to_owned()
+            .into_any()
+            .unbind()),
         JsonValue::Number(v) => {
             if let Some(i) = v.as_i64() {
                 Ok(i64::into_pyobject(i, py)?.unbind().into_any())
@@ -675,10 +684,14 @@ fn json_to_pyobject(py: Python<'_>, value: &SchemaValue) -> PyResult<Py<PyAny>> 
 
 fn py_any_to_column(value: &Bound<'_, PyAny>) -> PyResult<Column> {
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, f32>>() {
-        return Ok(Column::from_float(arr.as_array().mapv(|v| v as F).into_dyn()));
+        return Ok(Column::from_float(
+            arr.as_array().mapv(|v| v as F).into_dyn(),
+        ));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, f64>>() {
-        return Ok(Column::from_float(arr.as_array().mapv(|v| v as F).into_dyn()));
+        return Ok(Column::from_float(
+            arr.as_array().mapv(|v| v as F).into_dyn(),
+        ));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, i32>>() {
         return Ok(Column::from_int(arr.as_array().mapv(|v| v as I).into_dyn()));
@@ -687,10 +700,14 @@ fn py_any_to_column(value: &Bound<'_, PyAny>) -> PyResult<Column> {
         return Ok(Column::from_int(arr.as_array().mapv(|v| v as I).into_dyn()));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, u32>>() {
-        return Ok(Column::from_uint(arr.as_array().mapv(|v| v as U).into_dyn()));
+        return Ok(Column::from_uint(
+            arr.as_array().mapv(|v| v as U).into_dyn(),
+        ));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, u64>>() {
-        return Ok(Column::from_uint(arr.as_array().mapv(|v| v as U).into_dyn()));
+        return Ok(Column::from_uint(
+            arr.as_array().mapv(|v| v as U).into_dyn(),
+        ));
     }
     if let Ok(arr) = value.extract::<PyReadonlyArrayDyn<'_, bool>>() {
         return Ok(Column::from_bool(arr.as_array().to_owned().into_dyn()));
@@ -740,9 +757,15 @@ fn observable_to_pyobject(py: Python<'_>, observable: ObservableRecord) -> PyRes
 fn observable_data_to_pyobject(py: Python<'_>, data: &ObservableData) -> PyResult<Py<PyAny>> {
     match data {
         ObservableData::Column(column) => column_to_pyobject(py, column),
-        ObservableData::Grid(grid) => {
-            Ok(Py::new(py, PyGrid { inner: grid.clone() })?.into_bound(py).into_any().unbind())
-        }
+        ObservableData::Grid(grid) => Ok(Py::new(
+            py,
+            PyGrid {
+                inner: grid.clone(),
+            },
+        )?
+        .into_bound(py)
+        .into_any()
+        .unbind()),
     }
 }
 

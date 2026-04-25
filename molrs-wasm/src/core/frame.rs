@@ -210,7 +210,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = removeBlock)]
     pub fn remove_block(&self, key: &str) -> Result<(), JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
             .remove_block(self.inner.id, key)
             .map_err(js_err)
@@ -229,7 +230,11 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = clear)]
     pub fn clear(&self) -> Result<(), JsValue> {
-        self.inner.store.borrow_mut().clear_frame(self.inner.id).map_err(js_err)
+        self.inner
+            .store
+            .borrow_mut()
+            .clear_frame(self.inner.id)
+            .map_err(js_err)
     }
 
     /// Rename a block from `old_key` to `new_key`.
@@ -255,7 +260,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = renameBlock)]
     pub fn rename_block(&self, old_key: &str, new_key: &str) -> Result<bool, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
             .with_frame_mut(self.inner.id, |f| f.rename_block(old_key, new_key))
             .map_err(js_err)
@@ -290,9 +296,12 @@ impl Frame {
         old_col: &str,
         new_col: &str,
     ) -> Result<bool, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
-            .with_frame_mut(self.inner.id, |f| f.rename_column(block_key, old_col, new_col))
+            .with_frame_mut(self.inner.id, |f| {
+                f.rename_column(block_key, old_col, new_col)
+            })
             .map_err(js_err)
     }
 
@@ -305,7 +314,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = gridNames)]
     pub fn grid_names(&self) -> Result<JsArray, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_frame(self.inner.id, |frame| {
                 let names = JsArray::new();
@@ -330,7 +340,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = hasGrid)]
     pub fn has_grid(&self, name: &str) -> Result<bool, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_frame(self.inner.id, |frame| frame.has_grid(name))
             .map_err(js_err)
@@ -357,7 +368,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = getGrid)]
     pub fn get_grid(&self, name: &str) -> Result<Option<Grid>, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_frame(self.inner.id, |frame| {
                 frame.get_grid(name).map(|g| Grid::from_rs(g.clone()))
@@ -389,7 +401,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = insertGrid)]
     pub fn insert_grid(&self, name: &str, grid: Grid) -> Result<(), JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
             .with_frame_mut(self.inner.id, |frame| {
                 frame.insert_grid(name, grid.into_rs());
@@ -414,7 +427,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = removeGrid)]
     pub fn remove_grid(&self, name: &str) -> Result<(), JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
             .with_frame_mut(self.inner.id, |frame| {
                 frame.remove_grid(name);
@@ -446,7 +460,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = getMetaScalar)]
     pub fn get_meta_scalar(&self, name: &str) -> Option<f64> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_frame(self.inner.id, |frame| {
                 frame.meta.get(name).and_then(|s| s.parse::<f64>().ok())
@@ -467,7 +482,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = metaNames)]
     pub fn meta_names(&self) -> Vec<String> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_frame(self.inner.id, |frame| {
                 frame.meta.keys().cloned().collect::<Vec<String>>()
@@ -501,7 +517,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = setMeta)]
     pub fn set_meta(&self, name: &str, value: &str) -> Result<(), JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
             .with_frame_mut(self.inner.id, |frame| {
                 frame.meta.insert(name.to_string(), value.to_string());
@@ -526,7 +543,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(getter, js_name = simbox)]
     pub fn get_simbox(&self) -> Option<super::region::simbox::Box> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_frame_simbox(self.inner.id, |sb| {
                 sb.map(|s| super::region::simbox::Box { inner: s.clone() })
@@ -555,7 +573,8 @@ impl Frame {
     /// ```
     #[wasm_bindgen(setter, js_name = simbox)]
     pub fn set_simbox(&self, simbox: Option<super::region::simbox::Box>) -> Result<(), JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
             .set_frame_simbox(self.inner.id, simbox.map(|b| b.inner))
             .map_err(js_err)
@@ -579,7 +598,11 @@ impl Frame {
     /// ```
     #[wasm_bindgen(js_name = drop)]
     pub fn drop_frame(&self) -> Result<(), JsValue> {
-        self.inner.store.borrow_mut().frame_drop(self.inner.id).map_err(js_err)
+        self.inner
+            .store
+            .borrow_mut()
+            .frame_drop(self.inner.id)
+            .map_err(js_err)
     }
 }
 
@@ -608,7 +631,8 @@ impl Frame {
         &self,
         f: impl FnOnce(&molrs::frame::Frame) -> Result<R, JsValue>,
     ) -> Result<R, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_frame(self.inner.id, f)
             .map_err(js_err)?

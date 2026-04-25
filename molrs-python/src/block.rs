@@ -498,10 +498,7 @@ fn float_array_view(
 /// # Safety
 ///
 /// See [`float_array_view`].
-fn int_array_view(
-    py: Python<'_>,
-    array: Arc<ColumnHolder<I>>,
-) -> PyResult<Py<pyo3::types::PyAny>> {
+fn int_array_view(py: Python<'_>, array: Arc<ColumnHolder<I>>) -> PyResult<Py<pyo3::types::PyAny>> {
     let owner = Py::new(py, IntArrayOwner { array })?;
     let owner = owner.into_bound(py);
     let view = unsafe {

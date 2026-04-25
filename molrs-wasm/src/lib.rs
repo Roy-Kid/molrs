@@ -77,9 +77,9 @@ pub fn wasm_memory() -> Memory {
 }
 
 // Module declarations
-mod core;
 #[cfg(feature = "compute")]
 mod compute;
+mod core;
 #[cfg(feature = "embed")]
 mod embed;
 #[cfg(feature = "io")]
@@ -88,9 +88,9 @@ mod io;
 mod smiles;
 
 // Re-exports following molrs-core layout.
-pub use core::{Block, Box, Frame, Grid, WasmArray};
 #[cfg(feature = "compute")]
 pub use compute::*;
+pub use core::{Block, Box, Frame, Grid, WasmArray};
 #[cfg(feature = "embed")]
 pub use embed::*;
 #[cfg(feature = "io")]

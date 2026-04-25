@@ -27,7 +27,10 @@ use molrs::grid::Grid as CoreGrid;
 use molrs::types::F;
 use molrs_ffi::FrameRef;
 use ndarray::Array4;
-use numpy::{IntoPyArray, PyArray1, PyArray2, PyArray4, PyArrayDyn, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArrayDyn};
+use numpy::{
+    IntoPyArray, PyArray1, PyArray2, PyArray4, PyArrayDyn, PyReadonlyArray1, PyReadonlyArray2,
+    PyReadonlyArrayDyn,
+};
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -75,19 +78,37 @@ impl PyGrid {
         if origin_slice.len() != 3 {
             return Err(PyTypeError::new_err("origin must have length 3"));
         }
-        let o = [origin_slice[0] as F, origin_slice[1] as F, origin_slice[2] as F];
+        let o = [
+            origin_slice[0] as F,
+            origin_slice[1] as F,
+            origin_slice[2] as F,
+        ];
 
         let cell_arr = cell.as_array();
         if cell_arr.dim() != (3, 3) {
             return Err(PyTypeError::new_err("cell must have shape (3, 3)"));
         }
         let c = [
-            [cell_arr[[0, 0]] as F, cell_arr[[0, 1]] as F, cell_arr[[0, 2]] as F],
-            [cell_arr[[1, 0]] as F, cell_arr[[1, 1]] as F, cell_arr[[1, 2]] as F],
-            [cell_arr[[2, 0]] as F, cell_arr[[2, 1]] as F, cell_arr[[2, 2]] as F],
+            [
+                cell_arr[[0, 0]] as F,
+                cell_arr[[0, 1]] as F,
+                cell_arr[[0, 2]] as F,
+            ],
+            [
+                cell_arr[[1, 0]] as F,
+                cell_arr[[1, 1]] as F,
+                cell_arr[[1, 2]] as F,
+            ],
+            [
+                cell_arr[[2, 0]] as F,
+                cell_arr[[2, 1]] as F,
+                cell_arr[[2, 2]] as F,
+            ],
         ];
 
-        Ok(Self { inner: CoreGrid::new(dim, o, c, pbc) })
+        Ok(Self {
+            inner: CoreGrid::new(dim, o, c, pbc),
+        })
     }
 
     /// Grid dimensions `[nx, ny, nz]`.
@@ -107,7 +128,12 @@ impl PyGrid {
     /// Cell matrix of shape `(3, 3)` — columns are lattice vectors.
     #[getter]
     fn cell<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<NpF>> {
-        let flat: Vec<NpF> = self.inner.cell.iter().flat_map(|row| row.iter().map(|&v| v as NpF)).collect();
+        let flat: Vec<NpF> = self
+            .inner
+            .cell
+            .iter()
+            .flat_map(|row| row.iter().map(|&v| v as NpF))
+            .collect();
         ndarray::Array2::from_shape_vec((3, 3), flat)
             .unwrap()
             .into_pyarray(py)
@@ -143,8 +169,15 @@ impl PyGrid {
     }
 
     /// Retrieve a named scalar array as a shaped `(nx, ny, nz)` numpy array.
-    fn __getitem__<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyArrayDyn<NpF>>> {
-        let arr = self.inner.get(name).ok_or_else(|| PyKeyError::new_err(name.to_string()))?;
+    fn __getitem__<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+    ) -> PyResult<Bound<'py, PyArrayDyn<NpF>>> {
+        let arr = self
+            .inner
+            .get(name)
+            .ok_or_else(|| PyKeyError::new_err(name.to_string()))?;
         Ok(arr.mapv(|v| v as NpF).into_pyarray(py))
     }
 
@@ -155,7 +188,10 @@ impl PyGrid {
         if arr.shape() != [nx, ny, nz] {
             return Err(PyTypeError::new_err(format!(
                 "array shape {:?} does not match grid dim [{}, {}, {}]",
-                arr.shape(), nx, ny, nz
+                arr.shape(),
+                nx,
+                ny,
+                nz
             )));
         }
         let flat: Vec<F> = arr.iter().map(|&v| v as F).collect();

@@ -45,8 +45,7 @@ mod io;
 
 mod molrec;
 use molrec::{
-    PyGridObservable, PyMolRec, PyObservables, PyScalarObservable, PyTrajectory,
-    PyVectorObservable,
+    PyGridObservable, PyMolRec, PyObservables, PyScalarObservable, PyTrajectory, PyVectorObservable,
 };
 
 mod region;

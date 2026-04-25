@@ -31,8 +31,8 @@ use molrs::block::{Block as RsBlock, DType};
 use molrs::types::F;
 use molrs_ffi::BlockRef;
 
-use super::types::{FLOAT_DTYPE_NAME, JsFloatArray};
 use super::js_err;
+use super::types::{FLOAT_DTYPE_NAME, JsFloatArray};
 
 // ---------------------------------------------------------------------------
 // Block
@@ -201,7 +201,8 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = dtype)]
     pub fn dtype(&self, key: &str) -> Option<String> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_block(&self.inner.handle, |b| {
                 b.dtype(key).map(|dt| {
@@ -242,9 +243,12 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = renameColumn)]
     pub fn rename_column(&mut self, old_key: &str, new_key: &str) -> Result<bool, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
-            .with_block_mut(&mut self.inner.handle, |b| b.rename_column(old_key, new_key))
+            .with_block_mut(&mut self.inner.handle, |b| {
+                b.rename_column(old_key, new_key)
+            })
             .map_err(js_err)
     }
 
@@ -310,9 +314,12 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = viewColF)]
     pub fn view_col_f(&self, key: &str) -> Result<JsFloatArray, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
-            .borrow_col_F(&self.inner.handle, key, |s, _| unsafe { JsFloatArray::view(s) })
+            .borrow_col_F(&self.inner.handle, key, |s, _| unsafe {
+                JsFloatArray::view(s)
+            })
             .map_err(|e| col_not_found_or(key, FLOAT_DTYPE_NAME, e))
     }
 
@@ -419,9 +426,12 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = viewColI32)]
     pub fn view_col_i32(&self, key: &str) -> Result<Int32Array, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
-            .borrow_col_I(&self.inner.handle, key, |s, _| unsafe { Int32Array::view(s) })
+            .borrow_col_I(&self.inner.handle, key, |s, _| unsafe {
+                Int32Array::view(s)
+            })
             .map_err(|e| col_not_found_or(key, "i32", e))
     }
 
@@ -511,9 +521,12 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = viewColU32)]
     pub fn view_col_u32(&self, key: &str) -> Result<Uint32Array, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
-            .borrow_col_U(&self.inner.handle, key, |s, _| unsafe { Uint32Array::view(s) })
+            .borrow_col_U(&self.inner.handle, key, |s, _| unsafe {
+                Uint32Array::view(s)
+            })
             .map_err(|e| col_not_found_or(key, "u32", e))
     }
 
@@ -647,7 +660,8 @@ fn col_not_found_or(key: &str, dtype: &str, ffi_err: molrs_ffi::FfiError) -> JsV
 
 impl Block {
     fn with<R>(&self, f: impl FnOnce(&RsBlock) -> R) -> Result<R, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_block(&self.inner.handle, f)
             .map_err(js_err)
@@ -658,7 +672,8 @@ impl Block {
         key: &str,
         array: ndarray::ArrayD<T>,
     ) -> Result<(), JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
             .with_block_mut(&mut self.inner.handle, |b| {
                 b.insert(key, array)
