@@ -5,7 +5,7 @@
 //!
 //! | Module | JS class / function | Formats |
 //! |--------|-------------------|---------|
-//! | [`reader`] | `XYZReader`, `PDBReader`, `LAMMPSReader`, `LAMMPSDumpReader` | Read XYZ/ExtXYZ, PDB, LAMMPS data/dump files |
+//! | [`reader`] | `XYZReader`, `PDBReader`, `LAMMPSReader`, `LAMMPSTrajReader` | Read XYZ/ExtXYZ, PDB, LAMMPS data/dump files |
 //! | [`writer`] | `writeFrame(frame, format)` | Write XYZ, PDB, LAMMPS dump |
 //! | [`zarr`] | `MolRecReader` | Read MolRec Zarr V3 archives |
 //!

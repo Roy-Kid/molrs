@@ -14,11 +14,11 @@
 //! | `XYZReader` | XYZ / ExtXYZ | Yes | `"atoms"` block with `element`, `x`, `y`, `z` |
 //! | `PDBReader` | Protein Data Bank | No (step=0 only) | `"atoms"` block with `name`, `resname`, `x`, `y`, `z`, etc. |
 //! | `LAMMPSReader` | LAMMPS data file | No (step=0 only) | `"atoms"` block + `"bonds"` block + simbox |
-//! | `LAMMPSDumpReader` | LAMMPS dump trajectory | Yes | `"atoms"` block with columns from dump header |
+//! | `LAMMPSTrajReader` | LAMMPS dump trajectory | Yes | `"atoms"` block with columns from dump header |
 
 use crate::core::frame::Frame;
 use molrs_io::lammps_data::LAMMPSDataReader;
-use molrs_io::lammps_dump::LAMMPSDumpReader;
+use molrs_io::lammps_dump::LAMMPSTrajReader;
 use molrs_io::pdb::PDBReader;
 use molrs_io::reader::{FrameReader, TrajReader};
 use molrs_io::sdf::SDFReader;
@@ -375,24 +375,24 @@ impl LammpsReader {
 /// # Example (JavaScript)
 ///
 /// ```js
-/// const reader = new LAMMPSDumpReader(dumpContent);
+/// const reader = new LAMMPSTrajReader(dumpContent);
 /// console.log(reader.len()); // number of timesteps
 /// const frame = reader.read(0);
 /// const atoms = frame.getBlock("atoms");
 /// ```
-#[wasm_bindgen(js_name = LAMMPSDumpReader)]
+#[wasm_bindgen(js_name = LAMMPSTrajReader)]
 pub struct LammpsDumpReader {
-    inner: LAMMPSDumpReader<Cursor<Vec<u8>>>,
+    inner: LAMMPSTrajReader<Cursor<Vec<u8>>>,
 }
 
-#[wasm_bindgen(js_class = LAMMPSDumpReader)]
+#[wasm_bindgen(js_class = LAMMPSTrajReader)]
 impl LammpsDumpReader {
     /// Create a new LAMMPS dump reader from string content.
     #[wasm_bindgen(constructor)]
     pub fn new(content: &str) -> LammpsDumpReader {
         let bytes = content.as_bytes().to_vec();
         LammpsDumpReader {
-            inner: LAMMPSDumpReader::new(Cursor::new(bytes)),
+            inner: LAMMPSTrajReader::new(Cursor::new(bytes)),
         }
     }
 

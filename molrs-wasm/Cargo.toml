@@ -17,7 +17,9 @@ name = "molwasm"
 [features]
 # Default build = full (all subsystems).
 default = ["smiles", "io", "compute", "embed"]
-smiles  = ["dep:molrs-smiles"]
+# `smiles` lives inside molrs-io; activating it pulls in molrs-io with the
+# matching feature flag.
+smiles  = ["dep:molrs-io", "molrs-io/smiles"]
 io      = ["dep:molrs-io"]
 compute = ["dep:molrs-compute"]
 embed   = ["dep:molrs-embed"]
@@ -34,8 +36,9 @@ molrs = { path = "../molrs-core", package = "molcrafts-molrs-core", version = "0
 molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.0.12", default-features = false }
 
 # Optional sub-crates, gated by matching features above.
+# `smiles` is hosted inside molrs-io; the `smiles` feature here forwards to
+# molrs-io's own `smiles` feature flag.
 molrs-io      = { path = "../molrs-io",      package = "molcrafts-molrs-io",      version = "0.0.12", default-features = false, features = ["zarr"], optional = true }
-molrs-smiles  = { path = "../molrs-smiles",  package = "molcrafts-molrs-smiles",  version = "0.0.12", default-features = false, optional = true }
 molrs-compute = { path = "../molrs-compute", package = "molcrafts-molrs-compute", version = "0.0.12", default-features = false, optional = true }
 molrs-embed   = { path = "../molrs-embed",   package = "molcrafts-molrs-embed",   version = "0.0.12", default-features = false, optional = true }
 
