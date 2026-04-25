@@ -466,12 +466,12 @@ fn parse_single_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Fram
 /// # Ok(())
 /// # }
 /// ```
-pub struct LAMMPSDumpReader<R: BufRead> {
+pub struct LAMMPSTrajReader<R: BufRead> {
     reader: R,
     index: OnceCell<FrameIndex>,
 }
 
-impl<R: BufRead + Seek> LAMMPSDumpReader<R> {
+impl<R: BufRead + Seek> LAMMPSTrajReader<R> {
     /// Create a new LAMMPS dump reader.
     pub fn new(reader: R) -> Self {
         Self {
@@ -589,7 +589,7 @@ impl<R: BufRead + Seek> LAMMPSDumpReader<R> {
     }
 }
 
-impl<R: BufRead + Seek> Reader for LAMMPSDumpReader<R> {
+impl<R: BufRead + Seek> Reader for LAMMPSTrajReader<R> {
     type R = R;
     type Frame = Frame;
 
@@ -598,13 +598,13 @@ impl<R: BufRead + Seek> Reader for LAMMPSDumpReader<R> {
     }
 }
 
-impl<R: BufRead + Seek> FrameReader for LAMMPSDumpReader<R> {
+impl<R: BufRead + Seek> FrameReader for LAMMPSTrajReader<R> {
     fn read_frame(&mut self) -> std::io::Result<Option<Self::Frame>> {
         parse_single_frame(&mut self.reader)
     }
 }
 
-impl<R: BufRead + Seek> TrajReader for LAMMPSDumpReader<R> {
+impl<R: BufRead + Seek> TrajReader for LAMMPSTrajReader<R> {
     fn build_index(&mut self) -> std::io::Result<()> {
         self.build_index_impl()
     }
@@ -832,7 +832,7 @@ fn write_lammps_dump_frame<W: Write>(
 /// for random access without loading all frames into memory.
 pub fn read_lammps_dump<P: AsRef<Path>>(path: P) -> std::io::Result<Vec<Frame>> {
     let reader = crate::reader::open_seekable(path)?;
-    let mut dump_reader = LAMMPSDumpReader::new(reader);
+    let mut dump_reader = LAMMPSTrajReader::new(reader);
     dump_reader.read_all()
 }
 
@@ -842,9 +842,9 @@ pub fn read_lammps_dump<P: AsRef<Path>>(path: P) -> std::io::Result<Vec<Frame>> 
 /// on first call to `read_step` or `len`.
 pub fn open_lammps_dump<P: AsRef<Path>>(
     path: P,
-) -> std::io::Result<LAMMPSDumpReader<Box<dyn ReadSeek>>> {
+) -> std::io::Result<LAMMPSTrajReader<Box<dyn ReadSeek>>> {
     let reader = crate::reader::open_seekable(path)?;
-    Ok(LAMMPSDumpReader::new(reader))
+    Ok(LAMMPSTrajReader::new(reader))
 }
 
 /// Write frames to a LAMMPS dump file.
@@ -917,7 +917,7 @@ ITEM: ATOMS id type x y z
 
     #[test]
     fn test_build_index() {
-        let mut reader = LAMMPSDumpReader::new(cursor(MULTI_DUMP));
+        let mut reader = LAMMPSTrajReader::new(cursor(MULTI_DUMP));
         reader.build_index().unwrap();
 
         assert_eq!(reader.len().unwrap(), 2);
@@ -925,7 +925,7 @@ ITEM: ATOMS id type x y z
 
     #[test]
     fn test_read_step_random_access() {
-        let mut reader = LAMMPSDumpReader::new(cursor(MULTI_DUMP));
+        let mut reader = LAMMPSTrajReader::new(cursor(MULTI_DUMP));
 
         // Read step 1 first (out of order)
         let f1 = reader.read_step(1).unwrap().expect("step 1");
@@ -966,7 +966,7 @@ ITEM: ATOMS id type x y z
 2 1 4.0 5.0 6.0
 3 2 7.0 8.0 9.0
 ";
-        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
         let frames = reader.read_all().unwrap();
         assert_eq!(frames.len(), 2);
         assert_eq!(frames[0].get("atoms").unwrap().nrows(), Some(2));
@@ -987,7 +987,7 @@ ITEM: BOX BOUNDS pp pp pp
 ITEM: ATOMS id type x y z vx vy vz q c_pe
 1 1 1.0 2.0 3.0 0.1 0.2 0.3 -0.5 -10.5
 ";
-        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
         let frame = reader.read_frame().unwrap().expect("parse");
         let atoms = frame.get("atoms").unwrap();
 
@@ -1018,7 +1018,7 @@ ITEM: ATOMS id type xu yu zu
 1 1 1.0 2.0 3.0
 2 1 4.0 5.0 6.0
 ";
-        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
         let frame = reader.read_frame().unwrap().expect("parse");
         let atoms = frame.get("atoms").expect("atoms");
 
@@ -1050,7 +1050,7 @@ ITEM: ATOMS id type xs ys zs
 1 1 0.0 0.0 0.0
 2 1 0.5 0.5 0.5
 ";
-        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
         let frame = reader.read_frame().unwrap().expect("parse");
         let atoms = frame.get("atoms").expect("atoms");
 
@@ -1081,7 +1081,7 @@ ITEM: BOX BOUNDS xy xz yz pp pp pp
 ITEM: ATOMS id type xs ys zs
 1 1 0.25 0.5 0.75
 ";
-        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
         let frame = reader.read_frame().unwrap().expect("parse");
         let atoms = frame.get("atoms").expect("atoms");
 
@@ -1108,7 +1108,7 @@ ITEM: BOX BOUNDS pp pp pp
 ITEM: ATOMS id type xs yu zu
 1 1 0.5 5.0 5.0
 ";
-        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
         let frame = reader.read_frame().unwrap().expect("mixed coords parse");
         let atoms = frame.get("atoms").expect("atoms");
         assert_eq!(atoms.get_float("xs").expect("xs")[0], 0.5);
@@ -1130,7 +1130,7 @@ ITEM: BOX BOUNDS pp pp pp
 ITEM: ATOMS id type q
 1 1 -0.5
 ";
-        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
         let frame = reader.read_frame().unwrap().expect("parse");
         let atoms = frame.get("atoms").expect("atoms");
         assert_eq!(atoms.get_float("q").expect("q")[0], -0.5);
@@ -1138,13 +1138,13 @@ ITEM: ATOMS id type q
 
     #[test]
     fn test_empty_input() {
-        let mut reader = LAMMPSDumpReader::new(cursor(""));
+        let mut reader = LAMMPSTrajReader::new(cursor(""));
         assert!(reader.read_frame().unwrap().is_none());
     }
 
     #[test]
     fn test_empty_index() {
-        let mut reader = LAMMPSDumpReader::new(cursor(""));
+        let mut reader = LAMMPSTrajReader::new(cursor(""));
         reader.build_index().unwrap();
         assert_eq!(reader.len().unwrap(), 0);
     }
@@ -1163,7 +1163,7 @@ ITEM: BOX BOUNDS ff pp ss
 ITEM: ATOMS id type x y z
 1 1 1.0 2.0 3.0
 ";
-        let mut reader = LAMMPSDumpReader::new(cursor(dump));
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
         let frame = reader.read_frame().unwrap().expect("parse");
         let pbc = frame.simbox.as_ref().expect("simbox").pbc();
         // ff pp ss → [false, true, false]
@@ -1172,7 +1172,7 @@ ITEM: ATOMS id type x y z
 
     #[test]
     fn test_iter() {
-        let mut reader = LAMMPSDumpReader::new(cursor(MULTI_DUMP));
+        let mut reader = LAMMPSTrajReader::new(cursor(MULTI_DUMP));
         reader.build_index().unwrap();
         let mut count = 0;
         for result in reader.iter() {
