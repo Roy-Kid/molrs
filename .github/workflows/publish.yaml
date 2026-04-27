@@ -12,6 +12,28 @@ permissions:
   contents: write
   id-token: write
 
+# Repository guard: every job below is gated on
+# `github.repository == 'MolCrafts/molrs'`. A fork that pushes a `v*`
+# tag will see this workflow trigger but every job will be skipped, so
+# nothing reaches crates.io / npm / PyPI from anywhere except the
+# canonical MolCrafts/molrs repository.
+#
+# Defense in depth:
+#   1. YAML-level repo guard (this file) — bulletproof, evaluated by
+#      GitHub Actions server-side; cannot be bypassed by a fork.
+#   2. Tag-reachable-from-master check (in `guard` job) — refuses to
+#      publish a tag whose commit isn't on master, so a tag pushed
+#      against an unmerged branch can't ship to a registry.
+#   3. crates.io / npm / PyPI **trusted publishing** (OIDC) — every
+#      registry mints a short-lived token whose JWT claims pin
+#      iss / repository / workflow / environment. No long-lived
+#      `CARGO_REGISTRY_TOKEN` / `NPM_TOKEN` / `PYPI_TOKEN` secret
+#      lives in the repo, so a leaked secret cannot republish under
+#      our names.
+#   4. GitHub Environments (`release`, `pypi`) — required reviewers
+#      and protected tag rules configured in repo settings give a
+#      manual-approval gate before any registry call runs.
+#
 # Publish topology:
 #
 #                          ┌─ publish-core ─┬─ publish-io ──────┐
@@ -33,74 +55,116 @@ permissions:
 #     can be safely re-driven via workflow_dispatch.
 
 jobs:
+  guard:
+    name: repo-guard
+    runs-on: ubuntu-latest
+    if: github.repository == 'MolCrafts/molrs'
+    steps:
+      - name: Confirm canonical repository
+        run: |
+          echo "Publishing tag ${GITHUB_REF#refs/tags/} from ${GITHUB_REPOSITORY}"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify tag is reachable from master
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          TAG_SHA="${GITHUB_SHA}"
+          MASTER_SHA="$(git rev-parse origin/master)"
+          if ! git merge-base --is-ancestor "$TAG_SHA" "$MASTER_SHA"; then
+            echo "::error::Tag ${GITHUB_REF#refs/tags/} (commit $TAG_SHA) is not an ancestor of master ($MASTER_SHA). Refusing to publish."
+            echo "::error::Merge the release commit into master before pushing the tag."
+            exit 1
+          fi
+          echo "Tag $TAG_SHA is reachable from master ($MASTER_SHA) — proceeding."
+
   ci:
+    needs: guard
+    if: github.repository == 'MolCrafts/molrs'
     uses: ./.github/workflows/ci.yml
 
-  # ── Rust crates (crates.io, topological order) ──────────────────────────────
+  # ── Rust crates (crates.io trusted publishing, topological order) ───────────
 
   publish-core:
     needs: ci
+    if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: release
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
       - name: Publish molcrafts-molrs-core (skip if already on crates.io)
         run: bash scripts/publish-if-new.sh molrs-core/Cargo.toml molcrafts-molrs-core
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   publish-io:
     needs: publish-core
+    if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: release
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
       - run: sleep 30
       - name: Publish molcrafts-molrs-io (skip if already on crates.io)
         run: bash scripts/publish-if-new.sh molrs-io/Cargo.toml molcrafts-molrs-io
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   publish-compute:
     needs: publish-core
+    if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: release
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
       - run: sleep 30
       - name: Publish molcrafts-molrs-compute (skip if already on crates.io)
         run: bash scripts/publish-if-new.sh molrs-compute/Cargo.toml molcrafts-molrs-compute
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   publish-ff:
     needs: publish-core
+    if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: release
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
       - run: sleep 30
       - name: Publish molcrafts-molrs-ff (skip if already on crates.io)
         run: bash scripts/publish-if-new.sh molrs-ff/Cargo.toml molcrafts-molrs-ff
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   publish-embed:
     needs: publish-core
+    if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: release
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
       - run: sleep 30
       - name: Publish molcrafts-molrs-embed (skip if already on crates.io)
         run: bash scripts/publish-if-new.sh molrs-embed/Cargo.toml molcrafts-molrs-embed
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   publish-facade:
     needs:
@@ -108,6 +172,7 @@ jobs:
       - publish-compute
       - publish-ff
       - publish-embed
+    if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -121,10 +186,11 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
-  # ── WASM (npm) ───────────────────────────────────────────────────────────────
+  # ── WASM (npm trusted publishing) ────────────────────────────────────────────
 
   publish-wasm:
     needs: ci
+    if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -140,7 +206,7 @@ jobs:
       - name: Build wasm package
         working-directory: molrs-wasm
         run: wasm-pack build --release --target bundler --scope molcrafts --out-name molrs
-      - name: Publish to npm (skip if already on registry)
+      - name: Publish to npm (trusted publishing + provenance, skip if already on registry)
         working-directory: molrs-wasm/pkg
         run: |
           set -euo pipefail
@@ -152,10 +218,11 @@ jobs:
             npm publish --access public --provenance
           fi
 
-  # ── Python (PyPI, maturin trusted publishing) ───────────────────────────────
+  # ── Python (PyPI trusted publishing via maturin) ────────────────────────────
 
   publish-python:
     needs: ci
+    if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: pypi
     steps:
