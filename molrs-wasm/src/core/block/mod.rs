@@ -156,6 +156,77 @@ impl Block {
         self.with(|b| b.nrows().unwrap_or(0))
     }
 
+    /// Return the structural shape of the block as a `Uint32Array`.
+    ///
+    /// - Plain row tables (atoms, bonds): `[nrows]` — single-axis.
+    /// - Volumetric grids: `[Nx, Ny, Nz]` — explicitly declared via
+    ///   [`setShape`](Self::set_shape).
+    /// - Empty blocks: `[]`.
+    ///
+    /// `block.shape()` is uniform across all block kinds — the rank of
+    /// the returned array is what distinguishes a plain table from a
+    /// volumetric grid. The product of the shape always equals
+    /// `block.nrows()`.
+    ///
+    /// # Errors
+    ///
+    /// Throws if the block handle has been invalidated.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const atomsShape = atoms.shape();   // Uint32Array([1000])
+    /// const gridShape  = grid.shape();    // Uint32Array([32, 32, 32])
+    /// ```
+    #[wasm_bindgen(js_name = shape)]
+    pub fn shape(&self) -> Result<Uint32Array, JsValue> {
+        self.with(|b| {
+            let s = b.shape();
+            let arr = Uint32Array::new_with_length(s.len() as u32);
+            for (i, dim) in s.into_iter().enumerate() {
+                arr.set_index(i as u32, dim as u32);
+            }
+            arr
+        })
+    }
+
+    /// Declare this block as N-dimensional with the given `shape`.
+    ///
+    /// `shape.iter().product()` must equal the block's current `nrows`
+    /// when the block has columns. Pass an empty array to clear the
+    /// shape and revert to plain row-table semantics.
+    ///
+    /// This does **not** reshape column storage — columns remain
+    /// row-major 1D buffers of length `product(shape)`. `shape` is
+    /// structural metadata; consumers (e.g. the volumetric renderer in
+    /// MolVis) use it to unflatten the row index back into N-D
+    /// coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Throws if `shape.iter().product()` does not match the block's
+    /// existing `nrows`, or if the block handle has been invalidated.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const grid = frame.createBlock("grid");
+    /// grid.setColF("electron_density", values);  // values.length === 32*32*32
+    /// grid.setShape(new Uint32Array([32, 32, 32]));
+    /// ```
+    #[wasm_bindgen(js_name = setShape)]
+    pub fn set_shape(&mut self, shape: &Uint32Array) -> Result<(), JsValue> {
+        let mut buf = vec![0u32; shape.length() as usize];
+        shape.copy_to(&mut buf);
+        let dims: Vec<usize> = buf.into_iter().map(|d| d as usize).collect();
+        self.inner
+            .store
+            .borrow_mut()
+            .with_block_mut(&mut self.inner.handle, |b| b.set_shape(&dims))
+            .map_err(js_err)?
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     /// Return all column names as a JS `string[]`.
     ///
     /// # Errors
