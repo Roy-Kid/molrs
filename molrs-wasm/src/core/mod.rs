@@ -30,13 +30,11 @@ use molrs_ffi::FfiError;
 
 pub mod block;
 pub mod frame;
-pub mod grid;
 pub mod region;
 pub mod types;
 
 pub use block::Block;
 pub use frame::Frame;
-pub use grid::Grid;
 pub use region::simbox::Box;
 pub use types::WasmArray;
 

@@ -90,7 +90,7 @@ mod smiles;
 // Re-exports following molrs-core layout.
 #[cfg(feature = "compute")]
 pub use compute::*;
-pub use core::{Block, Box, Frame, Grid, WasmArray};
+pub use core::{Block, Box, Frame, WasmArray};
 #[cfg(feature = "embed")]
 pub use embed::*;
 #[cfg(feature = "io")]
