@@ -17,6 +17,7 @@
 //! | `LAMMPSTrajReader` | LAMMPS dump trajectory | Yes | `"atoms"` block with columns from dump header |
 
 use crate::core::frame::Frame;
+use molrs_io::dcd::DcdReader as RsDcdReader;
 use molrs_io::lammps_data::LAMMPSDataReader;
 use molrs_io::lammps_dump::LAMMPSTrajReader;
 use molrs_io::pdb::PDBReader;
@@ -503,6 +504,108 @@ impl SdfReader {
     }
 
     /// Check whether the file contains no records.
+    #[wasm_bindgen(js_name = isEmpty)]
+    pub fn is_empty(&mut self) -> Result<bool, JsValue> {
+        Ok(self.len()? == 0)
+    }
+}
+
+/// DCD trajectory file reader.
+///
+/// DCD is a binary multi-frame trajectory format originally used by
+/// CHARMM and now widely produced by NAMD / OpenMM / GROMACS-via-VMD.
+/// This wrapper accepts the file as raw bytes (`Uint8Array`) since
+/// DCD is not text-encoded — passing a JS string would corrupt the
+/// fixed-width Fortran record markers.
+///
+/// Each frame produces a [`Frame`] with an `"atoms"` block carrying
+/// `x`, `y`, `z` (F, angstrom). Box/cell information, when the DCD
+/// header declares it present, is attached as the frame's `simbox`.
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const bytes = new Uint8Array(await blob.arrayBuffer());
+/// const reader = new DCDReader(bytes);
+/// console.log(reader.len()); // number of frames
+///
+/// const frame = reader.read(0); // first frame
+/// const atoms = frame.getBlock("atoms");
+/// const x = atoms.copyColF("x");
+/// ```
+#[wasm_bindgen(js_name = DCDReader)]
+pub struct DcdReader {
+    inner: RsDcdReader<Cursor<Vec<u8>>>,
+}
+
+#[wasm_bindgen(js_class = DCDReader)]
+impl DcdReader {
+    /// Create a new DCD reader from the file's raw bytes.
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - The full binary content of a DCD file. The reader
+    ///   takes ownership of an internal copy, so the caller is free
+    ///   to discard the buffer immediately after this returns.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const bytes = new Uint8Array(await file.arrayBuffer());
+    /// const reader = new DCDReader(bytes);
+    /// ```
+    #[wasm_bindgen(constructor)]
+    pub fn new(bytes: &[u8]) -> DcdReader {
+        DcdReader {
+            inner: RsDcdReader::new(Cursor::new(bytes.to_vec())),
+        }
+    }
+
+    /// Read a frame at the given step index.
+    ///
+    /// # Arguments
+    ///
+    /// * `step` - Zero-based frame index
+    ///
+    /// # Returns
+    ///
+    /// A [`Frame`] if the step exists, or `undefined` if `step` is
+    /// out of range.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string on parse errors (truncated record,
+    /// malformed header, byte-order mismatch).
+    #[wasm_bindgen]
+    pub fn read(&mut self, step: usize) -> Result<Option<Frame>, JsValue> {
+        let rs_frame = self
+            .inner
+            .read_step(step)
+            .map_err(|e| JsValue::from_str(&format!("DCD read error: {}", e)))?;
+
+        match rs_frame {
+            Some(frame_data) => Ok(Some(Frame::from_rs(frame_data)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Return the number of frames in the DCD file.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string if the header cannot be parsed.
+    #[wasm_bindgen]
+    pub fn len(&mut self) -> Result<usize, JsValue> {
+        self.inner
+            .len()
+            .map_err(|e| JsValue::from_str(&format!("DCD len error: {}", e)))
+    }
+
+    /// Check whether the file contains no frames.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string if the header cannot be parsed.
     #[wasm_bindgen(js_name = isEmpty)]
     pub fn is_empty(&mut self) -> Result<bool, JsValue> {
         Ok(self.len()? == 0)
