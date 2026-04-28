@@ -32,7 +32,7 @@ use ndarray::{Array1, Array2, IxDyn, array};
 use molrs::block::Block;
 use molrs::frame::Frame;
 use molrs::region::simbox::SimBox;
-use molrs::types::F;
+use molrs::types::{F, I, U};
 
 use crate::reader::{FrameReader, Reader};
 use crate::writer::{FrameWriter, Writer};
@@ -55,6 +55,24 @@ fn insert_float_col(block: &mut Block, key: &str, vals: Vec<F>) -> Result<()> {
 }
 
 fn insert_str_col(block: &mut Block, key: &str, vals: Vec<String>) -> Result<()> {
+    let n = vals.len();
+    let arr = Array1::from_vec(vals)
+        .into_shape_with_order(IxDyn(&[n]))
+        .map_err(invalid_data)?
+        .into_dyn();
+    block.insert(key, arr).map_err(invalid_data)
+}
+
+fn insert_i32_col(block: &mut Block, key: &str, vals: Vec<I>) -> Result<()> {
+    let n = vals.len();
+    let arr = Array1::from_vec(vals)
+        .into_shape_with_order(IxDyn(&[n]))
+        .map_err(invalid_data)?
+        .into_dyn();
+    block.insert(key, arr).map_err(invalid_data)
+}
+
+fn insert_u32_col(block: &mut Block, key: &str, vals: Vec<U>) -> Result<()> {
     let n = vals.len();
     let arr = Array1::from_vec(vals)
         .into_shape_with_order(IxDyn(&[n]))
@@ -393,28 +411,52 @@ impl FrameInProgress {
         insert_float_col(&mut atoms, "y", ys)?;
         insert_float_col(&mut atoms, "z", zs)?;
 
-        // Optional columns.
+        // Optional columns. Naming follows the PDB reader so downstream
+        // molvis modifiers (element coloring, backbone ribbon, selection)
+        // can consume CIF and PDB frames interchangeably.
+        if let Some(ids) = column_u32(&self.atom_cols, &["_atom_site.id", "_atom_site_id"]) {
+            insert_u32_col(&mut atoms, "id", ids)?;
+        }
         if let Some(syms) = string_column(
             &self.atom_cols,
-            &["_atom_site_type_symbol", "_atom_site.type_symbol"],
+            &["_atom_site.type_symbol", "_atom_site_type_symbol"],
         ) {
-            insert_str_col(&mut atoms, "symbol", syms)?;
+            insert_str_col(&mut atoms, "element", syms)?;
         }
-        if let Some(labels) = string_column(
+        if let Some(names) = string_column(
             &self.atom_cols,
-            &["_atom_site_label", "_atom_site.label_atom_id"],
+            &["_atom_site.label_atom_id", "_atom_site_label"],
         ) {
-            insert_str_col(&mut atoms, "label", labels)?;
+            insert_str_col(&mut atoms, "name", names)?;
+        }
+        if let Some(res_names) = string_column(
+            &self.atom_cols,
+            &["_atom_site.label_comp_id", "_atom_site.auth_comp_id"],
+        ) {
+            insert_str_col(&mut atoms, "res_name", res_names)?;
+        }
+        if let Some(res_seqs) = column_i32(
+            &self.atom_cols,
+            &["_atom_site.label_seq_id", "_atom_site.auth_seq_id"],
+            0,
+        ) {
+            insert_i32_col(&mut atoms, "res_seq", res_seqs)?;
+        }
+        if let Some(chains) = string_column(
+            &self.atom_cols,
+            &["_atom_site.label_asym_id", "_atom_site.auth_asym_id"],
+        ) {
+            insert_str_col(&mut atoms, "chain_id", chains)?;
         }
         if let Some(occ) = column_floats(
             &self.atom_cols,
-            &["_atom_site_occupancy", "_atom_site.occupancy"],
+            &["_atom_site.occupancy", "_atom_site_occupancy"],
         ) {
             insert_float_col(&mut atoms, "occupancy", occ)?;
         }
         if let Some(b) = column_floats(
             &self.atom_cols,
-            &["_atom_site_B_iso_or_equiv", "_atom_site.B_iso_or_equiv"],
+            &["_atom_site.B_iso_or_equiv", "_atom_site_B_iso_or_equiv"],
         ) {
             insert_float_col(&mut atoms, "b_iso", b)?;
         }
@@ -446,6 +488,48 @@ fn string_column(map: &HashMap<String, Vec<String>>, keys: &[&str]) -> Option<Ve
     for k in keys {
         if let Some(col) = map.get(*k) {
             return Some(col.clone());
+        }
+    }
+    None
+}
+
+/// Parse an integer column from a CIF loop. CIF uses `"."` and `"?"` for
+/// "not applicable" and "unknown" respectively (e.g. `_atom_site.label_seq_id`
+/// is `"."` for ligand / water / metal-ion atoms with no polymer residue
+/// numbering). Both placeholders, plus empty strings or unparseable values,
+/// fall back to `missing` rather than aborting the whole frame build.
+fn column_i32(
+    map: &HashMap<String, Vec<String>>,
+    keys: &[&str],
+    missing: I,
+) -> Option<Vec<I>> {
+    for k in keys {
+        if let Some(col) = map.get(*k) {
+            return Some(
+                col.iter()
+                    .map(|s| {
+                        let t = s.trim();
+                        if t == "." || t == "?" || t.is_empty() {
+                            missing
+                        } else {
+                            t.parse::<I>().unwrap_or(missing)
+                        }
+                    })
+                    .collect(),
+            );
+        }
+    }
+    None
+}
+
+fn column_u32(map: &HashMap<String, Vec<String>>, keys: &[&str]) -> Option<Vec<U>> {
+    for k in keys {
+        if let Some(col) = map.get(*k) {
+            return Some(
+                col.iter()
+                    .map(|s| s.trim().parse::<U>().unwrap_or(0))
+                    .collect(),
+            );
         }
     }
     None
@@ -709,8 +793,8 @@ pub fn write_cif_frame<W: Write>(writer: &mut W, frame: &Frame) -> Result<()> {
     let zs = atoms
         .get_float("z")
         .ok_or_else(|| invalid_data("atoms.z missing"))?;
-    let labels = atoms.get_string("label");
-    let symbols = atoms.get_string("symbol");
+    let labels = atoms.get_string("name");
+    let symbols = atoms.get_string("element");
 
     for i in 0..n {
         let label = labels
