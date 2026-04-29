@@ -866,19 +866,18 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs"
-version = "0.0.12"
+version = "0.0.15"
 dependencies = [
  "molcrafts-molrs-compute",
  "molcrafts-molrs-core",
  "molcrafts-molrs-embed",
  "molcrafts-molrs-ff",
  "molcrafts-molrs-io",
- "molcrafts-molrs-smiles",
 ]
 
 [[package]]
 name = "molcrafts-molrs-compute"
-version = "0.0.12"
+version = "0.0.15"
 dependencies = [
  "criterion",
  "molcrafts-molrs-core",
@@ -890,7 +889,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-core"
-version = "0.0.12"
+version = "0.0.15"
 dependencies = [
  "criterion",
  "libm",
@@ -908,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-cxxapi"
-version = "0.0.12"
+version = "0.0.15"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -919,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-embed"
-version = "0.0.12"
+version = "0.0.15"
 dependencies = [
  "molcrafts-molrs-core",
  "ndarray",
@@ -929,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-ff"
-version = "0.0.12"
+version = "0.0.15"
 dependencies = [
  "libm",
  "molcrafts-molrs-core",
@@ -941,23 +940,16 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-io"
-version = "0.0.12"
+version = "0.0.15"
 dependencies = [
  "flate2",
  "molcrafts-molrs-core",
  "ndarray",
  "once_cell",
+ "petgraph",
  "serde_json",
  "tempfile",
  "zarrs",
-]
-
-[[package]]
-name = "molcrafts-molrs-smiles"
-version = "0.0.12"
-dependencies = [
- "molcrafts-molrs-core",
- "petgraph",
 ]
 
 [[package]]

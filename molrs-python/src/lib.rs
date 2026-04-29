@@ -45,8 +45,7 @@ mod io;
 
 mod molrec;
 use molrec::{
-    PyGridObservable, PyMolRec, PyObservables, PyScalarObservable, PyTrajectory,
-    PyVectorObservable,
+    PyGridObservable, PyMolRec, PyObservables, PyScalarObservable, PyTrajectory, PyVectorObservable,
 };
 
 mod region;
@@ -93,6 +92,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(io::read_xyz_trajectory, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_lammps, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_lammps_traj, m)?)?;
+    m.add_class::<io::PyLAMMPSTrajReader>()?;
     m.add_function(wrap_pyfunction!(io::read_chgcar_file, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_cube_file, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_cube_file, m)?)?;

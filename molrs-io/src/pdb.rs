@@ -9,7 +9,7 @@ use molrs::block::Block;
 use molrs::frame::Frame;
 use molrs::frame_access::FrameAccess;
 use molrs::region::simbox::SimBox;
-use molrs::types::{F, U};
+use molrs::types::{F, I, U};
 use ndarray::{Array1, IxDyn, array};
 use std::collections::HashMap;
 use std::fs::File;
@@ -350,6 +350,20 @@ fn to_array_uint(vec: Vec<U>, len: usize) -> std::io::Result<ndarray::ArrayD<U>>
         .into_dyn())
 }
 
+fn to_array_int(vec: Vec<I>, len: usize) -> std::io::Result<ndarray::ArrayD<I>> {
+    Ok(Array1::<I>::from_vec(vec)
+        .into_shape_with_order(IxDyn(&[len]))
+        .map_err(err_mapper)?
+        .into_dyn())
+}
+
+fn to_array_string(vec: Vec<String>, len: usize) -> std::io::Result<ndarray::ArrayD<String>> {
+    Ok(Array1::from_vec(vec)
+        .into_shape_with_order(IxDyn(&[len]))
+        .map_err(err_mapper)?
+        .into_dyn())
+}
+
 fn build_atoms_block(atoms: &[AtomRecord]) -> std::io::Result<(Block, String, HashMap<i32, U>)> {
     let n = atoms.len();
     let mut x_vec = Vec::with_capacity(n);
@@ -357,6 +371,10 @@ fn build_atoms_block(atoms: &[AtomRecord]) -> std::io::Result<(Block, String, Ha
     let mut z_vec = Vec::with_capacity(n);
     let mut ids_vec: Vec<U> = Vec::with_capacity(n);
     let mut elements = Vec::with_capacity(n);
+    let mut names: Vec<String> = Vec::with_capacity(n);
+    let mut res_names: Vec<String> = Vec::with_capacity(n);
+    let mut res_seqs: Vec<I> = Vec::with_capacity(n);
+    let mut chain_ids: Vec<String> = Vec::with_capacity(n);
     let mut serial_map: HashMap<i32, U> = HashMap::with_capacity(n);
 
     for (i, atom) in atoms.iter().enumerate() {
@@ -369,6 +387,14 @@ fn build_atoms_block(atoms: &[AtomRecord]) -> std::io::Result<(Block, String, Ha
         } else {
             atom.element.clone()
         });
+        names.push(atom.name.clone());
+        res_names.push(atom.res_name.clone());
+        res_seqs.push(atom.res_seq);
+        // Chain ID is a single character per the PDB format spec; expose it
+        // as a String so the block schema is uniform across formats and so
+        // mmCIF files (multi-char chain IDs) can drop in later without
+        // breaking downstream consumers.
+        chain_ids.push(atom.chain_id.to_string());
         serial_map.insert(atom.serial, i as U);
     }
 
@@ -387,12 +413,21 @@ fn build_atoms_block(atoms: &[AtomRecord]) -> std::io::Result<(Block, String, Ha
     block
         .insert("id", to_array_uint(ids_vec, n)?)
         .map_err(err_mapper)?;
-
-    let elements_arr = Array1::from_vec(elements)
-        .into_shape_with_order(IxDyn(&[n]))
-        .map_err(err_mapper)?
-        .into_dyn();
-    block.insert("element", elements_arr).map_err(err_mapper)?;
+    block
+        .insert("element", to_array_string(elements, n)?)
+        .map_err(err_mapper)?;
+    block
+        .insert("name", to_array_string(names, n)?)
+        .map_err(err_mapper)?;
+    block
+        .insert("res_name", to_array_string(res_names, n)?)
+        .map_err(err_mapper)?;
+    block
+        .insert("res_seq", to_array_int(res_seqs, n)?)
+        .map_err(err_mapper)?;
+    block
+        .insert("chain_id", to_array_string(chain_ids, n)?)
+        .map_err(err_mapper)?;
 
     Ok((block, unique_elements, serial_map))
 }
@@ -746,6 +781,176 @@ pub fn read_pdb_frame<P: AsRef<Path>>(path: P) -> std::io::Result<Frame> {
 }
 
 // ============================================================================
+// Streaming
+// ============================================================================
+
+use crate::streaming::{FrameIndexBuilder, FrameIndexEntry, LineAccumulator};
+use std::io::Cursor;
+
+/// Parse exactly one PDB frame from a tightly-bounded byte slice. The slice
+/// must be a `[byte_offset, byte_offset + byte_len)` window produced by
+/// [`PdbIndexBuilder`] — for multi-MODEL files this is a single
+/// `MODEL ... ENDMDL` block; for single-model files this is the entire file.
+pub fn parse_frame_bytes(bytes: &[u8]) -> std::io::Result<Frame> {
+    let cursor = Cursor::new(bytes);
+    let mut reader = PDBReader::new(cursor);
+    reader.read_frame()?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "PDB frame slice contained no atoms",
+        )
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PdbMode {
+    /// No `MODEL` line has been observed; the entire file will be one frame.
+    Single,
+    /// `MODEL` has been observed; frame boundaries are `MODEL` / `ENDMDL`.
+    Multi,
+}
+
+/// Streaming frame indexer for PDB files.
+///
+/// The state machine tracks two modes:
+/// * `Single`: no `MODEL` record has been seen — the whole file is one
+///   frame, emitted by `finish`.
+/// * `Multi`: `MODEL` opens a frame, `ENDMDL` (or another `MODEL` without
+///   a preceding `ENDMDL`) closes it.
+///
+/// The builder tolerates chunk boundaries inside the `MODEL`/`ENDMDL`
+/// literals.
+pub struct PdbIndexBuilder {
+    lines: LineAccumulator,
+    mode: PdbMode,
+    pending_frame_start: Option<u64>,
+    pending_entries: Vec<FrameIndexEntry>,
+}
+
+impl Default for PdbIndexBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PdbIndexBuilder {
+    pub fn new() -> Self {
+        Self {
+            lines: LineAccumulator::new(),
+            mode: PdbMode::Single,
+            pending_frame_start: None,
+            pending_entries: Vec::new(),
+        }
+    }
+}
+
+impl FrameIndexBuilder for PdbIndexBuilder {
+    fn feed(&mut self, chunk: &[u8], global_offset: u64) {
+        let mode = &mut self.mode;
+        let pending_frame_start = &mut self.pending_frame_start;
+        let pending_entries = &mut self.pending_entries;
+        self.lines
+            .feed(chunk, global_offset, |line, line_offset, line_len| {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("MODEL") {
+                    *mode = PdbMode::Multi;
+                    if let Some(prev) = pending_frame_start.replace(line_offset) {
+                        // A MODEL without a preceding ENDMDL — close the
+                        // previous frame at the new MODEL's offset.
+                        let len = (line_offset - prev) as u32;
+                        pending_entries.push(FrameIndexEntry {
+                            byte_offset: prev,
+                            byte_len: len,
+                        });
+                    }
+                } else if trimmed.starts_with("ENDMDL") {
+                    if let Some(prev) = pending_frame_start.take() {
+                        let line_end = line_offset + line_len as u64;
+                        let len = (line_end - prev) as u32;
+                        pending_entries.push(FrameIndexEntry {
+                            byte_offset: prev,
+                            byte_len: len,
+                        });
+                    }
+                }
+            });
+    }
+
+    fn drain(&mut self) -> Vec<FrameIndexEntry> {
+        std::mem::take(&mut self.pending_entries)
+    }
+
+    fn finish(mut self: Box<Self>) -> std::io::Result<Vec<FrameIndexEntry>> {
+        let mode = &mut self.mode;
+        let pending_frame_start = &mut self.pending_frame_start;
+        let pending_entries = &mut self.pending_entries;
+        self.lines.finish(|line, line_offset, line_len| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("MODEL") {
+                *mode = PdbMode::Multi;
+                if let Some(prev) = pending_frame_start.replace(line_offset) {
+                    let len = (line_offset - prev) as u32;
+                    pending_entries.push(FrameIndexEntry {
+                        byte_offset: prev,
+                        byte_len: len,
+                    });
+                }
+            } else if trimmed.starts_with("ENDMDL") {
+                if let Some(prev) = pending_frame_start.take() {
+                    let line_end = line_offset + line_len as u64;
+                    let len = (line_end - prev) as u32;
+                    pending_entries.push(FrameIndexEntry {
+                        byte_offset: prev,
+                        byte_len: len,
+                    });
+                }
+            }
+        });
+
+        let bytes_seen = self.lines.bytes_seen();
+        match self.mode {
+            PdbMode::Single => {
+                if bytes_seen > 0 {
+                    if bytes_seen > u32::MAX as u64 {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "PDB frame size exceeds 4 GiB",
+                        ));
+                    }
+                    self.pending_entries.push(FrameIndexEntry {
+                        byte_offset: 0,
+                        byte_len: bytes_seen as u32,
+                    });
+                }
+            }
+            PdbMode::Multi => {
+                // If a MODEL was opened but never closed (no ENDMDL),
+                // include it as a trailing frame spanning to EOF.
+                if let Some(prev) = self.pending_frame_start.take() {
+                    let span = bytes_seen.saturating_sub(prev);
+                    if span > u32::MAX as u64 {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "PDB frame size exceeds 4 GiB",
+                        ));
+                    }
+                    self.pending_entries.push(FrameIndexEntry {
+                        byte_offset: prev,
+                        byte_len: span as u32,
+                    });
+                }
+            }
+        }
+
+        Ok(std::mem::take(&mut self.pending_entries))
+    }
+
+    fn bytes_seen(&self) -> u64 {
+        self.lines.bytes_seen()
+    }
+}
+
+// ============================================================================
 // Unit Tests
 // ============================================================================
 
@@ -952,6 +1157,75 @@ END
             let i_atoms = bonds.get_uint("atomi").expect("No atomi column");
             let j_atoms = bonds.get_uint("atomj").expect("No atomj column");
             assert_eq!(i_atoms.len(), j_atoms.len(), "Bond arrays should match");
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Streaming index tests
+    // -----------------------------------------------------------------
+
+    fn pdb_build_chunked(bytes: &[u8], chunk_size: usize) -> Vec<FrameIndexEntry> {
+        let mut builder = Box::new(PdbIndexBuilder::new());
+        let mut offset: u64 = 0;
+        let mut out: Vec<FrameIndexEntry> = Vec::new();
+        for piece in bytes.chunks(chunk_size.max(1)) {
+            builder.feed(piece, offset);
+            offset += piece.len() as u64;
+            out.extend(builder.drain());
+        }
+        out.extend(builder.finish().expect("finish"));
+        out
+    }
+
+    const SINGLE_PDB: &str = concat!(
+        "CRYST1   10.000   10.000   10.000  90.00  90.00  90.00 P 1           1\n",
+        "ATOM      1  N   ALA A   1       1.000   2.000   3.000  1.00 20.00           N  \n",
+        "ATOM      2  CA  ALA A   1       2.000   3.000   4.000  1.00 20.00           C  \n",
+        "END\n",
+    );
+
+    const MULTI_PDB: &str = concat!(
+        "MODEL        1\n",
+        "ATOM      1  N   ALA A   1       1.000   2.000   3.000  1.00 20.00           N  \n",
+        "ATOM      2  CA  ALA A   1       2.000   3.000   4.000  1.00 20.00           C  \n",
+        "ENDMDL\n",
+        "MODEL        2\n",
+        "ATOM      1  N   ALA A   1       1.500   2.500   3.500  1.00 20.00           N  \n",
+        "ATOM      2  CA  ALA A   1       2.500   3.500   4.500  1.00 20.00           C  \n",
+        "ENDMDL\n",
+    );
+
+    #[test]
+    fn pdb_streaming_single_frame_no_model() {
+        let bytes = SINGLE_PDB.as_bytes();
+        for cs in [1usize, 7, 16, 64, bytes.len()] {
+            let entries = pdb_build_chunked(bytes, cs);
+            assert_eq!(entries.len(), 1, "chunk size {}", cs);
+            assert_eq!(entries[0].byte_offset, 0);
+            assert_eq!(entries[0].byte_len as usize, bytes.len());
+            parse_frame_bytes(&bytes[..entries[0].byte_len as usize])
+                .expect("parse single-frame PDB");
+        }
+    }
+
+    #[test]
+    fn pdb_streaming_multi_model() {
+        let bytes = MULTI_PDB.as_bytes();
+        let one_shot = pdb_build_chunked(bytes, bytes.len());
+        assert_eq!(one_shot.len(), 2);
+        for cs in [1usize, 7, 16, 64, 256] {
+            let chunked = pdb_build_chunked(bytes, cs);
+            assert_eq!(
+                one_shot, chunked,
+                "chunk size {} produced different index",
+                cs
+            );
+        }
+        for entry in &one_shot {
+            let lo = entry.byte_offset as usize;
+            let hi = lo + entry.byte_len as usize;
+            let frame = parse_frame_bytes(&bytes[lo..hi]).expect("parse model");
+            assert_eq!(frame.get("atoms").unwrap().nrows().unwrap(), 2);
         }
     }
 }

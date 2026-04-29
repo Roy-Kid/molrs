@@ -1308,3 +1308,123 @@ pub fn write_lammps_data<P: AsRef<Path>>(path: P, frame: &impl FrameAccess) -> s
     let mut writer = std::io::BufWriter::new(file);
     write_lammps_data_frame(&mut writer, frame)
 }
+
+// ============================================================================
+// Streaming
+// ============================================================================
+
+use crate::streaming::{FrameIndexBuilder, FrameIndexEntry};
+use std::io::Cursor;
+
+/// Parse a LAMMPS data frame from a tightly-bounded byte slice. The slice
+/// must contain the entire LAMMPS data file (data files are single-frame).
+pub fn parse_frame_bytes(bytes: &[u8]) -> std::io::Result<Frame> {
+    let cursor = Cursor::new(bytes);
+    let mut reader = LAMMPSDataReader::new(cursor);
+    reader
+        .read_frame()?
+        .ok_or_else(|| err_mapper("No frame found in LAMMPS data slice"))
+}
+
+/// Streaming frame indexer for LAMMPS data files.
+///
+/// LAMMPS data files contain exactly one frame; this indexer simply tracks
+/// total bytes seen and emits a single `FrameIndexEntry { 0, bytes_seen }`
+/// from `finish`.
+///
+/// `byte_len` is `u32` so files larger than 4 GiB are rejected — that's a
+/// future-spec lift.
+pub struct LammpsDataIndexBuilder {
+    bytes_seen: u64,
+}
+
+impl Default for LammpsDataIndexBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LammpsDataIndexBuilder {
+    pub fn new() -> Self {
+        Self { bytes_seen: 0 }
+    }
+}
+
+impl FrameIndexBuilder for LammpsDataIndexBuilder {
+    fn feed(&mut self, chunk: &[u8], global_offset: u64) {
+        self.bytes_seen = global_offset.saturating_add(chunk.len() as u64);
+    }
+
+    fn drain(&mut self) -> Vec<FrameIndexEntry> {
+        Vec::new()
+    }
+
+    fn finish(self: Box<Self>) -> std::io::Result<Vec<FrameIndexEntry>> {
+        if self.bytes_seen == 0 {
+            return Ok(Vec::new());
+        }
+        if self.bytes_seen > u32::MAX as u64 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "LAMMPS data file exceeds 4 GiB",
+            ));
+        }
+        Ok(vec![FrameIndexEntry {
+            byte_offset: 0,
+            byte_len: self.bytes_seen as u32,
+        }])
+    }
+
+    fn bytes_seen(&self) -> u64 {
+        self.bytes_seen
+    }
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+
+    const TINY_DATA: &str = concat!(
+        "LAMMPS data file\n",
+        "\n",
+        "2 atoms\n",
+        "1 atom types\n",
+        "\n",
+        "0.0 10.0 xlo xhi\n",
+        "0.0 10.0 ylo yhi\n",
+        "0.0 10.0 zlo zhi\n",
+        "\n",
+        "Atoms\n",
+        "\n",
+        "1 1 0.0 0.0 0.0\n",
+        "2 1 1.0 0.0 0.0\n",
+    );
+
+    fn build_chunked(bytes: &[u8], cs: usize) -> Vec<FrameIndexEntry> {
+        let mut b = Box::new(LammpsDataIndexBuilder::new());
+        let mut off: u64 = 0;
+        let mut out: Vec<FrameIndexEntry> = Vec::new();
+        for piece in bytes.chunks(cs.max(1)) {
+            b.feed(piece, off);
+            off += piece.len() as u64;
+            out.extend(b.drain());
+        }
+        out.extend(b.finish().expect("finish"));
+        out
+    }
+
+    #[test]
+    fn lammps_data_streaming_single_frame() {
+        let bytes = TINY_DATA.as_bytes();
+        let one = build_chunked(bytes, bytes.len());
+        for cs in [1usize, 7, 31, 64, bytes.len()] {
+            let chunked = build_chunked(bytes, cs);
+            assert_eq!(one, chunked, "chunk size {}", cs);
+        }
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].byte_offset, 0);
+        assert_eq!(one[0].byte_len as usize, bytes.len());
+        let frame = parse_frame_bytes(bytes).expect("parse");
+        assert_eq!(frame.get("atoms").unwrap().nrows().unwrap(), 2);
+    }
+}

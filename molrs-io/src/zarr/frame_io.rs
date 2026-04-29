@@ -117,54 +117,54 @@ pub(crate) fn read_column(
 
     if dt.is::<Float32DataType>() {
         let data: Vec<f32> = arr.retrieve_array_subset(&subset)?;
-        Ok(Column::Float(
+        Ok(Column::from_float(
             ArrayD::from_shape_vec(shape, data.into_iter().map(|v| v as F).collect())
                 .map_err(shape_err)?,
         ))
     } else if dt.is::<Float64DataType>() {
         let data: Vec<f64> = arr.retrieve_array_subset(&subset)?;
-        Ok(Column::Float(
+        Ok(Column::from_float(
             ArrayD::from_shape_vec(shape, data.into_iter().map(|v| v as F).collect())
                 .map_err(shape_err)?,
         ))
     } else if dt.is::<Int32DataType>() {
         let data: Vec<i32> = arr.retrieve_array_subset(&subset)?;
-        Ok(Column::Int(
+        Ok(Column::from_int(
             ArrayD::from_shape_vec(shape, data.into_iter().map(|v| v as I).collect())
                 .map_err(shape_err)?,
         ))
     } else if dt.is::<Int64DataType>() {
         let data: Vec<i64> = arr.retrieve_array_subset(&subset)?;
-        Ok(Column::Int(
+        Ok(Column::from_int(
             ArrayD::from_shape_vec(shape, data.into_iter().map(|v| v as I).collect())
                 .map_err(shape_err)?,
         ))
     } else if dt.is::<UInt32DataType>() {
         let data: Vec<u32> = arr.retrieve_array_subset(&subset)?;
-        Ok(Column::UInt(
+        Ok(Column::from_uint(
             ArrayD::from_shape_vec(shape, data.into_iter().map(|v| v as U).collect())
                 .map_err(shape_err)?,
         ))
     } else if dt.is::<UInt64DataType>() {
         let data: Vec<u64> = arr.retrieve_array_subset(&subset)?;
-        Ok(Column::UInt(
+        Ok(Column::from_uint(
             ArrayD::from_shape_vec(shape, data.into_iter().map(|v| v as U).collect())
                 .map_err(shape_err)?,
         ))
     } else if dt.is::<UInt8DataType>() && is_bool {
         let data: Vec<u8> = arr.retrieve_array_subset(&subset)?;
         let bools: Vec<bool> = data.into_iter().map(|v| v != 0).collect();
-        Ok(Column::Bool(
+        Ok(Column::from_bool(
             ArrayD::from_shape_vec(shape, bools).map_err(shape_err)?,
         ))
     } else if dt.is::<UInt8DataType>() {
         let data: Vec<u8> = arr.retrieve_array_subset(&subset)?;
-        Ok(Column::U8(
+        Ok(Column::from_u8(
             ArrayD::from_shape_vec(shape, data).map_err(shape_err)?,
         ))
     } else if dt.is::<StringDataType>() {
         let data: Vec<String> = arr.retrieve_array_subset(&subset)?;
-        Ok(Column::String(
+        Ok(Column::from_string(
             ArrayD::from_shape_vec(shape, data).map_err(shape_err)?,
         ))
     } else {
@@ -177,14 +177,8 @@ pub(crate) fn insert_column_into_block(
     name: &str,
     col: Column,
 ) -> Result<(), MolRsError> {
-    match col {
-        Column::Float(a) => block.insert(name, a).map_err(MolRsError::Block),
-        Column::Int(a) => block.insert(name, a).map_err(MolRsError::Block),
-        Column::UInt(a) => block.insert(name, a).map_err(MolRsError::Block),
-        Column::U8(a) => block.insert(name, a).map_err(MolRsError::Block),
-        Column::Bool(a) => block.insert(name, a).map_err(MolRsError::Block),
-        Column::String(a) => block.insert(name, a).map_err(MolRsError::Block),
-    }
+    // Zero-copy insert: hand the Arc-backed Column directly to the Block.
+    block.insert_column(name, col).map_err(MolRsError::Block)
 }
 
 // ---------------------------------------------------------------------------

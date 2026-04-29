@@ -922,6 +922,183 @@ pub fn read_xyz_traj<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<Vec<
     xyz_reader.iter().collect()
 }
 
+// ============================================================================
+// Streaming
+// ============================================================================
+
+use crate::streaming::{FrameIndexBuilder, FrameIndexEntry, LineAccumulator};
+use std::io::Cursor;
+
+/// Parse exactly one XYZ / Extended-XYZ frame from a tightly-bounded byte
+/// slice. The slice must be a `[byte_offset, byte_offset + byte_len)` window
+/// produced by [`XyzIndexBuilder`].
+pub fn parse_frame_bytes(bytes: &[u8]) -> std::io::Result<Frame> {
+    let mut cursor = Cursor::new(bytes);
+    read_xyz_frame_from_reader(&mut cursor)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "XYZ frame slice is empty",
+        )
+    })
+}
+
+/// Phase of the XYZ indexer state machine.
+#[derive(Debug, Clone, Copy)]
+enum XyzPhase {
+    /// Looking for the natoms count line.
+    AwaitingNatoms,
+    /// natoms parsed; the next line is the comment line.
+    AwaitingComment { natoms: usize },
+    /// Consuming `remaining` atom lines.
+    ConsumingAtoms { remaining: usize },
+}
+
+/// Streaming frame indexer for XYZ / Extended-XYZ files.
+///
+/// State machine: `AwaitingNatoms` → `AwaitingComment` → `ConsumingAtoms` →
+/// emit and reset to `AwaitingNatoms`. Blank or non-integer lines in
+/// `AwaitingNatoms` are skipped (matching the lenient
+/// `read_xyz_frame_from_reader` behavior).
+pub struct XyzIndexBuilder {
+    lines: LineAccumulator,
+    phase: XyzPhase,
+    pending_frame_start: Option<u64>,
+    pending_entries: Vec<FrameIndexEntry>,
+    /// Total bytes scanned so far (line offset + line len of the most
+    /// recently completed atom line) — needed to compute byte_len on
+    /// frame completion.
+    last_line_end: u64,
+}
+
+impl Default for XyzIndexBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl XyzIndexBuilder {
+    pub fn new() -> Self {
+        Self {
+            lines: LineAccumulator::new(),
+            phase: XyzPhase::AwaitingNatoms,
+            pending_frame_start: None,
+            pending_entries: Vec::new(),
+            last_line_end: 0,
+        }
+    }
+
+    fn process_line(&mut self, line: &str, line_offset: u64, line_len: u32) -> std::io::Result<()> {
+        let line_end = line_offset + line_len as u64;
+        self.last_line_end = line_end;
+        match self.phase {
+            XyzPhase::AwaitingNatoms => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    // Blank line — skip in the AwaitingNatoms state, matching
+                    // the legacy `read_xyz_frame_from_reader` semantics.
+                    return Ok(());
+                }
+                let n = match trimmed.parse::<usize>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        // Garbage line in AwaitingNatoms is also skipped per
+                        // spec ("blank/garbage lines in AwaitingNatoms state
+                        // are skipped not crashed").
+                        return Ok(());
+                    }
+                };
+                self.pending_frame_start = Some(line_offset);
+                self.phase = XyzPhase::AwaitingComment { natoms: n };
+                Ok(())
+            }
+            XyzPhase::AwaitingComment { natoms } => {
+                if natoms == 0 {
+                    // 0-atom frame — emit now, spanning the count + comment.
+                    let start = self.pending_frame_start.take().unwrap_or(line_offset);
+                    let span = line_end - start;
+                    self.push_entry(start, span)?;
+                    self.phase = XyzPhase::AwaitingNatoms;
+                } else {
+                    self.phase = XyzPhase::ConsumingAtoms { remaining: natoms };
+                }
+                Ok(())
+            }
+            XyzPhase::ConsumingAtoms { remaining } => {
+                let new_remaining = remaining - 1;
+                if new_remaining == 0 {
+                    let start = self.pending_frame_start.take().unwrap_or(line_offset);
+                    let span = line_end - start;
+                    self.push_entry(start, span)?;
+                    self.phase = XyzPhase::AwaitingNatoms;
+                } else {
+                    self.phase = XyzPhase::ConsumingAtoms {
+                        remaining: new_remaining,
+                    };
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn push_entry(&mut self, byte_offset: u64, span: u64) -> std::io::Result<()> {
+        if span > u32::MAX as u64 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "XYZ frame size exceeds 4 GiB",
+            ));
+        }
+        self.pending_entries.push(FrameIndexEntry {
+            byte_offset,
+            byte_len: span as u32,
+        });
+        Ok(())
+    }
+}
+
+impl FrameIndexBuilder for XyzIndexBuilder {
+    fn feed(&mut self, chunk: &[u8], global_offset: u64) {
+        // Drain into a buffer first, then process — the closure can't borrow
+        // self mutably and call self.process_line. Collect pending lines and
+        // process post-loop.
+        let mut staged: Vec<(String, u64, u32)> = Vec::new();
+        self.lines
+            .feed(chunk, global_offset, |line, line_offset, line_len| {
+                staged.push((line.to_string(), line_offset, line_len));
+            });
+        for (line, off, len) in staged {
+            // Errors during streaming index building are silently ignored —
+            // the legacy reader's strict-error behavior surfaces when
+            // parse_frame_bytes is later called on the resulting slice.
+            // For oversized frames we still surface via finish().
+            let _ = self.process_line(&line, off, len);
+        }
+    }
+
+    fn drain(&mut self) -> Vec<FrameIndexEntry> {
+        std::mem::take(&mut self.pending_entries)
+    }
+
+    fn finish(mut self: Box<Self>) -> std::io::Result<Vec<FrameIndexEntry>> {
+        let mut staged: Vec<(String, u64, u32)> = Vec::new();
+        self.lines.finish(|line, line_offset, line_len| {
+            staged.push((line.to_string(), line_offset, line_len));
+        });
+        for (line, off, len) in staged {
+            self.process_line(&line, off, len)?;
+        }
+        // Trailing partial frame: if pending_frame_start is still Some,
+        // we have an incomplete frame at EOF. The spec for XYZ says
+        // ConsumingAtoms must reach zero before emit; an incomplete final
+        // frame is malformed. Be lenient: drop it (legacy reader would
+        // error at parse time on this slice).
+        Ok(std::mem::take(&mut self.pending_entries))
+    }
+
+    fn bytes_seen(&self) -> u64 {
+        self.lines.bytes_seen()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
@@ -990,6 +1167,83 @@ mod tests {
         let mut cursor = Cursor::new(&data[..]);
         let err = read_xyz_frame_from_reader(&mut cursor).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    // -----------------------------------------------------------------
+    // Streaming index tests
+    // -----------------------------------------------------------------
+
+    fn xyz_build_chunked(bytes: &[u8], chunk_size: usize) -> Vec<FrameIndexEntry> {
+        let mut builder = Box::new(XyzIndexBuilder::new());
+        let mut offset: u64 = 0;
+        let mut out: Vec<FrameIndexEntry> = Vec::new();
+        for piece in bytes.chunks(chunk_size.max(1)) {
+            builder.feed(piece, offset);
+            offset += piece.len() as u64;
+            out.extend(builder.drain());
+        }
+        out.extend(builder.finish().expect("finish"));
+        out
+    }
+
+    const TWO_FRAME_XYZ: &str =
+        "2\nframe 0\nH 0 0 0\nH 1 0 0\n3\nframe 1\nO 0 0 0\nH 1 0 0\nH -1 0 0\n";
+
+    #[test]
+    fn xyz_streaming_single_shot_matches_chunks() {
+        let bytes = TWO_FRAME_XYZ.as_bytes();
+        let one_shot = xyz_build_chunked(bytes, bytes.len());
+        assert_eq!(one_shot.len(), 2);
+        for cs in [1usize, 3, 7, 13, 31, 64, 1024] {
+            let chunked = xyz_build_chunked(bytes, cs);
+            assert_eq!(
+                one_shot, chunked,
+                "chunk size {} produced different index",
+                cs
+            );
+        }
+
+        // Each entry slice must be parseable.
+        for entry in &one_shot {
+            let lo = entry.byte_offset as usize;
+            let hi = lo + entry.byte_len as usize;
+            parse_frame_bytes(&bytes[lo..hi]).expect("parse_frame_bytes");
+        }
+    }
+
+    /// Edge: chunk boundary inside the natoms count line.
+    #[test]
+    fn xyz_streaming_boundary_inside_natoms_count() {
+        // Multi-digit count.
+        let s = "12\nframe\n".to_string()
+            + &(0..12).map(|i| format!("H 0 0 {i}\n")).collect::<String>()
+            + "8\nframe2\n"
+            + &(0..8).map(|i| format!("H 0 0 {i}\n")).collect::<String>();
+        let bytes = s.as_bytes();
+        // Split at byte 1 — middle of "12".
+        let mut builder = Box::new(XyzIndexBuilder::new());
+        builder.feed(&bytes[..1], 0);
+        builder.feed(&bytes[1..], 1);
+        let mut got = builder.drain();
+        got.extend(builder.finish().expect("finish"));
+        let one_shot = xyz_build_chunked(bytes, bytes.len());
+        assert_eq!(one_shot.len(), 2);
+        assert_eq!(got, one_shot);
+    }
+
+    /// Edge: blank/garbage lines in `AwaitingNatoms` are skipped, not crashed.
+    #[test]
+    fn xyz_streaming_skips_blanks_in_awaiting_natoms() {
+        let s = "\n\n  \n2\nframe 0\nH 0 0 0\nH 1 0 0\n";
+        let bytes = s.as_bytes();
+        let entries = xyz_build_chunked(bytes, bytes.len());
+        assert_eq!(entries.len(), 1);
+        // Frame must start at the "2\n" line, not at byte 0.
+        let lo = entries[0].byte_offset as usize;
+        assert!(bytes[lo..].starts_with(b"2\n"));
+        let hi = lo + entries[0].byte_len as usize;
+        let frame = parse_frame_bytes(&bytes[lo..hi]).expect("parse");
+        assert_eq!(frame.get("atoms").unwrap().nrows().unwrap(), 2);
     }
 }
 

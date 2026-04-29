@@ -5,7 +5,8 @@
 //!
 //! | Module | JS class / function | Formats |
 //! |--------|-------------------|---------|
-//! | [`reader`] | `XYZReader`, `PDBReader`, `LAMMPSReader`, `LAMMPSDumpReader` | Read XYZ/ExtXYZ, PDB, LAMMPS data/dump files |
+//! | [`reader`] | `XYZReader`, `PDBReader`, `LAMMPSReader`, `LAMMPSTrajReader`, `SDFReader` | Read XYZ/ExtXYZ, PDB, LAMMPS data/dump, SDF (whole-content; deprecated path) |
+//! | [`streaming`] | `WasmLammpsDumpStream`, `WasmXyzStream`, `WasmPdbStream`, `WasmLammpsDataStream`, `WasmSdfStream` | Streaming readers driven by a chunk-fed `FrameIndexBuilder` |
 //! | [`writer`] | `writeFrame(frame, format)` | Write XYZ, PDB, LAMMPS dump |
 //! | [`zarr`] | `MolRecReader` | Read MolRec Zarr V3 archives |
 //!
@@ -14,9 +15,11 @@
 //! browser to read files, then pass the text content to the reader.
 
 pub mod reader;
+pub mod streaming;
 pub mod writer;
 pub mod zarr;
 
 pub use reader::*;
+pub use streaming::*;
 pub use writer::*;
 pub use zarr::*;

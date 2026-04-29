@@ -13,17 +13,22 @@
 //! |----------|--------|-------------|----------|
 //! | `XYZReader` | XYZ / ExtXYZ | Yes | `"atoms"` block with `element`, `x`, `y`, `z` |
 //! | `PDBReader` | Protein Data Bank | No (step=0 only) | `"atoms"` block with `name`, `resname`, `x`, `y`, `z`, etc. |
+//! | `CIFReader` | Crystallographic Information File | Yes (per `data_` block) | `"atoms"` block + simbox from unit cell |
 //! | `LAMMPSReader` | LAMMPS data file | No (step=0 only) | `"atoms"` block + `"bonds"` block + simbox |
-//! | `LAMMPSDumpReader` | LAMMPS dump trajectory | Yes | `"atoms"` block with columns from dump header |
+//! | `LAMMPSTrajReader` | LAMMPS dump trajectory | Yes | `"atoms"` block with columns from dump header |
 
 use crate::core::frame::Frame;
+use molrs_io::chgcar::read_chgcar_from_reader;
+use molrs_io::cif::CifReader as RsCifReader;
+use molrs_io::cube::read_cube_from_reader;
+use molrs_io::dcd::DcdReader as RsDcdReader;
 use molrs_io::lammps_data::LAMMPSDataReader;
-use molrs_io::lammps_dump::LAMMPSDumpReader;
+use molrs_io::lammps_dump::LAMMPSTrajReader;
 use molrs_io::pdb::PDBReader;
-use molrs_io::reader::{FrameReader, TrajReader};
+use molrs_io::reader::{FrameReader, Reader, TrajReader};
 use molrs_io::sdf::SDFReader;
 use molrs_io::xyz::XYZReader;
-use std::io::Cursor;
+use std::io::{BufReader, Cursor};
 use wasm_bindgen::prelude::*;
 
 /// XYZ / Extended XYZ file reader.
@@ -270,7 +275,7 @@ impl PdbReader {
 /// ```
 #[wasm_bindgen(js_name = LAMMPSReader)]
 pub struct LammpsReader {
-    inner: LAMMPSDataReader<Cursor<Vec<u8>>>,
+    content: Vec<u8>,
     cached_len: Option<usize>,
 }
 
@@ -289,9 +294,8 @@ impl LammpsReader {
     /// ```
     #[wasm_bindgen(constructor)]
     pub fn new(content: &str) -> LammpsReader {
-        let bytes = content.as_bytes().to_vec();
         LammpsReader {
-            inner: LAMMPSDataReader::new(Cursor::new(bytes)),
+            content: content.as_bytes().to_vec(),
             cached_len: None,
         }
     }
@@ -324,8 +328,12 @@ impl LammpsReader {
             return Ok(None);
         }
 
-        let rs_frame = self
-            .inner
+        // Build a fresh rs reader each call: `FrameReader::read_frame` is a
+        // single-shot cursor API (sets `returned=true` after first call), so
+        // reusing `inner` across `len()` and `read(0)` returned None on the
+        // second call. PDBReader already uses this pattern — mirror it here.
+        let mut reader = LAMMPSDataReader::new(Cursor::new(self.content.as_slice()));
+        let rs_frame = reader
             .read_frame()
             .map_err(|e| JsValue::from_str(&format!("LAMMPS read error: {}", e)))?;
 
@@ -372,24 +380,24 @@ impl LammpsReader {
 /// # Example (JavaScript)
 ///
 /// ```js
-/// const reader = new LAMMPSDumpReader(dumpContent);
+/// const reader = new LAMMPSTrajReader(dumpContent);
 /// console.log(reader.len()); // number of timesteps
 /// const frame = reader.read(0);
 /// const atoms = frame.getBlock("atoms");
 /// ```
-#[wasm_bindgen(js_name = LAMMPSDumpReader)]
+#[wasm_bindgen(js_name = LAMMPSTrajReader)]
 pub struct LammpsDumpReader {
-    inner: LAMMPSDumpReader<Cursor<Vec<u8>>>,
+    inner: LAMMPSTrajReader<Cursor<Vec<u8>>>,
 }
 
-#[wasm_bindgen(js_class = LAMMPSDumpReader)]
+#[wasm_bindgen(js_class = LAMMPSTrajReader)]
 impl LammpsDumpReader {
     /// Create a new LAMMPS dump reader from string content.
     #[wasm_bindgen(constructor)]
     pub fn new(content: &str) -> LammpsDumpReader {
         let bytes = content.as_bytes().to_vec();
         LammpsDumpReader {
-            inner: LAMMPSDumpReader::new(Cursor::new(bytes)),
+            inner: LAMMPSTrajReader::new(Cursor::new(bytes)),
         }
     }
 
@@ -506,10 +514,386 @@ impl SdfReader {
     }
 }
 
+/// DCD trajectory file reader.
+///
+/// DCD is a binary multi-frame trajectory format originally used by
+/// CHARMM and now widely produced by NAMD / OpenMM / GROMACS-via-VMD.
+/// This wrapper accepts the file as raw bytes (`Uint8Array`) since
+/// DCD is not text-encoded — passing a JS string would corrupt the
+/// fixed-width Fortran record markers.
+///
+/// Each frame produces a [`Frame`] with an `"atoms"` block carrying
+/// `x`, `y`, `z` (F, angstrom). Box/cell information, when the DCD
+/// header declares it present, is attached as the frame's `simbox`.
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const bytes = new Uint8Array(await blob.arrayBuffer());
+/// const reader = new DCDReader(bytes);
+/// console.log(reader.len()); // number of frames
+///
+/// const frame = reader.read(0); // first frame
+/// const atoms = frame.getBlock("atoms");
+/// const x = atoms.copyColF("x");
+/// ```
+#[wasm_bindgen(js_name = DCDReader)]
+pub struct DcdReader {
+    inner: RsDcdReader<Cursor<Vec<u8>>>,
+}
+
+#[wasm_bindgen(js_class = DCDReader)]
+impl DcdReader {
+    /// Create a new DCD reader from the file's raw bytes.
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - The full binary content of a DCD file. The reader
+    ///   takes ownership of an internal copy, so the caller is free
+    ///   to discard the buffer immediately after this returns.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const bytes = new Uint8Array(await file.arrayBuffer());
+    /// const reader = new DCDReader(bytes);
+    /// ```
+    #[wasm_bindgen(constructor)]
+    pub fn new(bytes: &[u8]) -> DcdReader {
+        DcdReader {
+            inner: RsDcdReader::new(Cursor::new(bytes.to_vec())),
+        }
+    }
+
+    /// Read a frame at the given step index.
+    ///
+    /// # Arguments
+    ///
+    /// * `step` - Zero-based frame index
+    ///
+    /// # Returns
+    ///
+    /// A [`Frame`] if the step exists, or `undefined` if `step` is
+    /// out of range.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string on parse errors (truncated record,
+    /// malformed header, byte-order mismatch).
+    #[wasm_bindgen]
+    pub fn read(&mut self, step: usize) -> Result<Option<Frame>, JsValue> {
+        let rs_frame = self
+            .inner
+            .read_step(step)
+            .map_err(|e| JsValue::from_str(&format!("DCD read error: {}", e)))?;
+
+        match rs_frame {
+            Some(frame_data) => Ok(Some(Frame::from_rs(frame_data)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Return the number of frames in the DCD file.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string if the header cannot be parsed.
+    #[wasm_bindgen]
+    pub fn len(&mut self) -> Result<usize, JsValue> {
+        self.inner
+            .len()
+            .map_err(|e| JsValue::from_str(&format!("DCD len error: {}", e)))
+    }
+
+    /// Check whether the file contains no frames.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string if the header cannot be parsed.
+    #[wasm_bindgen(js_name = isEmpty)]
+    pub fn is_empty(&mut self) -> Result<bool, JsValue> {
+        Ok(self.len()? == 0)
+    }
+}
+
+/// Crystallographic Information File (CIF / mmCIF) reader.
+///
+/// Each `data_*` block in the file becomes one [`Frame`]. Most CIF files
+/// contain a single block (one structure), but multi-block files (e.g.
+/// polymorphs of the same compound) are also supported and are exposed
+/// as a multi-frame sequence. The unit cell parameters
+/// (`_cell_length_a`, `_b`, `_c`, `_cell_angle_alpha`, `_beta`,
+/// `_gamma`) are converted to a 3x3 h-matrix on the Rust side and
+/// surface on the JS side as `frame.simbox`.
+///
+/// Produces a [`Frame`] with an `"atoms"` block containing
+/// `element` (string), `x`, `y`, `z` (F, angstrom in Cartesian
+/// coordinates) and (when present in the file) `label`, `occupancy`,
+/// `bfactor` columns.
+///
+/// CIF parsing reads the entire file on each `read(step)` call --
+/// random access is therefore O(file_size), but typical CIF files are
+/// small (< 1 MB) and the molvis lazy trajectory caches frames at the
+/// JS level, so this is rarely a bottleneck.
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const content = await file.text();
+/// const reader = new CIFReader(content);
+/// const frame  = reader.read(0);
+/// const atoms  = frame.getBlock("atoms");
+/// const box    = frame.simbox;        // populated from the unit cell
+/// ```
+#[wasm_bindgen(js_name = CIFReader)]
+pub struct CifReader {
+    content: Vec<u8>,
+    cached_len: Option<usize>,
+}
+
+#[wasm_bindgen(js_class = CIFReader)]
+impl CifReader {
+    /// Create a new CIF reader from a string containing the file content.
+    ///
+    /// # Arguments
+    ///
+    /// * `content` - The full text content of a CIF file
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const reader = new CIFReader(cifString);
+    /// ```
+    #[wasm_bindgen(constructor)]
+    pub fn new(content: &str) -> CifReader {
+        CifReader {
+            content: content.as_bytes().to_vec(),
+            cached_len: None,
+        }
+    }
+
+    /// Read the frame at the given block index.
+    ///
+    /// # Arguments
+    ///
+    /// * `step` - 0-based index of the `data_*` block to return
+    ///
+    /// # Returns
+    ///
+    /// A [`Frame`] for the requested block, or `undefined` when
+    /// `step >= len()`.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string on parse errors.
+    #[wasm_bindgen]
+    pub fn read(&mut self, step: usize) -> Result<Option<Frame>, JsValue> {
+        let mut reader = RsCifReader::new(Cursor::new(self.content.as_slice()));
+        let frames = reader
+            .read_all()
+            .map_err(|e| JsValue::from_str(&format!("CIF read error: {}", e)))?;
+        if step >= frames.len() {
+            return Ok(None);
+        }
+        let rs_frame = frames.into_iter().nth(step).expect("bounds checked");
+        Ok(Some(Frame::from_rs(rs_frame)?))
+    }
+
+    /// Return the number of `data_*` blocks in the file.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string on parse errors.
+    #[wasm_bindgen]
+    pub fn len(&mut self) -> Result<usize, JsValue> {
+        if let Some(n) = self.cached_len {
+            return Ok(n);
+        }
+        let mut reader = RsCifReader::new(Cursor::new(self.content.as_slice()));
+        let n = reader
+            .read_all()
+            .map_err(|e| JsValue::from_str(&format!("CIF len error: {}", e)))?
+            .len();
+        self.cached_len = Some(n);
+        Ok(n)
+    }
+
+    /// Check whether the file contains no valid blocks.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string on parse errors.
+    #[wasm_bindgen(js_name = isEmpty)]
+    pub fn is_empty(&mut self) -> Result<bool, JsValue> {
+        Ok(self.len()? == 0)
+    }
+}
+
+/// Gaussian Cube file reader.
+///
+/// Cube files describe a single voxel grid with embedded atom geometry.
+/// The reader produces a [`Frame`] with:
+/// - `"atoms"` block: `element` (string), `atomic_number` (i32),
+///   `charge` (F), `x`/`y`/`z` (F, **always Å** — Bohr files are converted
+///   on read).
+/// - `"grid"` block: structural shape `[nx, ny, nz]` and one f64 column
+///   per scalar field — `density` for single-density files,
+///   `mo_<idx>` for negative-natoms multi-orbital files.
+/// - `simbox`: voxel cell × dims in Å.
+///
+/// Cube is inherently single-frame (only `step = 0` is valid).
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const content = await file.text();
+/// const reader  = new CubeReader(content);
+/// const frame   = reader.read(0);
+/// const grid    = frame.getBlock("grid");   // shape [nx, ny, nz]
+/// const density = grid.copyColF("density"); // owned Float64Array
+/// ```
+#[wasm_bindgen(js_name = CubeReader)]
+pub struct CubeReader {
+    content: Vec<u8>,
+    cached_len: Option<usize>,
+}
+
+#[wasm_bindgen(js_class = CubeReader)]
+impl CubeReader {
+    /// Create a new Cube reader from the file's text content.
+    #[wasm_bindgen(constructor)]
+    pub fn new(content: &str) -> CubeReader {
+        CubeReader {
+            content: content.as_bytes().to_vec(),
+            cached_len: None,
+        }
+    }
+
+    /// Read the frame at `step`. Cube files are single-frame, so any
+    /// `step != 0` returns `undefined`.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string on parse errors.
+    #[wasm_bindgen]
+    pub fn read(&mut self, step: usize) -> Result<Option<Frame>, JsValue> {
+        if step > 0 {
+            return Ok(None);
+        }
+        let reader = BufReader::new(Cursor::new(self.content.as_slice()));
+        let rs_frame = read_cube_from_reader(reader)
+            .map_err(|e| JsValue::from_str(&format!("Cube read error: {}", e)))?;
+        Ok(Some(Frame::from_rs(rs_frame)?))
+    }
+
+    /// Return the number of frames (always 0 or 1).
+    #[wasm_bindgen]
+    pub fn len(&mut self) -> Result<usize, JsValue> {
+        if let Some(n) = self.cached_len {
+            return Ok(n);
+        }
+        let n = if self.read(0)?.is_some() { 1 } else { 0 };
+        self.cached_len = Some(n);
+        Ok(n)
+    }
+
+    #[wasm_bindgen(js_name = isEmpty)]
+    pub fn is_empty(&mut self) -> Result<bool, JsValue> {
+        Ok(self.len()? == 0)
+    }
+}
+
+/// VASP CHGCAR / CHGDIF volumetric data reader.
+///
+/// Reads VASP-format charge density files (extension-less canonical name
+/// `CHGCAR` or `CHGCAR_*`). Produces a [`Frame`] with:
+/// - `"atoms"` block: `element` (string), `x`/`y`/`z` (F, Cartesian Å).
+/// - `"grid"` block: structural shape `[nx, ny, nz]`, columns
+///   `total` (always) and `diff` (when ISPIN=2).
+/// - `simbox`: triclinic POSCAR lattice in Å, fully periodic.
+///
+/// CHGCAR is single-frame; only `step = 0` is valid.
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const content = await file.text();
+/// const reader  = new CHGCARReader(content);
+/// const frame   = reader.read(0);
+/// const grid    = frame.getBlock("grid");
+/// const total   = grid.copyColF("total");
+/// ```
+#[wasm_bindgen(js_name = CHGCARReader)]
+pub struct ChgcarReader {
+    content: Vec<u8>,
+    cached_len: Option<usize>,
+}
+
+#[wasm_bindgen(js_class = CHGCARReader)]
+impl ChgcarReader {
+    /// Create a new CHGCAR reader from the file's text content.
+    #[wasm_bindgen(constructor)]
+    pub fn new(content: &str) -> ChgcarReader {
+        ChgcarReader {
+            content: content.as_bytes().to_vec(),
+            cached_len: None,
+        }
+    }
+
+    /// Read the frame at `step`. CHGCAR is single-frame.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string on parse errors.
+    #[wasm_bindgen]
+    pub fn read(&mut self, step: usize) -> Result<Option<Frame>, JsValue> {
+        if step > 0 {
+            return Ok(None);
+        }
+        let reader = BufReader::new(Cursor::new(self.content.as_slice()));
+        let rs_frame = read_chgcar_from_reader(reader)
+            .map_err(|e| JsValue::from_str(&format!("CHGCAR read error: {}", e)))?;
+        Ok(Some(Frame::from_rs(rs_frame)?))
+    }
+
+    #[wasm_bindgen]
+    pub fn len(&mut self) -> Result<usize, JsValue> {
+        if let Some(n) = self.cached_len {
+            return Ok(n);
+        }
+        let n = if self.read(0)?.is_some() { 1 } else { 0 };
+        self.cached_len = Some(n);
+        Ok(n)
+    }
+
+    #[wasm_bindgen(js_name = isEmpty)]
+    pub fn is_empty(&mut self) -> Result<bool, JsValue> {
+        Ok(self.len()? == 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use wasm_bindgen_test::*;
+
+    #[wasm_bindgen_test]
+    fn test_lammps_reader_len_then_read() {
+        // Regression: `len()` used to call `read(0)` which flipped the
+        // inner reader's `returned` flag, causing a subsequent `read(0)`
+        // from the lazy FrameProvider in reader.ts to return None
+        // ("lammps reader returned no frame at step 0").
+        let data = "LAMMPS data\n\n\
+                    2 atoms\n1 atom types\n\n\
+                    0.0 10.0 xlo xhi\n0.0 10.0 ylo yhi\n0.0 10.0 zlo zhi\n\n\
+                    Atoms\n\n\
+                    1 1 1.0 2.0 3.0\n2 1 4.0 5.0 6.0\n";
+        let mut reader = LammpsReader::new(data);
+        assert_eq!(reader.len().expect("len"), 1);
+        let frame = reader.read(0).expect("read").expect("frame");
+        let atoms = frame.get_block("atoms").expect("atoms");
+        assert_eq!(atoms.copy_col_f("x").expect("x").length(), 2);
+    }
 
     #[wasm_bindgen_test]
     fn test_pdb_reader() {

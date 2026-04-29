@@ -27,9 +27,9 @@ use molrs::frame::Frame as CoreFrame;
 use molrs::neighbors::NeighborList;
 use molrs::types::F;
 use molrs_compute::{
-    CenterOfMass, COMResult, Cluster, ClusterCenters, ClusterCentersResult, ClusterResult,
-    Compute, GyrationTensor, InertiaTensor, KMeans, KMeansResult, MSD, MSDResult, MSDTimeSeries,
-    Pca2, PcaResult, RDF, RDFResult, RadiusOfGyration, RgResult,
+    COMResult, CenterOfMass, Cluster, ClusterCenters, ClusterCentersResult, ClusterResult, Compute,
+    GyrationTensor, InertiaTensor, KMeans, KMeansResult, MSD, MSDResult, MSDTimeSeries, Pca2,
+    PcaResult, RDF, RDFResult, RadiusOfGyration, RgResult,
 };
 
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayDyn, PyReadonlyArray1};
@@ -488,11 +488,7 @@ impl PyClusterCenters {
         let out = self.inner.compute(&refs, &cl_vec).map_err(py_value_err)?;
         if !batched {
             let single = out.into_iter().next().unwrap();
-            return Ok(Py::new(
-                py,
-                PyClusterCentersResult { inner: single },
-            )?
-            .into_any());
+            return Ok(Py::new(py, PyClusterCentersResult { inner: single })?.into_any());
         }
         let wrapped: Vec<Py<PyClusterCentersResult>> = out
             .into_iter()
@@ -603,11 +599,7 @@ impl PyCenterOfMass {
         let out = calc.compute(&refs, &cl_vec).map_err(py_value_err)?;
         if !batched {
             let single = out.into_iter().next().unwrap();
-            return Ok(Py::new(
-                py,
-                PyCenterOfMassResult { inner: single },
-            )?
-            .into_any());
+            return Ok(Py::new(py, PyCenterOfMassResult { inner: single })?.into_any());
         }
         let wrapped: Vec<Py<PyCenterOfMassResult>> = out
             .into_iter()
@@ -693,7 +685,9 @@ impl PyGyrationTensor {
             .map_err(py_value_err)?;
         if !batched {
             let tensors = out.into_iter().next().unwrap().0;
-            return Ok(tensor_list_into_pyarray(py, false, tensors).into_any().unbind());
+            return Ok(tensor_list_into_pyarray(py, false, tensors)
+                .into_any()
+                .unbind());
         }
         let arrays: Vec<Py<PyArrayDyn<NpF>>> = out
             .into_iter()
@@ -758,7 +752,9 @@ impl PyInertiaTensor {
             .map_err(py_value_err)?;
         if !batched {
             let tensors = out.into_iter().next().unwrap().0;
-            return Ok(tensor_list_into_pyarray(py, false, tensors).into_any().unbind());
+            return Ok(tensor_list_into_pyarray(py, false, tensors)
+                .into_any()
+                .unbind());
         }
         let arrays: Vec<Py<PyArrayDyn<NpF>>> = out
             .into_iter()
@@ -852,8 +848,8 @@ impl PyRadiusOfGyration {
             for row in &out {
                 flat.extend(row.0.iter().map(|&v| v as NpF));
             }
-            let arr = ndarray::Array2::from_shape_vec((n_frames, nc), flat)
-                .expect("rg batch shape");
+            let arr =
+                ndarray::Array2::from_shape_vec((n_frames, nc), flat).expect("rg batch shape");
             return Ok(arr.into_pyarray(py).into_any().unbind());
         }
 
@@ -962,10 +958,7 @@ impl PyPca2 {
         let owned: Vec<PyDescriptorRow> = rows.iter().map(|r| (*r).clone()).collect();
         // Wrap an empty FrameAccess slice — Pca2 does not touch frames.
         let frames: [&CoreFrame; 0] = [];
-        let pca = self
-            .inner
-            .compute(&frames, &owned)
-            .map_err(py_value_err)?;
+        let pca = self.inner.compute(&frames, &owned).map_err(py_value_err)?;
         Ok(PyPcaResult { inner: pca })
     }
 

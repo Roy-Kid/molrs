@@ -118,12 +118,12 @@ impl<'a> ColumnView<'a> {
     /// Creates an owned [`Column`] by cloning the viewed data.
     pub fn to_owned(&self) -> Column {
         match self {
-            ColumnView::Float(a) => Column::Float(a.to_owned()),
-            ColumnView::Int(a) => Column::Int(a.to_owned()),
-            ColumnView::Bool(a) => Column::Bool(a.to_owned()),
-            ColumnView::UInt(a) => Column::UInt(a.to_owned()),
-            ColumnView::U8(a) => Column::U8(a.to_owned()),
-            ColumnView::String(a) => Column::String(a.to_owned()),
+            ColumnView::Float(a) => Column::from_float(a.to_owned()),
+            ColumnView::Int(a) => Column::from_int(a.to_owned()),
+            ColumnView::Bool(a) => Column::from_bool(a.to_owned()),
+            ColumnView::UInt(a) => Column::from_uint(a.to_owned()),
+            ColumnView::U8(a) => Column::from_u8(a.to_owned()),
+            ColumnView::String(a) => Column::from_string(a.to_owned()),
         }
     }
 }
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_from_column_float() {
-        let col = Column::Float(Array1::from_vec(vec![1.0 as F, 2.0, 3.0]).into_dyn());
+        let col = Column::from_float(Array1::from_vec(vec![1.0 as F, 2.0, 3.0]).into_dyn());
         let view = ColumnView::from(&col);
         assert_eq!(view.dtype(), DType::Float);
         assert_eq!(view.nrows(), Some(3));
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_from_column_int() {
-        let col = Column::Int(Array1::from_vec(vec![1 as I, 2, 3]).into_dyn());
+        let col = Column::from_int(Array1::from_vec(vec![1 as I, 2, 3]).into_dyn());
         let view = ColumnView::from(&col);
         assert_eq!(view.dtype(), DType::Int);
         assert!(view.as_int().is_some());
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_from_column_bool() {
-        let col = Column::Bool(Array1::from_vec(vec![true, false]).into_dyn());
+        let col = Column::from_bool(Array1::from_vec(vec![true, false]).into_dyn());
         let view = ColumnView::from(&col);
         assert_eq!(view.dtype(), DType::Bool);
         assert!(view.as_bool().is_some());
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_from_column_uint() {
-        let col = Column::UInt(Array1::from_vec(vec![1 as U, 2]).into_dyn());
+        let col = Column::from_uint(Array1::from_vec(vec![1 as U, 2]).into_dyn());
         let view = ColumnView::from(&col);
         assert_eq!(view.dtype(), DType::UInt);
         assert!(view.as_uint().is_some());
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_from_column_u8() {
-        let col = Column::U8(Array1::from_vec(vec![1u8, 2]).into_dyn());
+        let col = Column::from_u8(Array1::from_vec(vec![1u8, 2]).into_dyn());
         let view = ColumnView::from(&col);
         assert_eq!(view.dtype(), DType::U8);
         assert!(view.as_u8().is_some());
@@ -205,8 +205,9 @@ mod tests {
 
     #[test]
     fn test_from_column_string() {
-        let col =
-            Column::String(Array1::from_vec(vec!["a".to_string(), "b".to_string()]).into_dyn());
+        let col = Column::from_string(
+            Array1::from_vec(vec!["a".to_string(), "b".to_string()]).into_dyn(),
+        );
         let view = ColumnView::from(&col);
         assert_eq!(view.dtype(), DType::String);
         assert!(view.as_string().is_some());
@@ -214,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_to_owned_roundtrip() {
-        let col = Column::Float(Array1::from_vec(vec![1.0 as F, 2.0, 3.0]).into_dyn());
+        let col = Column::from_float(Array1::from_vec(vec![1.0 as F, 2.0, 3.0]).into_dyn());
         let view = ColumnView::from(&col);
         let owned = view.to_owned();
         assert_eq!(owned.dtype(), DType::Float);
@@ -227,7 +228,7 @@ mod tests {
 
     #[test]
     fn test_zero_copy() {
-        let col = Column::Float(Array1::from_vec(vec![1.0 as F, 2.0, 3.0]).into_dyn());
+        let col = Column::from_float(Array1::from_vec(vec![1.0 as F, 2.0, 3.0]).into_dyn());
         let view = ColumnView::from(&col);
         // The view's data pointer should match the original column's data pointer
         let orig_ptr = col.as_float().unwrap().as_ptr();

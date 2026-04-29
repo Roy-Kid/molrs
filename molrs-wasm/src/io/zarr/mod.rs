@@ -59,8 +59,10 @@ impl MolRecReader {
 
     #[wasm_bindgen(js_name = countFrames)]
     pub fn count_frames(&self) -> Result<usize, JsValue> {
-        Ok(molrs_io::zarr::count_molrec_frames_in_store(self.store.clone())
-            .map_err(|e| JsValue::from_str(&e.to_string()))? as usize)
+        Ok(
+            molrs_io::zarr::count_molrec_frames_in_store(self.store.clone())
+                .map_err(|e| JsValue::from_str(&e.to_string()))? as usize,
+        )
     }
 
     #[wasm_bindgen(js_name = countAtoms)]

@@ -37,7 +37,7 @@ pub mod column_view;
 
 pub use access::{BlockAccess, ColumnAccess};
 pub use block_view::BlockView;
-pub use column::Column;
+pub use column::{Column, ColumnHolder};
 pub use column_view::ColumnView;
 pub use dtype::{BlockDtype, DType};
 pub use error::BlockError;
@@ -49,10 +49,18 @@ use std::ops::{Index, IndexMut};
 /// A dictionary from string keys to ndarray arrays with a consistent axis-0 length.
 ///
 /// This Block supports heterogeneous column types (float, int, bool).
+///
+/// `shape` is optional structural metadata that lets a Block declare itself
+/// as N-dimensional (e.g. a 3D volumetric grid). Columns themselves are
+/// stored row-major, so a grid block with `shape = [Nx, Ny, Nz]` carries
+/// columns of axis-0 length `Nx * Ny * Nz` — `shape` only tells consumers
+/// how to unflatten that index. When `shape` is `None`, the block is a
+/// plain row table and `block.shape()` reports `vec![nrows]`.
 #[derive(Default, Clone)]
 pub struct Block {
     map: HashMap<String, Column>,
     nrows: Option<usize>,
+    shape: Option<Vec<usize>>,
 }
 
 impl std::fmt::Debug for Block {
@@ -71,6 +79,7 @@ impl Block {
         Self {
             map: HashMap::new(),
             nrows: None,
+            shape: None,
         }
     }
 
@@ -79,6 +88,7 @@ impl Block {
         Self {
             map: HashMap::with_capacity(cap),
             nrows: None,
+            shape: None,
         }
     }
 
@@ -98,6 +108,59 @@ impl Block {
     #[inline]
     pub fn nrows(&self) -> Option<usize> {
         self.nrows
+    }
+
+    /// Returns the structural shape of the block.
+    ///
+    /// - For plain row tables (atoms, bonds): `vec![nrows]` — a single
+    ///   axis whose length is the row count.
+    /// - For N-D blocks (volumetric grids): the explicitly-set shape,
+    ///   e.g. `vec![Nx, Ny, Nz]`.
+    /// - For empty blocks: `vec![]`.
+    ///
+    /// The product of the returned shape always equals `nrows.unwrap_or(0)`.
+    /// This API is uniform across atoms / bonds / grid blocks — the
+    /// difference is the rank of the returned vector, not whether the
+    /// accessor exists.
+    pub fn shape(&self) -> Vec<usize> {
+        match (&self.shape, self.nrows) {
+            (Some(s), _) => s.clone(),
+            (None, Some(n)) => vec![n],
+            (None, None) => Vec::new(),
+        }
+    }
+
+    /// Declare this block as N-dimensional with the given `shape`.
+    ///
+    /// `shape` must have at least one axis and `shape.iter().product()`
+    /// must equal the block's current `nrows` (when the block has columns).
+    /// This does **not** change column storage — columns remain row-major
+    /// 1D buffers of length `product(shape)`. `shape` is structural
+    /// metadata used by consumers (e.g. the volumetric renderer) to
+    /// unflatten the row index back into N-D coordinates.
+    ///
+    /// Passing an empty slice clears the shape, reverting the block to
+    /// plain-row-table semantics.
+    pub fn set_shape(&mut self, shape: &[usize]) -> Result<(), BlockError> {
+        if shape.is_empty() {
+            self.shape = None;
+            return Ok(());
+        }
+        let prod: usize = shape.iter().product();
+        if let Some(nrows) = self.nrows {
+            if prod != nrows {
+                return Err(BlockError::validation(format!(
+                    "shape product {} does not match block nrows {}",
+                    prod, nrows
+                )));
+            }
+        } else {
+            // Block is empty — adopt nrows = product(shape) so subsequent
+            // inserts validate against the flattened length.
+            self.nrows = Some(prod);
+        }
+        self.shape = Some(shape.to_vec());
+        Ok(())
     }
 
     /// Returns true if the Block contains the specified key.
@@ -172,6 +235,41 @@ impl Block {
         }
 
         let col = T::into_column(arr);
+        self.map.insert(key, col);
+        Ok(())
+    }
+
+    /// Insert a pre-built [`Column`] under `key`, validating axis-0 length.
+    ///
+    /// This is the zero-copy insert path: the caller owns a [`Column`]
+    /// (which internally holds an `Arc<ArrayD<T>>`) and hands it over
+    /// without unwrapping the Arc. Useful when moving a column between
+    /// blocks or re-inserting a clone.
+    pub fn insert_column(&mut self, key: impl Into<String>, col: Column) -> Result<(), BlockError> {
+        let key = key.into();
+        let shape = col.shape();
+
+        if shape.is_empty() {
+            return Err(BlockError::RankZero { key });
+        }
+
+        let len0 = shape[0];
+
+        match self.nrows {
+            None => {
+                self.nrows = Some(len0);
+            }
+            Some(expected) => {
+                if len0 != expected {
+                    return Err(BlockError::RaggedAxis0 {
+                        key,
+                        expected,
+                        got: len0,
+                    });
+                }
+            }
+        }
+
         self.map.insert(key, col);
         Ok(())
     }
@@ -271,11 +369,13 @@ impl Block {
 
     /// Removes and returns the column for `key`, if present.
     ///
-    /// If the Block becomes empty after removal, resets `nrows` to `None`.
+    /// If the Block becomes empty after removal, resets `nrows` and
+    /// `shape` to `None`.
     pub fn remove(&mut self, key: &str) -> Option<Column> {
         let out = self.map.remove(key);
         if self.map.is_empty() {
             self.nrows = None;
+            self.shape = None;
         }
         out
     }
@@ -314,10 +414,11 @@ impl Block {
         }
     }
 
-    /// Clears the Block, removing all keys and resetting `nrows`.
+    /// Clears the Block, removing all keys and resetting `nrows` / `shape`.
     pub fn clear(&mut self) {
         self.map.clear();
         self.nrows = None;
+        self.shape = None;
     }
 
     /// Returns an iterator over (&str, &Column).
@@ -387,6 +488,10 @@ impl Block {
             col.resize(new_nrows);
         }
         self.nrows = Some(new_nrows);
+        // N-D shape becomes meaningless once axis-0 row count is changed
+        // by a 1D resize. Callers that want to preserve a grid shape must
+        // re-declare it via `set_shape` after resizing.
+        self.shape = None;
         Ok(())
     }
 
@@ -431,6 +536,7 @@ impl Block {
         if self.is_empty() {
             self.map = other.map.clone();
             self.nrows = other.nrows;
+            self.shape = other.shape.clone();
             return Ok(());
         }
 
@@ -470,7 +576,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::Float(merged)
+                    Column::from_float(merged)
                 }
                 (Column::Int(a), Column::Int(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -479,7 +585,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::Int(merged)
+                    Column::from_int(merged)
                 }
                 (Column::UInt(a), Column::UInt(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -488,7 +594,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::UInt(merged)
+                    Column::from_uint(merged)
                 }
                 (Column::U8(a), Column::U8(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -497,7 +603,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::U8(merged)
+                    Column::from_u8(merged)
                 }
                 (Column::Bool(a), Column::Bool(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -506,7 +612,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::Bool(merged)
+                    Column::from_bool(merged)
                 }
                 (Column::String(a), Column::String(b)) => {
                     let merged = concatenate(Axis(0), &[a.view(), b.view()]).map_err(|e| {
@@ -515,7 +621,7 @@ impl Block {
                             key, e
                         ))
                     })?;
-                    Column::String(merged)
+                    Column::from_string(merged)
                 }
                 _ => unreachable!("dtype mismatch already checked"),
             };
@@ -523,10 +629,13 @@ impl Block {
             new_map.insert(key.to_string(), merged_col);
         }
 
-        // Update nrows
+        // Update nrows. As with `resize`, an explicit N-D shape becomes
+        // meaningless once axis-0 grows; the merged block falls back to a
+        // plain row table unless the caller re-declares a shape.
         let new_nrows = self.nrows.unwrap() + other.nrows.unwrap();
         self.map = new_map;
         self.nrows = Some(new_nrows);
+        self.shape = None;
 
         Ok(())
     }

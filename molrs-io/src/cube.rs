@@ -25,21 +25,25 @@
 //! ## Data layout
 //!
 //! Volumetric data is stored with x as the outermost loop and z as the
-//! innermost (row-major). This matches the internal [`Grid`] convention, so
-//! **no reordering** is needed (unlike CHGCAR).
+//! innermost (row-major). This matches the molvis marching-cubes consumer's
+//! `data[ix*ny*nz + iy*nz + iz]` layout, so **no reordering** is needed
+//! (unlike CHGCAR).
 //!
 //! ## Unit handling
 //!
-//! molrs is **unit-agnostic**: values are stored as-is from the file. The
-//! detected unit system is recorded in `frame.meta["cube_units"]` as either
-//! `"bohr"` or `"angstrom"`.
+//! Atom coordinates and the simulation box are normalised to **Å** on read
+//! (Bohr → Å conversion via [`BOHR_TO_ANG`] when the file uses Bohr units).
+//! The original unit system is recorded in `frame.meta["cube_units"]` so
+//! [`write_cube_to_writer`] can round-trip the file without surprising the
+//! producing toolchain.
 //!
 //! ## Frame contents
 //!
-//! | Block / Grid | Key(s)            | Content                        |
+//! | Block        | Key(s)            | Content                        |
 //! |--------------|-------------------|--------------------------------|
-//! | `"atoms"`    | symbol, x, y, z, atomic_number, charge | Atom data |
-//! | grid `"cube"`| `"density"` or `"mo_<idx>"` | Volumetric scalar fields |
+//! | `"atoms"`    | element, x, y, z, atomic_number, charge | Atom data (Å) |
+//! | `"grid"`     | `"density"` or `"mo_<idx>"`             | Volumetric scalar fields, shape `[nx, ny, nz]` |
+//! | `simbox`     | (h-matrix, origin)                      | Voxel cell × dims, in Å |
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -50,8 +54,13 @@ use molrs::block::Block;
 use molrs::element::Element;
 use molrs::error::MolRsError;
 use molrs::frame::Frame;
-use molrs::grid::Grid;
+use molrs::region::simbox::SimBox;
 use molrs::types::{F, I};
+
+/// Bohr radius in Ångström. Cube files declare their units via the sign of
+/// the first voxel-count integer (positive = Bohr, negative = Å). molvis's
+/// world is Å, so we always convert on read.
+const BOHR_TO_ANG: f64 = 0.529_177_210_67;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -203,64 +212,107 @@ pub fn read_cube_from_reader<R: BufRead>(mut reader: R) -> Result<Frame, MolRsEr
     let flat_data = read_volumetric_data(&mut reader, total_values, &mut line_no)?;
 
     // -----------------------------------------------------------------------
-    // Build Grid
+    // Normalise to Å. Cube files store atom positions and voxel vectors in
+    // the same unit system declared by the sign of N1; we convert here so
+    // every downstream consumer (simbox, marching cubes, atom rendering)
+    // can treat the frame as Å without further bookkeeping.
     // -----------------------------------------------------------------------
-    // cell[i] = voxel_vec[i] * N_i  (total span per axis)
-    let cell: [[F; 3]; 3] = [
+    let unit_scale: f64 = if is_angstrom { 1.0 } else { BOHR_TO_ANG };
+    let origin_ang: [f64; 3] = [
+        origin[0] * unit_scale,
+        origin[1] * unit_scale,
+        origin[2] * unit_scale,
+    ];
+    let voxel_vecs_ang: [[f64; 3]; 3] = [
         [
-            voxel_vecs[0][0] * dims[0] as f64,
-            voxel_vecs[0][1] * dims[0] as f64,
-            voxel_vecs[0][2] * dims[0] as f64,
+            voxel_vecs[0][0] * unit_scale,
+            voxel_vecs[0][1] * unit_scale,
+            voxel_vecs[0][2] * unit_scale,
         ],
         [
-            voxel_vecs[1][0] * dims[1] as f64,
-            voxel_vecs[1][1] * dims[1] as f64,
-            voxel_vecs[1][2] * dims[1] as f64,
+            voxel_vecs[1][0] * unit_scale,
+            voxel_vecs[1][1] * unit_scale,
+            voxel_vecs[1][2] * unit_scale,
         ],
         [
-            voxel_vecs[2][0] * dims[2] as f64,
-            voxel_vecs[2][1] * dims[2] as f64,
-            voxel_vecs[2][2] * dims[2] as f64,
+            voxel_vecs[2][0] * unit_scale,
+            voxel_vecs[2][1] * unit_scale,
+            voxel_vecs[2][2] * unit_scale,
         ],
     ];
-    let grid_origin: [F; 3] = [origin[0], origin[1], origin[2]];
 
-    let mut grid = Grid::new(dims, grid_origin, cell, [false; 3]);
-
-    if has_mo {
-        // Deinterleave: data is [v0_pt0, v1_pt0, v2_pt0, v0_pt1, v1_pt1, …]
-        for (k, &idx) in mo_indices.iter().enumerate() {
-            let arr: Vec<F> = (0..n_voxels)
-                .map(|i| flat_data[i * n_vals_per_point + k])
-                .collect();
-            grid.insert(format!("mo_{}", idx), arr)
-                .map_err(|e| MolRsError::parse(format!("grid insert error: {}", e)))?;
-        }
-    } else {
-        grid.insert("density", flat_data)
-            .map_err(|e| MolRsError::parse(format!("grid insert error: {}", e)))?;
-    }
+    // cell column i = voxel_vec[i] * N_i — total span along voxel axis i.
+    let cell_cols: [[F; 3]; 3] = [
+        [
+            (voxel_vecs_ang[0][0] * dims[0] as f64) as F,
+            (voxel_vecs_ang[0][1] * dims[0] as f64) as F,
+            (voxel_vecs_ang[0][2] * dims[0] as f64) as F,
+        ],
+        [
+            (voxel_vecs_ang[1][0] * dims[1] as f64) as F,
+            (voxel_vecs_ang[1][1] * dims[1] as f64) as F,
+            (voxel_vecs_ang[1][2] * dims[1] as f64) as F,
+        ],
+        [
+            (voxel_vecs_ang[2][0] * dims[2] as f64) as F,
+            (voxel_vecs_ang[2][1] * dims[2] as f64) as F,
+            (voxel_vecs_ang[2][2] * dims[2] as f64) as F,
+        ],
+    ];
 
     // -----------------------------------------------------------------------
-    // Build atoms Block
+    // Build the volumetric Block ("grid"): one f64 column per scalar field,
+    // structural shape = [nx, ny, nz] so consumers can unflatten the row
+    // index back into voxel coordinates.
+    // -----------------------------------------------------------------------
+    let mut grid_block = Block::new();
+    if has_mo {
+        // Deinterleave: file stores [v0_pt0, v1_pt0, …, v0_pt1, v1_pt1, …].
+        // Each orbital becomes its own column.
+        for (k, &idx) in mo_indices.iter().enumerate() {
+            let col_data: Vec<F> = (0..n_voxels)
+                .map(|i| flat_data[i * n_vals_per_point + k])
+                .collect();
+            grid_block
+                .insert(
+                    format!("mo_{}", idx),
+                    Array1::from_vec(col_data).into_dyn(),
+                )
+                .map_err(MolRsError::Block)?;
+        }
+    } else {
+        grid_block
+            .insert("density", Array1::from_vec(flat_data).into_dyn())
+            .map_err(MolRsError::Block)?;
+    }
+    grid_block
+        .set_shape(&[dims[0], dims[1], dims[2]])
+        .map_err(MolRsError::Block)?;
+
+    // -----------------------------------------------------------------------
+    // Build atoms Block. Coordinates are in the file's native unit; convert
+    // to Å so simbox + atoms share the same world frame.
     // -----------------------------------------------------------------------
     let mut atoms = Block::new();
     atoms
         .insert(
             "x",
-            Array1::from_vec(xs.iter().map(|&v| v as F).collect::<Vec<_>>()).into_dyn(),
+            Array1::from_vec(xs.iter().map(|&v| (v * unit_scale) as F).collect::<Vec<_>>())
+                .into_dyn(),
         )
         .map_err(MolRsError::Block)?;
     atoms
         .insert(
             "y",
-            Array1::from_vec(ys.iter().map(|&v| v as F).collect::<Vec<_>>()).into_dyn(),
+            Array1::from_vec(ys.iter().map(|&v| (v * unit_scale) as F).collect::<Vec<_>>())
+                .into_dyn(),
         )
         .map_err(MolRsError::Block)?;
     atoms
         .insert(
             "z",
-            Array1::from_vec(zs.iter().map(|&v| v as F).collect::<Vec<_>>()).into_dyn(),
+            Array1::from_vec(zs.iter().map(|&v| (v * unit_scale) as F).collect::<Vec<_>>())
+                .into_dyn(),
         )
         .map_err(MolRsError::Block)?;
     atoms
@@ -283,6 +335,16 @@ pub fn read_cube_from_reader<R: BufRead>(mut reader: R) -> Result<Frame, MolRsEr
                 .into_dyn(),
         )
         .map_err(MolRsError::Block)?;
+
+    // -----------------------------------------------------------------------
+    // Build SimBox: column i of h = i-th voxel-axis × dim, origin in Å.
+    // PBC defaults off — cube files describe a finite voxel grid, not a
+    // periodic cell. Hosts that know better can flip pbc on later.
+    // -----------------------------------------------------------------------
+    let h = ndarray::Array2::from_shape_fn((3, 3), |(i, j)| cell_cols[j][i]);
+    let origin_arr = ndarray::array![origin_ang[0] as F, origin_ang[1] as F, origin_ang[2] as F];
+    let simbox = SimBox::new(h, origin_arr, [false; 3])
+        .map_err(|e| MolRsError::parse(format!("invalid cube cell: {:?}", e)))?;
 
     // -----------------------------------------------------------------------
     // Assemble Frame
@@ -311,8 +373,9 @@ pub fn read_cube_from_reader<R: BufRead>(mut reader: R) -> Result<Frame, MolRsEr
         frame.meta.insert("cube_mo_indices".into(), indices_str);
     }
 
+    frame.simbox = Some(simbox);
     frame.insert("atoms", atoms);
-    frame.insert_grid("cube", grid);
+    frame.insert("grid", grid_block);
 
     Ok(frame)
 }
@@ -325,16 +388,31 @@ pub fn write_cube<P: AsRef<Path>>(path: P, frame: &Frame) -> Result<(), MolRsErr
 }
 
 /// Write a Gaussian Cube file to any [`Write`] destination.
+///
+/// Reads from the modern Frame layout: `frame.get("grid")` (Block with
+/// `set_shape([nx, ny, nz])` and one f64 column per scalar field),
+/// `frame.get("atoms")` for geometry, and `frame.simbox` for the cell.
 pub fn write_cube_to_writer<W: Write>(writer: &mut W, frame: &Frame) -> Result<(), MolRsError> {
-    let grid = frame
-        .get_grid("cube")
-        .ok_or_else(|| MolRsError::validation("frame has no 'cube' grid"))?;
+    let grid_block = frame
+        .get("grid")
+        .ok_or_else(|| MolRsError::validation("frame has no 'grid' block"))?;
     let atoms = frame
         .get("atoms")
         .ok_or_else(|| MolRsError::validation("frame has no 'atoms' block"))?;
+    let simbox = frame
+        .simbox
+        .as_ref()
+        .ok_or_else(|| MolRsError::validation("frame has no simbox; cannot recover cube cell"))?;
 
     let n_atoms = atoms.nrows().unwrap_or(0);
-    let [nx, ny, nz] = grid.dim;
+    let grid_shape = grid_block.shape();
+    if grid_shape.len() != 3 {
+        return Err(MolRsError::validation(format!(
+            "grid block must have 3-D shape, got {:?}",
+            grid_shape
+        )));
+    }
+    let (nx, ny, nz) = (grid_shape[0], grid_shape[1], grid_shape[2]);
 
     // Determine MO mode from metadata
     let mo_indices: Option<Vec<usize>> = frame.meta.get("cube_mo_indices").map(|s| {
@@ -344,11 +422,24 @@ pub fn write_cube_to_writer<W: Write>(writer: &mut W, frame: &Frame) -> Result<(
     });
     let has_mo = mo_indices.is_some();
 
-    // Determine unit sign convention
+    // Determine unit sign convention. Stored cell/atom coordinates are in
+    // Å regardless; the meta key only controls how we write the file back
+    // out so producers consuming the round-tripped file see what they
+    // expect.
     let is_angstrom = frame
         .meta
         .get("cube_units")
         .is_some_and(|u| u == "angstrom");
+    let unit_scale: f64 = if is_angstrom { 1.0 } else { 1.0 / BOHR_TO_ANG };
+
+    // Recover origin and cell columns from simbox, in the writer's unit.
+    let origin_arr = simbox.origin_view().to_owned();
+    let origin = [
+        origin_arr[0] as f64 * unit_scale,
+        origin_arr[1] as f64 * unit_scale,
+        origin_arr[2] as f64 * unit_scale,
+    ];
+    let h = simbox.h_view();
 
     // Comment lines
     let c1 = frame.meta.get("comment1").cloned().unwrap_or_default();
@@ -365,27 +456,27 @@ pub fn write_cube_to_writer<W: Write>(writer: &mut W, frame: &Frame) -> Result<(
     writeln!(
         writer,
         "{:5}{:12.6}{:12.6}{:12.6}",
-        natoms_signed, grid.origin[0], grid.origin[1], grid.origin[2]
+        natoms_signed, origin[0], origin[1], origin[2]
     )
     .map_err(MolRsError::Io)?;
 
-    // Voxel axis lines
+    // Voxel axis lines: voxel_vec = cell_col / N (in writer's unit).
+    let dims = [nx, ny, nz];
     for i in 0..3 {
-        let n = grid.dim[i];
+        let n = dims[i];
         let n_signed: i32 = if i == 0 && is_angstrom {
             -(n as i32)
         } else {
             n as i32
         };
-        // voxel_vec = cell[i] / N
-        let vx = grid.cell[i][0] / n as F;
-        let vy = grid.cell[i][1] / n as F;
-        let vz = grid.cell[i][2] / n as F;
+        let vx = (h[[0, i]] as f64 * unit_scale) / n as f64;
+        let vy = (h[[1, i]] as f64 * unit_scale) / n as f64;
+        let vz = (h[[2, i]] as f64 * unit_scale) / n as f64;
         writeln!(writer, "{:5}{:12.6}{:12.6}{:12.6}", n_signed, vx, vy, vz)
             .map_err(MolRsError::Io)?;
     }
 
-    // Atom lines
+    // Atom lines (positions in writer's unit).
     let atom_x = atoms.get_float("x");
     let atom_y = atoms.get_float("y");
     let atom_z = atoms.get_float("z");
@@ -399,9 +490,9 @@ pub fn write_cube_to_writer<W: Write>(writer: &mut W, frame: &Frame) -> Result<(
             .or_else(|| atom_symbol.and_then(|s| Element::by_symbol(&s[[i]]).map(|e| e.z() as I)))
             .unwrap_or(0);
         let charge = atom_charge.map(|a| a[[i]]).unwrap_or(z_num as F);
-        let x = atom_x.map(|a| a[[i]]).unwrap_or(0.0);
-        let y = atom_y.map(|a| a[[i]]).unwrap_or(0.0);
-        let z = atom_z.map(|a| a[[i]]).unwrap_or(0.0);
+        let x = atom_x.map(|a| a[[i]]).unwrap_or(0.0) * unit_scale as F;
+        let y = atom_y.map(|a| a[[i]]).unwrap_or(0.0) * unit_scale as F;
+        let z = atom_z.map(|a| a[[i]]).unwrap_or(0.0) * unit_scale as F;
         writeln!(
             writer,
             "{:5}{:12.6}{:12.6}{:12.6}{:12.6}",
@@ -421,16 +512,21 @@ pub fn write_cube_to_writer<W: Write>(writer: &mut W, frame: &Frame) -> Result<(
     // Volumetric data
     let n_voxels = nx * ny * nz;
     if let Some(ref indices) = mo_indices {
-        // Interleave MO data
+        // Interleave MO data, deinterleaved on read into one column per orbital.
         let n_vals = indices.len();
-        let arrays: Vec<Option<&[F]>> = indices
+        let columns: Vec<Vec<F>> = indices
             .iter()
-            .map(|idx| grid.get_raw(&format!("mo_{}", idx)))
+            .map(|idx| {
+                grid_block
+                    .get_float(&format!("mo_{}", idx))
+                    .map(|a| a.iter().copied().collect::<Vec<_>>())
+                    .unwrap_or_default()
+            })
             .collect();
         let mut col = 0;
         for i in 0..n_voxels {
-            for (k, arr_opt) in arrays.iter().enumerate() {
-                let val = arr_opt.map(|a| a[i]).unwrap_or(0.0);
+            for (k, arr) in columns.iter().enumerate() {
+                let val = arr.get(i).copied().unwrap_or(0.0);
                 write!(writer, "{:13.5E}", val).map_err(MolRsError::Io)?;
                 col += 1;
                 if col % 6 == 0 || (i == n_voxels - 1 && k == n_vals - 1) {
@@ -444,12 +540,12 @@ pub fn write_cube_to_writer<W: Write>(writer: &mut W, frame: &Frame) -> Result<(
         }
     } else {
         // Single density field
-        let data = grid
-            .get_raw("density")
-            .ok_or_else(|| MolRsError::validation("cube grid has no 'density' array"))?;
+        let data = grid_block
+            .get_float("density")
+            .ok_or_else(|| MolRsError::validation("cube grid has no 'density' column"))?;
         let mut col = 0;
-        for &val in data {
-            write!(writer, "{:13.5E}", val).map_err(MolRsError::Io)?;
+        for v in data.iter() {
+            write!(writer, "{:13.5E}", v).map_err(MolRsError::Io)?;
             col += 1;
             if col % 6 == 0 {
                 writeln!(writer).map_err(MolRsError::Io)?;

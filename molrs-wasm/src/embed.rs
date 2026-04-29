@@ -22,8 +22,8 @@
 use wasm_bindgen::prelude::*;
 
 use molrs::atomistic::Atomistic;
-use molrs_embed::{EmbedOptions, EmbedSpeed, generate_3d};
 use molrs::molgraph::MolGraph;
+use molrs_embed::{EmbedOptions, EmbedSpeed, generate_3d};
 
 use crate::core::frame::Frame;
 

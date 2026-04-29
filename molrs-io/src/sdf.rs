@@ -277,6 +277,127 @@ impl<R: BufRead> FrameReader for SDFReader<R> {
     }
 }
 
+// ============================================================================
+// Streaming
+// ============================================================================
+
+use crate::streaming::{FrameIndexBuilder, FrameIndexEntry, LineAccumulator};
+use std::io::Cursor;
+
+/// Parse exactly one SDF / MDL molfile record from a tightly-bounded byte
+/// slice. The slice must be a `[byte_offset, byte_offset + byte_len)` window
+/// produced by [`SdfIndexBuilder`].
+pub fn parse_frame_bytes(bytes: &[u8]) -> std::io::Result<Frame> {
+    let cursor = Cursor::new(bytes);
+    let mut reader = SDFReader::new(cursor);
+    reader.read_frame()?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "SDF record slice contained no atoms",
+        )
+    })
+}
+
+/// Streaming frame indexer for SDF / MDL multi-record files.
+///
+/// Detects record terminators (`$$$$` lines) and emits one
+/// [`FrameIndexEntry`] per record. The terminator line is included in the
+/// preceding frame's byte range.
+pub struct SdfIndexBuilder {
+    lines: LineAccumulator,
+    /// Offset of the next record's first byte (i.e. the byte after the
+    /// most-recently emitted terminator's line). `0` initially.
+    next_record_start: u64,
+    pending_entries: Vec<FrameIndexEntry>,
+}
+
+impl Default for SdfIndexBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SdfIndexBuilder {
+    pub fn new() -> Self {
+        Self {
+            lines: LineAccumulator::new(),
+            next_record_start: 0,
+            pending_entries: Vec::new(),
+        }
+    }
+}
+
+impl FrameIndexBuilder for SdfIndexBuilder {
+    fn feed(&mut self, chunk: &[u8], global_offset: u64) {
+        let next_record_start = &mut self.next_record_start;
+        let pending_entries = &mut self.pending_entries;
+        self.lines
+            .feed(chunk, global_offset, |line, line_offset, line_len| {
+                if line.trim_end() != "$$$$" {
+                    return;
+                }
+                let line_end = line_offset + line_len as u64;
+                let start = *next_record_start;
+                let span = line_end - start;
+                // span fits in u32 because per-record SDF size is always
+                // small (< 1 MiB typical). Defensive saturate just in case.
+                let len = span.min(u32::MAX as u64) as u32;
+                pending_entries.push(FrameIndexEntry {
+                    byte_offset: start,
+                    byte_len: len,
+                });
+                *next_record_start = line_end;
+            });
+    }
+
+    fn drain(&mut self) -> Vec<FrameIndexEntry> {
+        std::mem::take(&mut self.pending_entries)
+    }
+
+    fn finish(mut self: Box<Self>) -> std::io::Result<Vec<FrameIndexEntry>> {
+        let next_record_start = &mut self.next_record_start;
+        let pending_entries = &mut self.pending_entries;
+        self.lines.finish(|line, line_offset, line_len| {
+            if line.trim_end() != "$$$$" {
+                return;
+            }
+            let line_end = line_offset + line_len as u64;
+            let start = *next_record_start;
+            let span = line_end - start;
+            let len = span.min(u32::MAX as u64) as u32;
+            pending_entries.push(FrameIndexEntry {
+                byte_offset: start,
+                byte_len: len,
+            });
+            *next_record_start = line_end;
+        });
+
+        let bytes_seen = self.lines.bytes_seen();
+        // Trailing record without `$$$$`: legacy SDFReader supports
+        // single-record `.mol` files (no terminator). Treat the trailing
+        // bytes as one final frame iff they look non-empty.
+        if self.next_record_start < bytes_seen {
+            let span = bytes_seen - self.next_record_start;
+            if span > u32::MAX as u64 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "SDF record exceeds 4 GiB",
+                ));
+            }
+            self.pending_entries.push(FrameIndexEntry {
+                byte_offset: self.next_record_start,
+                byte_len: span as u32,
+            });
+        }
+
+        Ok(std::mem::take(&mut self.pending_entries))
+    }
+
+    fn bytes_seen(&self) -> u64 {
+        self.lines.bytes_seen()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +433,74 @@ mod tests {
         let bad = "name\n\n\n  0  0  0  0  0  0  0  0  0  0999 V3000\n";
         let mut reader = SDFReader::new(Cursor::new(bad.as_bytes()));
         assert!(reader.read_frame().is_err());
+    }
+
+    // -----------------------------------------------------------------
+    // Streaming index tests
+    // -----------------------------------------------------------------
+
+    fn sdf_build_chunked(bytes: &[u8], cs: usize) -> Vec<FrameIndexEntry> {
+        let mut b = Box::new(SdfIndexBuilder::new());
+        let mut off: u64 = 0;
+        let mut out: Vec<FrameIndexEntry> = Vec::new();
+        for piece in bytes.chunks(cs.max(1)) {
+            b.feed(piece, off);
+            off += piece.len() as u64;
+            out.extend(b.drain());
+        }
+        out.extend(b.finish().expect("finish"));
+        out
+    }
+
+    fn make_two_record_sdf() -> String {
+        format!("{WATER_SDF}{WATER_SDF}")
+    }
+
+    #[test]
+    fn sdf_streaming_two_records_match_chunks() {
+        let s = make_two_record_sdf();
+        let bytes = s.as_bytes();
+        let one = sdf_build_chunked(bytes, bytes.len());
+        assert_eq!(one.len(), 2);
+        for cs in [1usize, 7, 13, 31, 64, 1024] {
+            let chunked = sdf_build_chunked(bytes, cs);
+            assert_eq!(one, chunked, "chunk size {}", cs);
+        }
+        for entry in &one {
+            let lo = entry.byte_offset as usize;
+            let hi = lo + entry.byte_len as usize;
+            parse_frame_bytes(&bytes[lo..hi]).expect("parse SDF record");
+        }
+    }
+
+    /// Edge: chunk boundary lands inside the literal `$$$$`.
+    #[test]
+    fn sdf_streaming_boundary_in_terminator() {
+        let s = make_two_record_sdf();
+        let bytes = s.as_bytes();
+        // Find first `$$$$` and split inside it.
+        let term_pos = bytes.windows(4).position(|w| w == b"$$$$").expect("$$$$");
+        let split = term_pos + 2;
+        let mut b = Box::new(SdfIndexBuilder::new());
+        b.feed(&bytes[..split], 0);
+        b.feed(&bytes[split..], split as u64);
+        let mut got = b.drain();
+        got.extend(b.finish().expect("finish"));
+        let one_shot = sdf_build_chunked(bytes, bytes.len());
+        assert_eq!(got, one_shot);
+    }
+
+    /// Edge: SDF without trailing `$$$$` — legacy `.mol` file. Indexer
+    /// should still emit one frame from `finish`.
+    #[test]
+    fn sdf_streaming_no_terminator() {
+        // Strip the trailing $$$$\n
+        let s = WATER_SDF.replace("$$$$\n", "");
+        let bytes = s.as_bytes();
+        let entries = sdf_build_chunked(bytes, bytes.len());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].byte_offset, 0);
+        assert_eq!(entries[0].byte_len as usize, bytes.len());
+        parse_frame_bytes(bytes).expect("parse no-terminator SDF");
     }
 }

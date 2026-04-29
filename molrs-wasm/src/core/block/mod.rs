@@ -31,8 +31,8 @@ use molrs::block::{Block as RsBlock, DType};
 use molrs::types::F;
 use molrs_ffi::BlockRef;
 
-use super::types::{FLOAT_DTYPE_NAME, JsFloatArray};
 use super::js_err;
+use super::types::{FLOAT_DTYPE_NAME, JsFloatArray};
 
 // ---------------------------------------------------------------------------
 // Block
@@ -156,6 +156,77 @@ impl Block {
         self.with(|b| b.nrows().unwrap_or(0))
     }
 
+    /// Return the structural shape of the block as a `Uint32Array`.
+    ///
+    /// - Plain row tables (atoms, bonds): `[nrows]` — single-axis.
+    /// - Volumetric grids: `[Nx, Ny, Nz]` — explicitly declared via
+    ///   [`setShape`](Self::set_shape).
+    /// - Empty blocks: `[]`.
+    ///
+    /// `block.shape()` is uniform across all block kinds — the rank of
+    /// the returned array is what distinguishes a plain table from a
+    /// volumetric grid. The product of the shape always equals
+    /// `block.nrows()`.
+    ///
+    /// # Errors
+    ///
+    /// Throws if the block handle has been invalidated.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const atomsShape = atoms.shape();   // Uint32Array([1000])
+    /// const gridShape  = grid.shape();    // Uint32Array([32, 32, 32])
+    /// ```
+    #[wasm_bindgen(js_name = shape)]
+    pub fn shape(&self) -> Result<Uint32Array, JsValue> {
+        self.with(|b| {
+            let s = b.shape();
+            let arr = Uint32Array::new_with_length(s.len() as u32);
+            for (i, dim) in s.into_iter().enumerate() {
+                arr.set_index(i as u32, dim as u32);
+            }
+            arr
+        })
+    }
+
+    /// Declare this block as N-dimensional with the given `shape`.
+    ///
+    /// `shape.iter().product()` must equal the block's current `nrows`
+    /// when the block has columns. Pass an empty array to clear the
+    /// shape and revert to plain row-table semantics.
+    ///
+    /// This does **not** reshape column storage — columns remain
+    /// row-major 1D buffers of length `product(shape)`. `shape` is
+    /// structural metadata; consumers (e.g. the volumetric renderer in
+    /// MolVis) use it to unflatten the row index back into N-D
+    /// coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Throws if `shape.iter().product()` does not match the block's
+    /// existing `nrows`, or if the block handle has been invalidated.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const grid = frame.createBlock("grid");
+    /// grid.setColF("electron_density", values);  // values.length === 32*32*32
+    /// grid.setShape(new Uint32Array([32, 32, 32]));
+    /// ```
+    #[wasm_bindgen(js_name = setShape)]
+    pub fn set_shape(&mut self, shape: &Uint32Array) -> Result<(), JsValue> {
+        let mut buf = vec![0u32; shape.length() as usize];
+        shape.copy_to(&mut buf);
+        let dims: Vec<usize> = buf.into_iter().map(|d| d as usize).collect();
+        self.inner
+            .store
+            .borrow_mut()
+            .with_block_mut(&mut self.inner.handle, |b| b.set_shape(&dims))
+            .map_err(js_err)?
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     /// Return all column names as a JS `string[]`.
     ///
     /// # Errors
@@ -201,7 +272,8 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = dtype)]
     pub fn dtype(&self, key: &str) -> Option<String> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_block(&self.inner.handle, |b| {
                 b.dtype(key).map(|dt| {
@@ -242,9 +314,12 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = renameColumn)]
     pub fn rename_column(&mut self, old_key: &str, new_key: &str) -> Result<bool, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
-            .with_block_mut(&mut self.inner.handle, |b| b.rename_column(old_key, new_key))
+            .with_block_mut(&mut self.inner.handle, |b| {
+                b.rename_column(old_key, new_key)
+            })
             .map_err(js_err)
     }
 
@@ -310,9 +385,12 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = viewColF)]
     pub fn view_col_f(&self, key: &str) -> Result<JsFloatArray, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
-            .borrow_col_F(&self.inner.handle, key, |s, _| unsafe { JsFloatArray::view(s) })
+            .borrow_col_F(&self.inner.handle, key, |s, _| unsafe {
+                JsFloatArray::view(s)
+            })
             .map_err(|e| col_not_found_or(key, FLOAT_DTYPE_NAME, e))
     }
 
@@ -347,6 +425,32 @@ impl Block {
                 .map(JsFloatArray::from)
                 .ok_or_else(|| col_err(key, FLOAT_DTYPE_NAME))
         })?
+    }
+
+    /// Allocate a zero-filled float column at `key` with the given shape.
+    ///
+    /// Pair with [`viewColF`](Block::view_col_f) for zero-copy writes from JS:
+    ///
+    /// ```js
+    /// block.createColF("x", [N]);            // allocate
+    /// const view = block.viewColF("x");      // zero-copy view into the column
+    /// for (let i = 0; i < N; i++) view[i] = src[i]; // direct write
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Column name
+    /// * `shape` - Shape of the column (e.g. `[N]` for 1D, `[N, 3]` for Nx3)
+    ///
+    /// # Errors
+    ///
+    /// Throws if the shape is empty, or if the leading dimension conflicts
+    /// with existing columns in this block.
+    #[wasm_bindgen(js_name = createColF)]
+    pub fn create_col_f(&mut self, key: &str, shape: Box<[usize]>) -> Result<(), JsValue> {
+        let dims: Vec<usize> = shape.into_vec();
+        let arr = ndarray::ArrayD::<F>::zeros(ndarray::IxDyn(&dims));
+        self.insert_col(key, arr)
     }
 
     // ---- I32 ----
@@ -393,9 +497,12 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = viewColI32)]
     pub fn view_col_i32(&self, key: &str) -> Result<Int32Array, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
-            .borrow_col_I(&self.inner.handle, key, |s, _| unsafe { Int32Array::view(s) })
+            .borrow_col_I(&self.inner.handle, key, |s, _| unsafe {
+                Int32Array::view(s)
+            })
             .map_err(|e| col_not_found_or(key, "i32", e))
     }
 
@@ -422,6 +529,21 @@ impl Block {
                 .map(Int32Array::from)
                 .ok_or_else(|| col_err(key, "i32"))
         })?
+    }
+
+    /// Allocate a zero-filled i32 column at `key` with the given shape.
+    ///
+    /// See [`createColF`](Block::create_col_f) for the zero-copy write pattern.
+    ///
+    /// # Errors
+    ///
+    /// Throws if the shape is empty, or if the leading dimension conflicts
+    /// with existing columns.
+    #[wasm_bindgen(js_name = createColI32)]
+    pub fn create_col_i32(&mut self, key: &str, shape: Box<[usize]>) -> Result<(), JsValue> {
+        let dims: Vec<usize> = shape.into_vec();
+        let arr = ndarray::ArrayD::<i32>::zeros(ndarray::IxDyn(&dims));
+        self.insert_col(key, arr)
     }
 
     // ---- U32 ----
@@ -470,9 +592,12 @@ impl Block {
     /// ```
     #[wasm_bindgen(js_name = viewColU32)]
     pub fn view_col_u32(&self, key: &str) -> Result<Uint32Array, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
-            .borrow_col_U(&self.inner.handle, key, |s, _| unsafe { Uint32Array::view(s) })
+            .borrow_col_U(&self.inner.handle, key, |s, _| unsafe {
+                Uint32Array::view(s)
+            })
             .map_err(|e| col_not_found_or(key, "u32", e))
     }
 
@@ -500,6 +625,21 @@ impl Block {
                 .map(Uint32Array::from)
                 .ok_or_else(|| col_err(key, "u32"))
         })?
+    }
+
+    /// Allocate a zero-filled u32 column at `key` with the given shape.
+    ///
+    /// See [`createColF`](Block::create_col_f) for the zero-copy write pattern.
+    ///
+    /// # Errors
+    ///
+    /// Throws if the shape is empty, or if the leading dimension conflicts
+    /// with existing columns.
+    #[wasm_bindgen(js_name = createColU32)]
+    pub fn create_col_u32(&mut self, key: &str, shape: Box<[usize]>) -> Result<(), JsValue> {
+        let dims: Vec<usize> = shape.into_vec();
+        let arr = ndarray::ArrayD::<u32>::zeros(ndarray::IxDyn(&dims));
+        self.insert_col(key, arr)
     }
 
     // ---- Str ----
@@ -591,7 +731,8 @@ fn col_not_found_or(key: &str, dtype: &str, ffi_err: molrs_ffi::FfiError) -> JsV
 
 impl Block {
     fn with<R>(&self, f: impl FnOnce(&RsBlock) -> R) -> Result<R, JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow()
             .with_block(&self.inner.handle, f)
             .map_err(js_err)
@@ -602,7 +743,8 @@ impl Block {
         key: &str,
         array: ndarray::ArrayD<T>,
     ) -> Result<(), JsValue> {
-        self.inner.store
+        self.inner
+            .store
             .borrow_mut()
             .with_block_mut(&mut self.inner.handle, |b| {
                 b.insert(key, array)
@@ -686,5 +828,65 @@ mod tests {
         let frame = Frame::new();
         let block = frame.create_block("atoms").unwrap();
         assert!(block.copy_col_f("nonexistent").is_err());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_create_col_f_then_write_via_view_is_zero_copy() {
+        let frame = Frame::new();
+        let mut block = frame.create_block("atoms").unwrap();
+
+        block
+            .create_col_f("x", vec![3_usize].into_boxed_slice())
+            .unwrap();
+        assert_eq!(block.nrows().unwrap(), 3);
+
+        let view = block.view_col_f("x").unwrap();
+        view.set_index(0, 1.0);
+        view.set_index(1, 2.0);
+        view.set_index(2, 3.0);
+
+        let copied = block.copy_col_f("x").unwrap();
+        assert_eq!(copied.length(), 3);
+        assert!((copied.get_index(0) - 1.0).abs() < 1e-9);
+        assert!((copied.get_index(2) - 3.0).abs() < 1e-9);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_create_col_i32_then_write_via_view_is_zero_copy() {
+        let frame = Frame::new();
+        let mut block = frame.create_block("atoms").unwrap();
+
+        block
+            .create_col_i32("charge", vec![2_usize].into_boxed_slice())
+            .unwrap();
+
+        let view = block.view_col_i32("charge").unwrap();
+        view.set_index(0, 1);
+        view.set_index(1, -1);
+
+        let copied = block.copy_col_i32("charge").unwrap();
+        assert_eq!(copied.get_index(0), 1);
+        assert_eq!(copied.get_index(1), -1);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_create_col_u32_matrix_shape_preserved() {
+        let frame = Frame::new();
+        let mut block = frame.create_block("bonds").unwrap();
+
+        // 2D shape: 2 rows, 2 cols.
+        block
+            .create_col_u32("ij", vec![2_usize, 2_usize].into_boxed_slice())
+            .unwrap();
+        assert_eq!(block.nrows().unwrap(), 2);
+
+        let view = block.view_col_u32("ij").unwrap();
+        assert_eq!(view.length(), 4);
+        view.set_index(0, 10);
+        view.set_index(3, 40);
+
+        let copied = block.copy_col_u32("ij").unwrap();
+        assert_eq!(copied.get_index(0), 10);
+        assert_eq!(copied.get_index(3), 40);
     }
 }
