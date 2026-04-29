@@ -22,6 +22,7 @@ target
 
 # Python
 __pycache__/
+.venv/
 *.py[cod]
 *$py.class
 *.so
@@ -50,6 +51,8 @@ tests/tests-data
 molrs-wasm/Cargo.lock
 
 # Generated bindings and packaging artifacts
+site/
+docs/site/
 molrs-capi/include/molrs.h
 pkg/
 molrs-wasm/pkg/

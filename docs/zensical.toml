@@ -1,0 +1,78 @@
+[project]
+site_name = "molrs"
+site_description = "Unified documentation for the molrs molecular modeling toolkit."
+site_author = "MolCrafts"
+site_url = "https://molcrafts.github.io/molrs/"
+repo_url = "https://github.com/MolCrafts/molrs"
+repo_name = "MolCrafts/molrs"
+docs_dir = "site-src"
+site_dir = "site"
+copyright = "Copyright &copy; 2026 MolCrafts"
+
+nav = [
+  { "Overview" = "index.md" },
+  { "Getting Started" = [
+    { "Installation" = "getting-started/installation.md" },
+    { "Rust Quickstart" = "getting-started/quickstart-rust.md" },
+    { "Python Quickstart" = "getting-started/quickstart-python.md" },
+    { "WASM Quickstart" = "getting-started/quickstart-wasm.md" },
+  ] },
+  { "Guides" = [
+    { "Data Model" = "guides/data-model.md" },
+    { "SMILES and Topology" = "guides/smiles-and-topology.md" },
+    { "Neighbor Search" = "guides/neighbor-search.md" },
+    { "3D Embedding" = "guides/embed-3d.md" },
+    { "Force Fields" = "guides/force-field.md" },
+    { "I/O Formats" = "guides/io-formats.md" },
+    { "Trajectory Analysis" = "guides/trajectory-analysis.md" },
+  ] },
+  { "Reference" = [
+    { "Rust" = "reference/rust.md" },
+    { "Python" = "reference/python.md" },
+    { "WASM" = "reference/wasm.md" },
+  ] },
+  { "Contributing" = "contributing.md" },
+  { "Changelog" = "changelog.md" },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "content.code.copy",
+  "content.tabs.link",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.sections",
+  "navigation.tracking",
+  "navigation.top",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "teal"
+accent = "indigo"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "teal"
+accent = "indigo"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.plugins.search]
+
+[project.plugins.mkdocstrings]
+default_handler = "python"
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["../molrs-python/python"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "numpy"
+members_order = "source"
+show_root_heading = true
+show_root_full_path = false
+show_source = false

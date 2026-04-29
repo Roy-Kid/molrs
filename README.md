@@ -2,6 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/molcrafts-molrs.svg)](https://crates.io/crates/molcrafts-molrs)
 [![Documentation](https://docs.rs/molcrafts-molrs/badge.svg)](https://docs.rs/molcrafts-molrs)
+[![Site](https://img.shields.io/badge/docs-Zensical-0f766e.svg)](https://molcrafts.github.io/molrs/)
 [![PyPI](https://img.shields.io/pypi/v/molcrafts-molrs.svg)](https://pypi.org/project/molcrafts-molrs/)
 [![npm](https://img.shields.io/npm/v/@molcrafts/molrs.svg)](https://www.npmjs.com/package/@molcrafts/molrs)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
@@ -33,7 +34,14 @@ dependency when needed.
 - **Force field** — MMFF94 bond/angle/torsion/vdw/electrostatic potentials
 - **I/O** — PDB, XYZ, LAMMPS data, Zarr V3 trajectories
 - **Packing** — see [`molpack`](https://github.com/MolCrafts/molpack) (separate crate)
-- **Bindings** — Python (PyO3/maturin), WASM (wasm-bindgen), C/C++ (cbindgen)
+- **Bindings** — Python (PyO3/maturin) and WASM (wasm-bindgen)
+
+## Documentation
+
+- Zensical site: <https://molcrafts.github.io/molrs/>
+- Rust API reference: <https://docs.rs/molcrafts-molrs>
+- Python API reference: <https://molcrafts.github.io/molrs/reference/python/>
+- WASM API reference: <https://molcrafts.github.io/molrs/reference/wasm/>
 
 ## Crates
 
@@ -41,15 +49,19 @@ dependency when needed.
 |-------|-------------|
 | [`molcrafts-molrs`](https://crates.io/crates/molcrafts-molrs) | Core library |
 | [`molcrafts-molpack`](https://crates.io/crates/molcrafts-molpack) | Molecular packing (separate repo) |
-| `molcrafts-molrs-ffi` | Handle-based FFI layer |
-| `molcrafts-molrs-capi` | C/C++ API |
+| [`molcrafts-molrs-core`](https://crates.io/crates/molcrafts-molrs-core) | Frame, Block, topology, boxes, neighbor search |
+| [`molcrafts-molrs-io`](https://crates.io/crates/molcrafts-molrs-io) | PDB, XYZ, LAMMPS, CHGCAR, Cube, Zarr |
+| [`molcrafts-molrs-compute`](https://crates.io/crates/molcrafts-molrs-compute) | RDF, MSD, clusters, descriptors |
+| [`molcrafts-molrs-ff`](https://crates.io/crates/molcrafts-molrs-ff) | MMFF94 typing and potentials |
+| [`molcrafts-molrs-embed`](https://crates.io/crates/molcrafts-molrs-embed) | 3D coordinate generation |
 
 ## Quick start
 
 ### Rust
 
 ```rust
-use molrs::{parse_smiles, to_atomistic, generate_3d, EmbedOptions};
+use molrs::embed::{generate_3d, EmbedOptions};
+use molrs::smiles::{parse_smiles, to_atomistic};
 
 let ir = parse_smiles("c1ccccc1").unwrap();         // benzene
 let mol = to_atomistic(&ir).unwrap();
@@ -62,8 +74,9 @@ let (mol3d, _report) = generate_3d(&mol, EmbedOptions::default()).unwrap();
 import molrs
 
 ir = molrs.parse_smiles("CCO")
-frame = ir.to_frame()
-result = molrs.generate_3d(frame)
+mol = ir.to_atomistic()
+result = molrs.generate_3d(mol, molrs.EmbedOptions(speed="fast", seed=42))
+frame = result.mol.to_frame()
 ```
 
 ### JavaScript / TypeScript
