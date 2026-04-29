@@ -60,7 +60,24 @@ enum ColumnType {
     String,
 }
 
+/// Whether a frame's data section came from the per-atom (`dump
+/// atom/custom`) or per-entry (`dump local`) flavor of the LAMMPS dump
+/// format. Picked by which header keyword starts the count line:
+/// `ITEM: NUMBER OF ATOMS` vs. `ITEM: NUMBER OF ENTRIES`. Determines
+/// the destination block name on the resulting [`Frame`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BlockKind {
+    Atoms,
+    Entries,
+}
+
 /// Classify a LAMMPS dump column by name.
+///
+/// Used by the *writer* to pick a per-column print format (integer vs
+/// `%.6f` vs raw string). Reader-side classification went value-based
+/// (see [`classify_value`]) because LAMMPS dump column names are
+/// user-defined (`c_X[N]`, `f_reax[1]`, `batom1`, …) and a name-only
+/// heuristic can't keep up with the long tail.
 ///
 /// Integer columns: id, type, mol, proc, procp1, ix, iy, iz.
 /// String columns: element (element symbol, e.g. "C", "H").
@@ -73,6 +90,7 @@ fn classify_column(name: &str) -> ColumnType {
         _ => ColumnType::Float,
     }
 }
+
 
 // ============================================================================
 // Parsing
@@ -284,19 +302,36 @@ fn parse_single_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Fram
         }
     };
 
-    // -- ITEM: NUMBER OF ATOMS --
+    // -- ITEM: NUMBER OF ATOMS  /  ITEM: NUMBER OF ENTRIES --
+    //
+    // Two flavors of LAMMPS dump output share this parser:
+    //   * `dump atom/custom` writes per-atom rows under
+    //     `ITEM: NUMBER OF ATOMS` + `ITEM: ATOMS …`.
+    //   * `dump local` (OVITO-compatible) writes per-bond / per-angle /
+    //     per-pair-distance rows under `ITEM: NUMBER OF ENTRIES` +
+    //     `ITEM: ENTRIES …`. See:
+    //     https://www.ovito.org/manual/reference/file_formats/input/lammps_dump_local.html
+    //
+    // The per-row schema is identical (whitespace-separated tokens, one
+    // line per row), so we accept either header keyword and stash a
+    // `BlockKind` discriminator to pick the destination block name when
+    // we build the Frame.
     line.clear();
     reader.read_line(&mut line)?;
-    if !line.trim().starts_with("ITEM: NUMBER OF ATOMS") {
+    let block_kind = if line.trim().starts_with("ITEM: NUMBER OF ATOMS") {
+        BlockKind::Atoms
+    } else if line.trim().starts_with("ITEM: NUMBER OF ENTRIES") {
+        BlockKind::Entries
+    } else {
         return Err(err_mapper(format!(
-            "Expected 'ITEM: NUMBER OF ATOMS', got: {}",
+            "Expected 'ITEM: NUMBER OF ATOMS' or 'ITEM: NUMBER OF ENTRIES', got: {}",
             line.trim()
         )));
-    }
+    };
 
     line.clear();
     reader.read_line(&mut line)?;
-    let natoms: usize = line.trim().parse().map_err(err_mapper)?;
+    let nrows: usize = line.trim().parse().map_err(err_mapper)?;
 
     // -- ITEM: BOX BOUNDS --
     line.clear();
@@ -311,106 +346,195 @@ fn parse_single_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Fram
     let (is_triclinic, boundary_raw) = DumpBoxBounds::parse_header(line.trim())?;
     let bounds = DumpBoxBounds::parse_lines(reader, is_triclinic, boundary_raw)?;
 
-    // -- ITEM: ATOMS --
+    // -- ITEM: ATOMS  /  ITEM: ENTRIES --
     line.clear();
     reader.read_line(&mut line)?;
-    if !line.trim().starts_with("ITEM: ATOMS") {
+    let header_keyword = match block_kind {
+        BlockKind::Atoms => "ITEM: ATOMS",
+        BlockKind::Entries => "ITEM: ENTRIES",
+    };
+    if !line.trim().starts_with(header_keyword) {
         return Err(err_mapper(format!(
-            "Expected 'ITEM: ATOMS', got: {}",
+            "Expected '{}', got: {}",
+            header_keyword,
             line.trim()
         )));
     }
 
-    // Extract column names from "ITEM: ATOMS col1 col2 ..."
-    let atoms_header = line.trim().strip_prefix("ITEM: ATOMS").unwrap_or("").trim();
-    let col_names: Vec<String> = atoms_header.split_whitespace().map(String::from).collect();
-    let col_types: Vec<ColumnType> = col_names.iter().map(|n| classify_column(n)).collect();
+    // Extract column names from "ITEM: <keyword> col1 col2 ..."
+    let header_tail = line
+        .trim()
+        .strip_prefix(header_keyword)
+        .unwrap_or("")
+        .trim();
+    let col_names: Vec<String> = header_tail.split_whitespace().map(String::from).collect();
 
     if col_names.is_empty() {
-        return Err(err_mapper("ITEM: ATOMS header has no column names"));
+        return Err(err_mapper(format!(
+            "{} header has no column names",
+            header_keyword
+        )));
     }
 
-    // Pre-allocate column storage
     let ncols = col_names.len();
-    let mut int_cols: Vec<Option<Vec<I>>> = vec![None; ncols];
+
+    // Atoms are kept in file order, NOT sorted by `id`. Per-row order
+    // out of LAMMPS's `dump custom`/`dump local` reflects each MPI
+    // rank's local atom storage; bonds emitted by `compute property/
+    // local` in companion `dump local` files are typically indexed by
+    // that same per-row position rather than by atom id. Re-sorting
+    // atom rows on read would break those bond mappings — bonds.dump's
+    // batom1/batom2 (or equivalent) point at "the atom written at file
+    // row K", not at "the atom whose id is K". Keep both flavors in
+    // file order and let the user pick a 0-/1-based offset in the
+    // BondColumnRemap dialog if needed.
+    //
+    // Note: this means atom rows can shuffle across frames if MPI
+    // rebalancing happens. That's a property of the LAMMPS dump
+    // protocol — the user can add `dump_modify sort id` to their LAMMPS
+    // script to stabilize order on the writer side.
+
+    // Per-column typed buffers. Exactly one of int/float/str is `Some`
+    // at any moment for each column; the active one matches `col_types[i]`.
+    // Promotion (Integer → Float → String) drains the old buffer and
+    // converts each existing value to the wider type before continuing
+    // — see the match arms below.
+    let mut col_types: Vec<ColumnType> = vec![ColumnType::Integer; ncols];
+    let mut int_cols: Vec<Option<Vec<I>>> = (0..ncols)
+        .map(|_| Some(Vec::with_capacity(nrows)))
+        .collect();
     let mut float_cols: Vec<Option<Vec<F>>> = vec![None; ncols];
     let mut str_cols: Vec<Option<Vec<std::string::String>>> = vec![None; ncols];
 
-    for (i, ct) in col_types.iter().enumerate() {
-        match ct {
-            ColumnType::Integer => int_cols[i] = Some(Vec::with_capacity(natoms)),
-            ColumnType::Float => float_cols[i] = Some(Vec::with_capacity(natoms)),
-            ColumnType::String => str_cols[i] = Some(Vec::with_capacity(natoms)),
-        }
-    }
-
-    // Read atom data lines
-    for row in 0..natoms {
+    // --- Single pass: walk rows in file order, push into typed columns ---
+    //
+    // Promote-on-demand value-based typing: every column starts at
+    // Integer (the narrowest); the first token that doesn't parse as
+    // the current type triggers a one-shot promotion of that column's
+    // already-collected values to the wider type, and the loop
+    // continues with the new type cached in `col_types[i]`. Per-cell
+    // cost is one `i64`/`f64::parse` in the steady state; promotions
+    // happen at most twice per column over the whole file (Integer →
+    // Float once, Float → String once) and are bounded O(rows-already-
+    // collected).
+    //
+    // Why promote-on-demand instead of "probe row 0, lock in types,
+    // dispatch the rest": LAMMPS' `%g` float format prints exact zeros
+    // as `0` (no decimal point, no exponent), so a column whose first
+    // atom sits at the origin would lock as Integer and then panic on
+    // row 2's `0.693361`.
+    for row in 0..nrows {
         line.clear();
         let bytes = reader.read_line(&mut line)?;
         if bytes == 0 {
             return Err(err_mapper(format!(
-                "Unexpected EOF at atom line {} (expected {})",
-                row, natoms
+                "Unexpected EOF at row {} (expected {})",
+                row, nrows
             )));
         }
 
-        let tokens: Vec<&str> = line.split_whitespace().collect();
-        if tokens.len() < ncols {
-            return Err(err_mapper(format!(
-                "Atom line {} has {} tokens, expected {}",
-                row,
-                tokens.len(),
-                ncols
-            )));
-        }
-
-        for (i, ct) in col_types.iter().enumerate() {
-            match ct {
+        let mut tokens = line.split_whitespace();
+        for i in 0..ncols {
+            let token = tokens.next().ok_or_else(|| {
+                err_mapper(format!(
+                    "Row {} has fewer than {} tokens",
+                    row, ncols
+                ))
+            })?;
+            match col_types[i] {
                 ColumnType::Integer => {
-                    let v: I = tokens[i].parse().map_err(err_mapper)?;
-                    int_cols[i].as_mut().unwrap().push(v);
+                    if let Ok(v) = token.parse::<I>() {
+                        int_cols[i].as_mut().unwrap().push(v);
+                    } else if let Ok(v) = token.parse::<F>() {
+                        // Integer → Float: lift accumulated ints into a
+                        // Vec<F> and continue with float storage. Cast
+                        // is lossless for values in `i32`/`u32` range
+                        // and acceptable elsewhere — the column already
+                        // committed to numeric.
+                        let drained = int_cols[i].take().unwrap();
+                        let mut promoted: Vec<F> = Vec::with_capacity(nrows);
+                        for prev in drained {
+                            promoted.push(prev as F);
+                        }
+                        promoted.push(v);
+                        float_cols[i] = Some(promoted);
+                        col_types[i] = ColumnType::Float;
+                    } else {
+                        // Integer → String: stringify accumulated ints.
+                        let drained = int_cols[i].take().unwrap();
+                        let mut promoted: Vec<std::string::String> =
+                            Vec::with_capacity(nrows);
+                        for prev in drained {
+                            promoted.push(prev.to_string());
+                        }
+                        promoted.push(token.to_owned());
+                        str_cols[i] = Some(promoted);
+                        col_types[i] = ColumnType::String;
+                    }
                 }
                 ColumnType::Float => {
-                    let v: F = tokens[i].parse().map_err(err_mapper)?;
-                    float_cols[i].as_mut().unwrap().push(v);
+                    if let Ok(v) = token.parse::<F>() {
+                        float_cols[i].as_mut().unwrap().push(v);
+                    } else {
+                        // Float → String: stringify accumulated floats.
+                        let drained = float_cols[i].take().unwrap();
+                        let mut promoted: Vec<std::string::String> =
+                            Vec::with_capacity(nrows);
+                        for prev in drained {
+                            promoted.push(prev.to_string());
+                        }
+                        promoted.push(token.to_owned());
+                        str_cols[i] = Some(promoted);
+                        col_types[i] = ColumnType::String;
+                    }
                 }
                 ColumnType::String => {
-                    str_cols[i].as_mut().unwrap().push(tokens[i].to_owned());
+                    str_cols[i].as_mut().unwrap().push(token.to_owned());
                 }
             }
         }
     }
 
+
     // Build Frame
     let mut frame = Frame::new();
-    let mut atoms_block = Block::new();
+    let mut data_block = Block::new();
 
     for (i, name) in col_names.iter().enumerate() {
         match col_types[i] {
             ColumnType::Integer => {
                 let arr = Array1::from_vec(int_cols[i].take().unwrap())
-                    .into_shape_with_order(IxDyn(&[natoms]))
+                    .into_shape_with_order(IxDyn(&[nrows]))
                     .map_err(err_mapper)?
                     .into_dyn();
-                atoms_block.insert(name.as_str(), arr).map_err(err_mapper)?;
+                data_block.insert(name.as_str(), arr).map_err(err_mapper)?;
             }
             ColumnType::Float => {
                 let arr = Array1::from_vec(float_cols[i].take().unwrap())
-                    .into_shape_with_order(IxDyn(&[natoms]))
+                    .into_shape_with_order(IxDyn(&[nrows]))
                     .map_err(err_mapper)?
                     .into_dyn();
-                atoms_block.insert(name.as_str(), arr).map_err(err_mapper)?;
+                data_block.insert(name.as_str(), arr).map_err(err_mapper)?;
             }
             ColumnType::String => {
-                let arr = ArrayD::from_shape_vec(IxDyn(&[natoms]), str_cols[i].take().unwrap())
+                let arr = ArrayD::from_shape_vec(IxDyn(&[nrows]), str_cols[i].take().unwrap())
                     .map_err(err_mapper)?;
-                atoms_block.insert(name.as_str(), arr).map_err(err_mapper)?;
+                data_block.insert(name.as_str(), arr).map_err(err_mapper)?;
             }
         }
     }
 
-    frame.insert("atoms", atoms_block);
+    // ENTRIES (dump local) → "bonds": typical use case is per-bond rows.
+    // Column names are preserved as-is; downstream (`DrawBondModifier`)
+    // is gated on the canonical `atomi`/`atomj` columns so a non-bond
+    // dump local file (angles, pair distances, …) parses and lands in
+    // the pipeline without auto-attaching a bond renderer that would
+    // throw on missing columns.
+    let block_name = match block_kind {
+        BlockKind::Atoms => "atoms",
+        BlockKind::Entries => "bonds",
+    };
+    frame.insert(block_name, data_block);
 
     // Timestep is frame-level metadata, not a box property.
     frame
@@ -520,7 +644,8 @@ impl<R: BufRead + Seek> LAMMPSTrajReader<R> {
             }
             current_pos += bytes as u64;
 
-            // Skip "ITEM: NUMBER OF ATOMS"
+            // Skip "ITEM: NUMBER OF ATOMS" or "ITEM: NUMBER OF ENTRIES"
+            // — both flavors share this scaffolding (see parse_single_frame).
             line.clear();
             let bytes = self.reader.read_line(&mut line)?;
             if bytes == 0 {
@@ -528,14 +653,14 @@ impl<R: BufRead + Seek> LAMMPSTrajReader<R> {
             }
             current_pos += bytes as u64;
 
-            // Read natoms
+            // Read row count (natoms for ATOMS, nentries for ENTRIES).
             line.clear();
             let bytes = self.reader.read_line(&mut line)?;
             if bytes == 0 {
                 break;
             }
             current_pos += bytes as u64;
-            let natoms: usize = line.trim().parse().unwrap_or(0);
+            let nrows: usize = line.trim().parse().unwrap_or(0);
 
             // Skip "ITEM: BOX BOUNDS ..."
             line.clear();
@@ -555,7 +680,7 @@ impl<R: BufRead + Seek> LAMMPSTrajReader<R> {
                 current_pos += bytes as u64;
             }
 
-            // Skip "ITEM: ATOMS ..."
+            // Skip "ITEM: ATOMS ..." or "ITEM: ENTRIES ..."
             line.clear();
             let bytes = self.reader.read_line(&mut line)?;
             if bytes == 0 {
@@ -563,8 +688,8 @@ impl<R: BufRead + Seek> LAMMPSTrajReader<R> {
             }
             current_pos += bytes as u64;
 
-            // Skip natoms data lines
-            for _ in 0..natoms {
+            // Skip nrows data lines
+            for _ in 0..nrows {
                 line.clear();
                 let bytes = self.reader.read_line(&mut line)?;
                 if bytes == 0 {
@@ -864,6 +989,119 @@ pub fn write_lammps_dump<P: AsRef<Path>, FA: FrameAccess>(
 }
 
 // ============================================================================
+// Streaming
+// ============================================================================
+
+use crate::streaming::{FrameIndexBuilder, FrameIndexEntry, LineAccumulator};
+use std::io::Cursor;
+
+/// Parse exactly one LAMMPS dump frame from a tightly-bounded byte slice.
+///
+/// `bytes` must be the slice produced by [`LammpsDumpIndexBuilder`] for one
+/// frame: it begins with an `ITEM: TIMESTEP` (or an optional `ITEM: UNITS` /
+/// `ITEM: TIME` header preceding it) and ends just before the next frame's
+/// `ITEM: TIMESTEP` or at EOF. The frame must be self-contained.
+pub fn parse_frame_bytes(bytes: &[u8]) -> std::io::Result<Frame> {
+    let mut cursor = Cursor::new(bytes);
+    parse_single_frame(&mut cursor)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "LAMMPS dump frame slice is empty",
+        )
+    })
+}
+
+/// Streaming frame indexer for LAMMPS dump files.
+///
+/// Detects frame boundaries by scanning for `ITEM: TIMESTEP` lines. The
+/// builder tolerates chunk boundaries that split lines (LF or CRLF) and
+/// frames that span multiple chunks.
+pub struct LammpsDumpIndexBuilder {
+    lines: LineAccumulator,
+    /// Offset of the most-recent unfinalized frame's first byte, if any.
+    pending_frame_start: Option<u64>,
+    /// Frames finalized (i.e. their successor's `ITEM: TIMESTEP` has been
+    /// observed) but not yet drained.
+    pending_entries: Vec<FrameIndexEntry>,
+}
+
+impl Default for LammpsDumpIndexBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LammpsDumpIndexBuilder {
+    pub fn new() -> Self {
+        Self {
+            lines: LineAccumulator::new(),
+            pending_frame_start: None,
+            pending_entries: Vec::new(),
+        }
+    }
+}
+
+impl FrameIndexBuilder for LammpsDumpIndexBuilder {
+    fn feed(&mut self, chunk: &[u8], global_offset: u64) {
+        let pending_frame_start = &mut self.pending_frame_start;
+        let pending_entries = &mut self.pending_entries;
+        self.lines
+            .feed(chunk, global_offset, |line, line_offset, _line_len| {
+                if !line.trim_start().starts_with("ITEM: TIMESTEP") {
+                    return;
+                }
+                if let Some(prev) = pending_frame_start.replace(line_offset) {
+                    let len = (line_offset - prev) as u32;
+                    pending_entries.push(FrameIndexEntry {
+                        byte_offset: prev,
+                        byte_len: len,
+                    });
+                }
+            });
+    }
+
+    fn drain(&mut self) -> Vec<FrameIndexEntry> {
+        std::mem::take(&mut self.pending_entries)
+    }
+
+    fn finish(mut self: Box<Self>) -> std::io::Result<Vec<FrameIndexEntry>> {
+        let pending_frame_start = &mut self.pending_frame_start;
+        let pending_entries = &mut self.pending_entries;
+        self.lines.finish(|line, line_offset, _len| {
+            if !line.trim_start().starts_with("ITEM: TIMESTEP") {
+                return;
+            }
+            if let Some(prev) = pending_frame_start.replace(line_offset) {
+                let len = (line_offset - prev) as u32;
+                pending_entries.push(FrameIndexEntry {
+                    byte_offset: prev,
+                    byte_len: len,
+                });
+            }
+        });
+        let bytes_seen = self.lines.bytes_seen();
+        if let Some(prev) = self.pending_frame_start.take() {
+            let span = bytes_seen.saturating_sub(prev);
+            if span > u32::MAX as u64 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "LAMMPS dump frame size exceeds 4 GiB",
+                ));
+            }
+            self.pending_entries.push(FrameIndexEntry {
+                byte_offset: prev,
+                byte_len: span as u32,
+            });
+        }
+        Ok(std::mem::take(&mut self.pending_entries))
+    }
+
+    fn bytes_seen(&self) -> u64 {
+        self.lines.bytes_seen()
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -937,6 +1175,102 @@ ITEM: ATOMS id type x y z
 
         // Out of bounds
         assert!(reader.read_step(5).unwrap().is_none());
+    }
+
+    /// Per-bond `dump local` (OVITO-compatible). The header keywords
+    /// `NUMBER OF ENTRIES` and `ENTRIES` substitute for the per-atom
+    /// flavor's `NUMBER OF ATOMS` / `ATOMS`. The parsed columns land
+    /// in a `bonds` block (vs `atoms` for the per-atom flavor) so a
+    /// downstream pipeline can route the two through different
+    /// renderers without inspecting the dump variant directly.
+    #[test]
+    fn test_dump_local_entries_form() {
+        let dump = "\
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ENTRIES
+3
+ITEM: BOX BOUNDS pp pp pp
+0.0 10.0
+0.0 10.0
+0.0 10.0
+ITEM: ENTRIES c_1[1] c_1[2] c_1[3]
+1 1 2
+2 2 3
+3 3 4
+";
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
+        let frames = reader.read_all().unwrap();
+        assert_eq!(frames.len(), 1);
+        // Block name is "bonds" (not "atoms") for ENTRIES form.
+        assert!(frames[0].get("atoms").is_none());
+        let bonds = frames[0].get("bonds").expect("bonds block present");
+        assert_eq!(bonds.nrows(), Some(3));
+        // Column names preserved as-is from the file.
+        assert!(bonds.dtype("c_1[1]").is_some());
+        assert!(bonds.dtype("c_1[2]").is_some());
+        assert!(bonds.dtype("c_1[3]").is_some());
+    }
+
+    #[test]
+    fn test_atoms_keep_file_order() {
+        // Atoms are NOT sorted by `id` on read. LAMMPS' companion
+        // `dump local` outputs (e.g. bonds.dump from `compute property/
+        // local`) typically reference atoms by the same per-row position
+        // they occupy in this dump, not by atom id. Re-sorting on read
+        // would break those bond mappings on every frame switch. Users
+        // who want a canonical row order should add `dump_modify sort
+        // id` on the LAMMPS side; the reader trusts whatever ordering
+        // the writer chose.
+        let dump = "\
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+3
+ITEM: BOX BOUNDS pp pp pp
+0.0 10.0
+0.0 10.0
+0.0 10.0
+ITEM: ATOMS id type x y z
+3 1 9.0 0.0 0.0
+1 1 1.0 0.0 0.0
+2 1 5.0 0.0 0.0
+";
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
+        let frames = reader.read_all().unwrap();
+        let atoms = frames[0].get("atoms").expect("atoms block");
+        let ids = atoms.get_int("id").expect("id column");
+        let xs = atoms.get_float("x").expect("x column");
+        // File order preserved: 3, 1, 2 (matching x: 9.0, 1.0, 5.0).
+        assert_eq!(ids.as_slice().unwrap(), &[3, 1, 2]);
+        assert_eq!(xs.as_slice().unwrap(), &[9.0, 1.0, 5.0]);
+    }
+
+    #[test]
+    fn test_entries_keep_file_order() {
+        // ENTRIES blocks (dump local) have no `id` column — bonds are
+        // identified by their endpoint atom IDs, not by row position.
+        // File order is preserved.
+        let dump = "\
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ENTRIES
+3
+ITEM: BOX BOUNDS pp pp pp
+0.0 10.0
+0.0 10.0
+0.0 10.0
+ITEM: ENTRIES batom1 batom2 btype
+3 4 1
+1 2 1
+2 3 1
+";
+        let mut reader = LAMMPSTrajReader::new(cursor(dump));
+        let frames = reader.read_all().unwrap();
+        let bonds = frames[0].get("bonds").expect("bonds block");
+        let batom1 = bonds.get_int("batom1").expect("batom1");
+        // File order: 3, 1, 2 (no sort applied).
+        assert_eq!(batom1.as_slice().unwrap(), &[3, 1, 2]);
     }
 
     #[test]
@@ -1180,5 +1514,159 @@ ITEM: ATOMS id type x y z
             count += 1;
         }
         assert_eq!(count, 2);
+    }
+
+    // -----------------------------------------------------------------
+    // Streaming index tests
+    // -----------------------------------------------------------------
+
+    fn build_index_in_chunks(bytes: &[u8], chunk_size: usize) -> Vec<FrameIndexEntry> {
+        let mut builder = Box::new(LammpsDumpIndexBuilder::new());
+        let mut offset: u64 = 0;
+        let mut out: Vec<FrameIndexEntry> = Vec::new();
+        for piece in bytes.chunks(chunk_size.max(1)) {
+            builder.feed(piece, offset);
+            offset += piece.len() as u64;
+            out.extend(builder.drain());
+        }
+        out.extend(builder.finish().expect("finish"));
+        out
+    }
+
+    #[test]
+    fn streaming_single_shot_matches_legacy() {
+        let bytes = MULTI_DUMP.as_bytes();
+        let entries = build_index_in_chunks(bytes, bytes.len());
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].byte_offset, 0);
+        // Reconstruct a frame from each entry slice.
+        for entry in &entries {
+            let lo = entry.byte_offset as usize;
+            let hi = lo + entry.byte_len as usize;
+            let frame = parse_frame_bytes(&bytes[lo..hi]).expect("parse_frame_bytes");
+            assert!(frame.get("atoms").is_some());
+        }
+    }
+
+    #[test]
+    fn streaming_chunked_indices_are_identical() {
+        let bytes = MULTI_DUMP.as_bytes();
+        let one_shot = build_index_in_chunks(bytes, bytes.len());
+        for cs in [1usize, 7, 13, 31, 64, 1024] {
+            let chunked = build_index_in_chunks(bytes, cs);
+            assert_eq!(
+                one_shot, chunked,
+                "chunk size {} produced different index",
+                cs
+            );
+        }
+    }
+
+    /// Edge case: chunk boundary lands inside the literal "ITEM: TIMESTEP".
+    #[test]
+    fn streaming_boundary_inside_timestep_literal() {
+        let bytes = MULTI_DUMP.as_bytes();
+        // Find first "ITEM: TIMESTEP" position in second frame.
+        let second = bytes
+            .windows(b"ITEM: TIMESTEP".len())
+            .position(|w| w == b"ITEM: TIMESTEP")
+            .and_then(|first| {
+                bytes[first + 1..]
+                    .windows(b"ITEM: TIMESTEP".len())
+                    .position(|w| w == b"ITEM: TIMESTEP")
+                    .map(|p| first + 1 + p)
+            })
+            .expect("two TIMESTEP markers");
+        // Split ~7 bytes into the literal.
+        let split = second + 7;
+        let mut builder = Box::new(LammpsDumpIndexBuilder::new());
+        builder.feed(&bytes[..split], 0);
+        builder.feed(&bytes[split..], split as u64);
+        let mut entries = builder.drain();
+        entries.extend(builder.finish().expect("finish"));
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].byte_offset as usize, second);
+    }
+
+    /// Edge case: file with `ITEM: UNITS` preceding `ITEM: TIMESTEP`. The
+    /// indexer must NOT treat `ITEM: UNITS` as a frame boundary; only the
+    /// `ITEM: TIMESTEP` line is the boundary marker. The leading `ITEM: UNITS`
+    /// prefix is part of the first frame's body.
+    #[test]
+    fn streaming_handles_units_header_before_timestep() {
+        let dump = "\
+ITEM: UNITS
+metal
+ITEM: TIMESTEP
+0
+ITEM: NUMBER OF ATOMS
+1
+ITEM: BOX BOUNDS pp pp pp
+0.0 10.0
+0.0 10.0
+0.0 10.0
+ITEM: ATOMS id type x y z
+1 1 1.0 2.0 3.0
+";
+        let bytes = dump.as_bytes();
+        let entries = build_index_in_chunks(bytes, bytes.len());
+        // The frame starts at the `ITEM: TIMESTEP` line, NOT byte 0.
+        assert_eq!(entries.len(), 1);
+        let lo = entries[0].byte_offset as usize;
+        assert!(bytes[lo..].starts_with(b"ITEM: TIMESTEP"));
+        // The slice rooted at byte_offset must be parseable.
+        parse_frame_bytes(&bytes[lo..lo + entries[0].byte_len as usize])
+            .expect("parse the units-prefixed frame");
+    }
+
+    /// Edge case: CRLF line endings.
+    #[test]
+    fn streaming_handles_crlf_line_endings() {
+        let dump = MULTI_DUMP.replace('\n', "\r\n");
+        let bytes = dump.as_bytes();
+        let entries = build_index_in_chunks(bytes, bytes.len());
+        assert_eq!(entries.len(), 2);
+        for entry in &entries {
+            let lo = entry.byte_offset as usize;
+            let hi = lo + entry.byte_len as usize;
+            parse_frame_bytes(&bytes[lo..hi]).expect("parse CRLF frame");
+        }
+    }
+
+    /// Edge case: missing trailing newline on the final atom line.
+    #[test]
+    fn streaming_handles_missing_trailing_newline() {
+        // Build a single-frame dump without a trailing newline.
+        let dump = "ITEM: TIMESTEP\n0\nITEM: NUMBER OF ATOMS\n1\nITEM: BOX BOUNDS pp pp pp\n0.0 10.0\n0.0 10.0\n0.0 10.0\nITEM: ATOMS id type x y z\n1 1 1.0 2.0 3.0";
+        let bytes = dump.as_bytes();
+        let entries = build_index_in_chunks(bytes, bytes.len());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].byte_offset, 0);
+        assert_eq!(entries[0].byte_len as usize, bytes.len());
+        parse_frame_bytes(bytes).expect("parse no-trailing-newline");
+    }
+
+    /// Edge case: chunk boundary at byte 0 of a TIMESTEP line.
+    #[test]
+    fn streaming_boundary_at_timestep_start_byte() {
+        let bytes = MULTI_DUMP.as_bytes();
+        let second = bytes
+            .windows(b"ITEM: TIMESTEP".len())
+            .position(|w| w == b"ITEM: TIMESTEP")
+            .and_then(|first| {
+                bytes[first + 1..]
+                    .windows(b"ITEM: TIMESTEP".len())
+                    .position(|w| w == b"ITEM: TIMESTEP")
+                    .map(|p| first + 1 + p)
+            })
+            .expect("two TIMESTEP markers");
+        let mut builder = Box::new(LammpsDumpIndexBuilder::new());
+        builder.feed(&bytes[..second], 0);
+        builder.feed(&bytes[second..], second as u64);
+        let mut entries = builder.drain();
+        entries.extend(builder.finish().expect("finish"));
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].byte_offset, 0);
+        assert_eq!(entries[1].byte_offset as usize, second);
     }
 }

@@ -193,3 +193,43 @@ fn test_model_pdb_single_frame() {
     let atoms = frame.get("atoms").expect("atoms");
     assert!(atoms.nrows().unwrap() > 0, "model.pdb should have atoms");
 }
+
+/// The atoms block must expose the residue/chain identity columns
+/// downstream tools (notably the molvis backbone-ribbon auto-modifier)
+/// use to detect protein-like frames. These are parsed from PDB columns
+/// 13-16 (atom name), 18-20 (residue name), 22 (chain id), 23-26 (res seq).
+#[test]
+fn test_atoms_block_carries_residue_columns() {
+    let path = crate::test_data::get_test_data_path("pdb/1avg.pdb");
+    let frame = read_pdb_frame(path.to_str().unwrap()).expect("read 1avg.pdb");
+    let atoms = frame.get("atoms").expect("atoms");
+    let n = atoms.nrows().unwrap();
+    assert!(n > 0, "1avg.pdb should have atoms");
+
+    // All four new columns must be present and have one value per atom.
+    let names = atoms.get_string("name").expect("name column");
+    let res_names = atoms.get_string("res_name").expect("res_name column");
+    let res_seqs = atoms.get_int("res_seq").expect("res_seq column");
+    let chain_ids = atoms.get_string("chain_id").expect("chain_id column");
+    assert_eq!(names.len(), n);
+    assert_eq!(res_names.len(), n);
+    assert_eq!(res_seqs.len(), n);
+    assert_eq!(chain_ids.len(), n);
+
+    // Backbone ribbons need at least one row that looks like a CA atom.
+    assert!(
+        names.iter().any(|s| s.trim() == "CA"),
+        "expected at least one CA atom in 1avg.pdb"
+    );
+    // Residue names should be non-empty for a real PDB file.
+    assert!(
+        res_names.iter().all(|s| !s.is_empty()),
+        "all res_name values must be non-empty"
+    );
+    // Chain id is always exactly one character (or one space) per the
+    // PDB column-22 spec; we serialize it as a single-char String.
+    assert!(
+        chain_ids.iter().all(|s| s.chars().count() == 1),
+        "chain_id values must each be exactly one character"
+    );
+}

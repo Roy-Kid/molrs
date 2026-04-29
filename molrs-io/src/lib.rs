@@ -11,6 +11,7 @@ pub mod pdb;
 pub mod poscar;
 pub mod reader;
 pub mod sdf;
+pub mod streaming;
 pub mod vasp_common;
 pub mod writer;
 pub mod xyz;
