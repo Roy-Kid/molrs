@@ -140,31 +140,31 @@ impl PyBlock {
         // forging, the same numpy array is copied into a Rust-owned column.
         // Narrowing-cast dtypes (f32→f64, i64→i32, u64→u32) always copy —
         // there is no zero-copy path across a dtype change.
-        if let Ok(pyarr) = array.downcast::<PyArrayDyn<F>>() {
+        if let Ok(pyarr) = array.cast::<PyArrayDyn<F>>() {
             if let Some(col) = try_forge_foreign_column(pyarr, Column::from_float_holder) {
                 return self.insert_column(key, col);
             }
             return self.insert_array::<F>(key, pyarr.readonly().as_array().to_owned());
         }
-        if let Ok(pyarr) = array.downcast::<PyArrayDyn<I>>() {
+        if let Ok(pyarr) = array.cast::<PyArrayDyn<I>>() {
             if let Some(col) = try_forge_foreign_column(pyarr, Column::from_int_holder) {
                 return self.insert_column(key, col);
             }
             return self.insert_array::<I>(key, pyarr.readonly().as_array().to_owned());
         }
-        if let Ok(pyarr) = array.downcast::<PyArrayDyn<U>>() {
+        if let Ok(pyarr) = array.cast::<PyArrayDyn<U>>() {
             if let Some(col) = try_forge_foreign_column(pyarr, Column::from_uint_holder) {
                 return self.insert_column(key, col);
             }
             return self.insert_array::<U>(key, pyarr.readonly().as_array().to_owned());
         }
-        if let Ok(pyarr) = array.downcast::<PyArrayDyn<bool>>() {
+        if let Ok(pyarr) = array.cast::<PyArrayDyn<bool>>() {
             if let Some(col) = try_forge_foreign_column(pyarr, Column::from_bool_holder) {
                 return self.insert_column(key, col);
             }
             return self.insert_array::<bool>(key, pyarr.readonly().as_array().to_owned());
         }
-        if let Ok(pyarr) = array.downcast::<PyArrayDyn<u8>>() {
+        if let Ok(pyarr) = array.cast::<PyArrayDyn<u8>>() {
             if let Some(col) = try_forge_foreign_column(pyarr, Column::from_u8_holder) {
                 return self.insert_column(key, col);
             }

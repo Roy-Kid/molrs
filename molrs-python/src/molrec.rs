@@ -1,3 +1,9 @@
+// PyO3-bound MolRec methods inherently mirror the long argument lists of
+// the underlying core API (observable record creators take metadata,
+// frame ranges, dtype, units, etc.). Refactoring would change the Python
+// surface and is out of scope for this binding crate.
+#![allow(clippy::too_many_arguments)]
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -18,37 +24,37 @@ use crate::forcefield::PyForceField;
 use crate::frame::{PyFrame, PyGrid};
 use crate::helpers::{NpF, molrs_error_to_pyerr};
 
-#[pyclass(name = "Trajectory", unsendable)]
+#[pyclass(name = "Trajectory", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyTrajectory {
     pub(crate) inner: CoreTrajectory,
 }
 
-#[pyclass(name = "MolRec", unsendable)]
+#[pyclass(name = "MolRec", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyMolRec {
     inner: Rc<RefCell<CoreMolRec>>,
 }
 
-#[pyclass(name = "Observables", unsendable)]
+#[pyclass(name = "Observables", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyObservables {
     inner: Rc<RefCell<CoreMolRec>>,
 }
 
-#[pyclass(name = "ScalarObservable", unsendable)]
+#[pyclass(name = "ScalarObservable", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyScalarObservable {
     pub(crate) inner: ObservableRecord,
 }
 
-#[pyclass(name = "VectorObservable", unsendable)]
+#[pyclass(name = "VectorObservable", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyVectorObservable {
     pub(crate) inner: ObservableRecord,
 }
 
-#[pyclass(name = "GridObservable", unsendable)]
+#[pyclass(name = "GridObservable", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyGridObservable {
     pub(crate) inner: ObservableRecord,
@@ -168,16 +174,14 @@ impl PyMolRec {
 
     #[staticmethod]
     fn read_zarr(path: &str) -> PyResult<Self> {
-        let inner =
-            molrs_io::zarr::read_molrec_file(path).map_err(|e| molrs_error_to_pyerr(e.into()))?;
+        let inner = molrs_io::zarr::read_molrec_file(path).map_err(molrs_error_to_pyerr)?;
         Ok(Self {
             inner: Rc::new(RefCell::new(inner)),
         })
     }
 
     fn write_zarr(&self, path: &str) -> PyResult<()> {
-        molrs_io::zarr::write_molrec_file(path, &self.inner.borrow())
-            .map_err(|e| molrs_error_to_pyerr(e.into()))
+        molrs_io::zarr::write_molrec_file(path, &self.inner.borrow()).map_err(molrs_error_to_pyerr)
     }
 
     fn count_frames(&self) -> usize {

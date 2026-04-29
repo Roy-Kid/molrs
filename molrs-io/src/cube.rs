@@ -444,9 +444,9 @@ pub fn write_cube_to_writer<W: Write>(writer: &mut W, frame: &Frame) -> Result<(
     // Recover origin and cell columns from simbox, in the writer's unit.
     let origin_arr = simbox.origin_view().to_owned();
     let origin = [
-        origin_arr[0] as f64 * unit_scale,
-        origin_arr[1] as f64 * unit_scale,
-        origin_arr[2] as f64 * unit_scale,
+        origin_arr[0] * unit_scale,
+        origin_arr[1] * unit_scale,
+        origin_arr[2] * unit_scale,
     ];
     let h = simbox.h_view();
 
@@ -478,9 +478,9 @@ pub fn write_cube_to_writer<W: Write>(writer: &mut W, frame: &Frame) -> Result<(
         } else {
             n as i32
         };
-        let vx = (h[[0, i]] as f64 * unit_scale) / n as f64;
-        let vy = (h[[1, i]] as f64 * unit_scale) / n as f64;
-        let vz = (h[[2, i]] as f64 * unit_scale) / n as f64;
+        let vx = (h[[0, i]] * unit_scale) / n as f64;
+        let vy = (h[[1, i]] * unit_scale) / n as f64;
+        let vz = (h[[2, i]] * unit_scale) / n as f64;
         writeln!(writer, "{:5}{:12.6}{:12.6}{:12.6}", n_signed, vx, vy, vz)
             .map_err(MolRsError::Io)?;
     }

@@ -93,7 +93,7 @@ impl PyPotentials {
         let slice = coords.as_slice()?;
         let (energy, forces) = self.inner.eval(slice);
         let forces_arr = forces.to_pyarray(py);
-        Ok((energy as f64, forces_arr))
+        Ok((energy, forces_arr))
     }
 
     /// Evaluate energy only (no force computation).
@@ -114,7 +114,7 @@ impl PyPotentials {
     ///     If ``coords`` is not contiguous in memory.
     fn energy(&self, coords: numpy::PyReadonlyArray1<'_, NpF>) -> PyResult<f64> {
         let slice = coords.as_slice()?;
-        Ok(self.inner.energy(slice) as f64)
+        Ok(self.inner.energy(slice))
     }
 
     fn __repr__(&self) -> String {

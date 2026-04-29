@@ -1,51 +1,155 @@
+# Mirrors every check in .github/workflows/ci-*.yml. Any divergence is a
+# bug — when you add/modify a CI step, update this file in the same commit.
+#
+# Stages:
+#   pre-commit (default): fast checks (fmt, clippy). Runs on every commit.
+#   pre-push:            slow checks (full workspace test, wasm build,
+#                        python build+test, C API cmake+ctest). Runs before
+#                        push only.
+#
+# Install both stages:
+#   pre-commit install --hook-type pre-commit --hook-type pre-push
+
 repos:
   - repo: local
     hooks:
+      # ─── ci-rust.yml::fmt ─────────────────────────────────────────────────
       - id: cargo-fmt
-        name: cargo fmt
+        name: cargo fmt --check (workspace)
         entry: cargo fmt --all -- --check
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: cargo-fmt-python
-        name: cargo fmt (python)
+        name: cargo fmt --check (molrs-python)
         entry: bash -c 'cd molrs-python && cargo fmt -- --check'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: cargo-fmt-wasm
-        name: cargo fmt (wasm)
+        name: cargo fmt --check (molrs-wasm)
         entry: bash -c 'cd molrs-wasm && cargo fmt -- --check'
         language: system
         pass_filenames: false
         types: [rust]
 
-      - id: cargo-clippy
-        name: cargo clippy (workspace)
-        entry: cargo clippy -- -D warnings
+      # ─── ci-rust.yml::clippy ──────────────────────────────────────────────
+      # CI runs:
+      #   cargo clippy --workspace --all-targets -- -D warnings
+      #   cargo clippy -p molcrafts-molrs --all-targets --features full -- -D warnings
+      - id: cargo-clippy-workspace
+        name: cargo clippy --workspace --all-targets (-D warnings)
+        entry: cargo clippy --workspace --all-targets -- -D warnings
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-clippy-facade-full
+        name: cargo clippy facade --features full (-D warnings)
+        entry: cargo clippy -p molcrafts-molrs --all-targets --features full -- -D warnings
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: cargo-clippy-python
-        name: cargo clippy (python)
+        name: cargo clippy (molrs-python)
         entry: bash -c 'cd molrs-python && cargo clippy -- -D warnings'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: cargo-clippy-wasm
-        name: cargo clippy (wasm)
+        name: cargo clippy (molrs-wasm)
         entry: bash -c 'cd molrs-wasm && cargo clippy -- -D warnings'
         language: system
         pass_filenames: false
         types: [rust]
 
-      - id: cargo-test
-        name: cargo test (core)
-        entry: bash -c 'cd molrs-core && cargo test'
+      # ─── ci-rust.yml::test (pre-push: too slow for every commit) ──────────
+      # CI runs `bash scripts/fetch-test-data.sh` before cargo test (with
+      # actions/cache wrapping it). Locally we just run the fetch — it
+      # does `git clone --depth=1` which is small and fast. Without this
+      # the pdb / lammps / cif tests panic on "Test data not found".
+      - id: fetch-test-data
+        name: fetch-test-data.sh (clones MolCrafts/tests-data into target/)
+        entry: bash scripts/fetch-test-data.sh
+        language: system
+        pass_filenames: false
+        types: [rust]
+        stages: [pre-push]
+
+      - id: cargo-test-workspace
+        name: cargo test --workspace --lib --tests --examples
+        entry: cargo test --workspace --lib --tests --examples
+        language: system
+        pass_filenames: false
+        types: [rust]
+        stages: [pre-push]
+
+      - id: cargo-test-facade-full
+        name: cargo test facade --features "full filesystem"
+        entry: cargo test -p molcrafts-molrs --lib --tests --features "full filesystem"
+        language: system
+        pass_filenames: false
+        types: [rust]
+        stages: [pre-push]
+
+      - id: cargo-bench-build
+        name: cargo bench --no-run (molrs-core)
+        entry: cargo bench -p molcrafts-molrs-core --no-run
+        language: system
+        pass_filenames: false
+        types: [rust]
+        stages: [pre-push]
+
+      # ─── ci-wasm.yml ──────────────────────────────────────────────────────
+      - id: wasm-pack-build
+        name: wasm-pack build (molrs-wasm)
+        entry: bash -c 'cd molrs-wasm && wasm-pack build --target web'
+        language: system
+        pass_filenames: false
+        types: [rust]
+        stages: [pre-push]
+
+      # ─── ci-capi.yml ──────────────────────────────────────────────────────
+      - id: capi-cargo-build
+        name: cargo build (molrs-capi, generates header via cbindgen)
+        entry: cargo build --manifest-path molrs-capi/Cargo.toml
+        language: system
+        pass_filenames: false
+        types: [rust]
+        stages: [pre-push]
+
+      - id: capi-cmake-test
+        name: cmake build + ctest (molrs-capi C++ integration)
+        entry: bash -c 'cd molrs-capi && cmake -S tests/cpp -B build-test && cmake --build build-test && ctest --test-dir build-test --output-on-failure'
+        language: system
+        pass_filenames: false
+        types: [rust]
+        stages: [pre-push]
+
+      # ─── ci-python.yml (pre-push: maturin build is heavy) ────────────────
+      # CI runs across 3.9 / 3.10 / 3.11 / 3.12. Locally pin to whatever
+      # python3 is active — full matrix is the CI runner's job.
+      #
+      # `rm -rf target/wheels` before maturin build so the install glob
+      # below only ever picks up the wheel maturin just produced. Without
+      # the cleanup, stale wheels from previous version bumps left in
+      # target/wheels (e.g. molrs-0.0.2 alongside molrs-0.1.0) make pip
+      # see "conflicting dependencies" and refuse to install.
+      - id: python-maturin-build
+        name: maturin build --release (molrs-python)
+        entry: bash -c 'cd molrs-python && rm -rf target/wheels && maturin build --release'
+        language: system
+        pass_filenames: false
+        types: [rust]
+        stages: [pre-push]
+
+      - id: python-pytest
+        name: pytest (molrs-python, after wheel install)
+        entry: bash -c 'cd molrs-python && python -m pip install --quiet --force-reinstall target/wheels/*.whl && pytest -q'
         language: system
         pass_filenames: false
         types: [rust]

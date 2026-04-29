@@ -164,9 +164,10 @@ fn column_access<'a>(
     block_idx: usize,
     col_idx: usize,
 ) -> Result<ColumnAccess<'a>, JsValue> {
-    let block_meta = index.blocks.get(block_idx).ok_or_else(|| {
-        JsValue::from_str(&format!("block index {} out of range", block_idx))
-    })?;
+    let block_meta = index
+        .blocks
+        .get(block_idx)
+        .ok_or_else(|| JsValue::from_str(&format!("block index {} out of range", block_idx)))?;
     let col_name = block_meta.columns.get(col_idx).ok_or_else(|| {
         JsValue::from_str(&format!(
             "column index {} out of range in block {}",
@@ -683,11 +684,7 @@ macro_rules! impl_wasm_traj_stream {
             /// **Lifetime**: valid only until the next non-trivial wasm
             /// call. See the module-level memory-grow contract.
             #[wasm_bindgen(js_name = gridArrayPtrF64)]
-            pub fn grid_array_ptr_f64(
-                &self,
-                grid_idx: usize,
-                array_idx: usize,
-            ) -> *const f64 {
+            pub fn grid_array_ptr_f64(&self, grid_idx: usize, array_idx: usize) -> *const f64 {
                 let Some(frame) = self.output.as_ref() else {
                     return std::ptr::null();
                 };
