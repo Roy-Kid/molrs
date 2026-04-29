@@ -274,10 +274,7 @@ pub fn read_cube_from_reader<R: BufRead>(mut reader: R) -> Result<Frame, MolRsEr
                 .map(|i| flat_data[i * n_vals_per_point + k])
                 .collect();
             grid_block
-                .insert(
-                    format!("mo_{}", idx),
-                    Array1::from_vec(col_data).into_dyn(),
-                )
+                .insert(format!("mo_{}", idx), Array1::from_vec(col_data).into_dyn())
                 .map_err(MolRsError::Block)?;
         }
     } else {
@@ -297,22 +294,34 @@ pub fn read_cube_from_reader<R: BufRead>(mut reader: R) -> Result<Frame, MolRsEr
     atoms
         .insert(
             "x",
-            Array1::from_vec(xs.iter().map(|&v| (v * unit_scale) as F).collect::<Vec<_>>())
-                .into_dyn(),
+            Array1::from_vec(
+                xs.iter()
+                    .map(|&v| (v * unit_scale) as F)
+                    .collect::<Vec<_>>(),
+            )
+            .into_dyn(),
         )
         .map_err(MolRsError::Block)?;
     atoms
         .insert(
             "y",
-            Array1::from_vec(ys.iter().map(|&v| (v * unit_scale) as F).collect::<Vec<_>>())
-                .into_dyn(),
+            Array1::from_vec(
+                ys.iter()
+                    .map(|&v| (v * unit_scale) as F)
+                    .collect::<Vec<_>>(),
+            )
+            .into_dyn(),
         )
         .map_err(MolRsError::Block)?;
     atoms
         .insert(
             "z",
-            Array1::from_vec(zs.iter().map(|&v| (v * unit_scale) as F).collect::<Vec<_>>())
-                .into_dyn(),
+            Array1::from_vec(
+                zs.iter()
+                    .map(|&v| (v * unit_scale) as F)
+                    .collect::<Vec<_>>(),
+            )
+            .into_dyn(),
         )
         .map_err(MolRsError::Block)?;
     atoms

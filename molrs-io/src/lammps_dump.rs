@@ -91,7 +91,6 @@ fn classify_column(name: &str) -> ColumnType {
     }
 }
 
-
 // ============================================================================
 // Parsing
 // ============================================================================
@@ -436,10 +435,7 @@ fn parse_single_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Fram
         let mut tokens = line.split_whitespace();
         for i in 0..ncols {
             let token = tokens.next().ok_or_else(|| {
-                err_mapper(format!(
-                    "Row {} has fewer than {} tokens",
-                    row, ncols
-                ))
+                err_mapper(format!("Row {} has fewer than {} tokens", row, ncols))
             })?;
             match col_types[i] {
                 ColumnType::Integer => {
@@ -462,8 +458,7 @@ fn parse_single_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Fram
                     } else {
                         // Integer → String: stringify accumulated ints.
                         let drained = int_cols[i].take().unwrap();
-                        let mut promoted: Vec<std::string::String> =
-                            Vec::with_capacity(nrows);
+                        let mut promoted: Vec<std::string::String> = Vec::with_capacity(nrows);
                         for prev in drained {
                             promoted.push(prev.to_string());
                         }
@@ -478,8 +473,7 @@ fn parse_single_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Fram
                     } else {
                         // Float → String: stringify accumulated floats.
                         let drained = float_cols[i].take().unwrap();
-                        let mut promoted: Vec<std::string::String> =
-                            Vec::with_capacity(nrows);
+                        let mut promoted: Vec<std::string::String> = Vec::with_capacity(nrows);
                         for prev in drained {
                             promoted.push(prev.to_string());
                         }
@@ -494,7 +488,6 @@ fn parse_single_frame<R: BufRead>(reader: &mut R) -> std::io::Result<Option<Fram
             }
         }
     }
-
 
     // Build Frame
     let mut frame = Frame::new();

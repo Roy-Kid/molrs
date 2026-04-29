@@ -201,7 +201,12 @@ fn test_grid25mo_single_orbital() {
         .filter(|k| k.starts_with("mo_"))
         .map(|s| s.to_string())
         .collect();
-    assert_eq!(mo_keys.len(), 1, "exactly one mo_* column, got {:?}", mo_keys);
+    assert_eq!(
+        mo_keys.len(),
+        1,
+        "exactly one mo_* column, got {:?}",
+        mo_keys
+    );
     let col = grid.get_float(&mo_keys[0]).expect("mo column");
     assert_eq!(col.len(), 25 * 25 * 25);
 }

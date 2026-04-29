@@ -498,11 +498,7 @@ fn string_column(map: &HashMap<String, Vec<String>>, keys: &[&str]) -> Option<Ve
 /// is `"."` for ligand / water / metal-ion atoms with no polymer residue
 /// numbering). Both placeholders, plus empty strings or unparseable values,
 /// fall back to `missing` rather than aborting the whole frame build.
-fn column_i32(
-    map: &HashMap<String, Vec<String>>,
-    keys: &[&str],
-    missing: I,
-) -> Option<Vec<I>> {
+fn column_i32(map: &HashMap<String, Vec<String>>, keys: &[&str], missing: I) -> Option<Vec<I>> {
     for k in keys {
         if let Some(col) = map.get(*k) {
             return Some(
