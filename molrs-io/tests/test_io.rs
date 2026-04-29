@@ -2,6 +2,7 @@ mod test_data;
 mod test_io {
     pub mod test_chgcar;
     pub mod test_cif;
+    pub mod test_cube;
     pub mod test_dcd;
     pub mod test_gro;
     pub mod test_lammps_data;
@@ -10,5 +11,6 @@ mod test_io {
     pub mod test_pdb;
     pub mod test_poscar;
     pub mod test_sdf;
+    pub mod test_streaming;
     pub mod test_xyz;
 }

@@ -75,22 +75,26 @@ fn assert_valid_chgcar(path: &std::path::Path) {
     assert!(frame.simbox.is_some(), "{:?}: missing simbox", path);
 
     let grid = frame
-        .get_grid("chgcar")
-        .unwrap_or_else(|| panic!("{:?}: missing chgcar grid", path));
+        .get("grid")
+        .unwrap_or_else(|| panic!("{:?}: missing grid block", path));
     assert!(
-        grid.contains("total"),
-        "{:?}: grid has no 'total' array",
+        grid.contains_key("total"),
+        "{:?}: grid has no 'total' column",
         path
     );
 
-    let [nx, ny, nz] = grid.dim;
+    let shape = grid.shape();
+    assert_eq!(shape.len(), 3, "{:?}: grid block must be 3-D", path);
+    let (nx, ny, nz) = (shape[0], shape[1], shape[2]);
     assert!(nx > 0 && ny > 0 && nz > 0, "{:?}: grid dim is zero", path);
 
-    let total = grid.get("total").unwrap();
+    let total = grid
+        .get_float("total")
+        .unwrap_or_else(|| panic!("{:?}: total column not f64", path));
     assert_eq!(
-        total.shape(),
-        [nx, ny, nz].as_slice(),
-        "{:?}: dim/shape mismatch",
+        total.len(),
+        nx * ny * nz,
+        "{:?}: total length / shape mismatch",
         path
     );
 
@@ -127,25 +131,25 @@ fn test_nospin_structure() {
     let symbols = atoms.get_string("element").expect("element column");
     assert_eq!(symbols[[0]], "Li", "nospin atom is Li");
 
-    let grid = frame.get_grid("chgcar").expect("chgcar grid");
-    assert_eq!(grid.dim, [32, 32, 32], "nospin grid is 32³");
-    assert!(!grid.contains("diff"), "nospin must have no 'diff'");
+    let grid = frame.get("grid").expect("grid block");
+    assert_eq!(grid.shape(), vec![32, 32, 32], "nospin grid is 32³");
+    assert!(!grid.contains_key("diff"), "nospin must have no 'diff'");
 }
 
 /// CHGCAR.Li_spin: ISPIN=2 → 'diff' (magnetization density) must be present
-/// with the same shape as 'total'.
+/// with the same length as 'total'.
 #[test]
 fn test_spin_has_diff_block() {
     let path = chgcar_path("CHGCAR.Li_spin");
     let frame = read_chgcar(path.to_str().unwrap()).expect("read CHGCAR.spin");
 
-    let grid = frame.get_grid("chgcar").expect("chgcar grid");
-    assert_eq!(grid.dim, [48, 48, 48], "spin grid is 48³");
-    assert!(grid.contains("diff"), "spin CHGCAR must expose 'diff'");
+    let grid = frame.get("grid").expect("grid block");
+    assert_eq!(grid.shape(), vec![48, 48, 48], "spin grid is 48³");
+    assert!(grid.contains_key("diff"), "spin CHGCAR must expose 'diff'");
     assert_eq!(
-        grid.get("total").unwrap().shape(),
-        grid.get("diff").unwrap().shape(),
-        "'total' and 'diff' must have the same shape"
+        grid.get_float("total").unwrap().len(),
+        grid.get_float("diff").unwrap().len(),
+        "'total' and 'diff' must have the same length"
     );
 }
 
@@ -166,8 +170,8 @@ fn test_soc_elements_and_grid() {
     assert!(symbols.iter().any(|s| s == "Ni"), "NiO_SOC must contain Ni");
     assert!(symbols.iter().any(|s| s == "O"), "NiO_SOC must contain O");
 
-    let grid = frame.get_grid("chgcar").expect("chgcar grid");
-    assert_eq!(grid.dim, [56, 56, 56], "NiO_SOC grid is 56³");
+    let grid = frame.get("grid").expect("grid block");
+    assert_eq!(grid.shape(), vec![56, 56, 56], "NiO_SOC grid is 56³");
 }
 
 /// CHGCAR.Fe3O4_spin: 14-atom Fe3O4 (6 Fe + 8 O), non-orthogonal cell.
@@ -200,27 +204,27 @@ fn test_fe3o4_ref_matches_calc() {
         "calc and ref must have the same atom count"
     );
     assert_eq!(
-        calc.get_grid("chgcar").unwrap().dim,
-        refe.get_grid("chgcar").unwrap().dim,
+        calc.get("grid").unwrap().shape(),
+        refe.get("grid").unwrap().shape(),
         "calc and ref must have the same grid dimensions"
     );
 }
 
-/// Grid dimensions recorded in the file header must match the actual array shape
+/// Grid dimensions recorded in the file header must match the actual array length
 /// for every good CHGCAR file.
 #[test]
 fn test_grid_dimensions_match_header() {
     for path in all_chgcar_good_files() {
         let frame =
             read_chgcar(path.to_str().unwrap()).unwrap_or_else(|e| panic!("{:?}: {}", path, e));
-        let grid = frame.get_grid("chgcar").unwrap();
-        let [nx, ny, nz] = grid.dim;
+        let grid = frame.get("grid").unwrap();
+        let shape = grid.shape();
+        let total_len = grid.get_float("total").unwrap().len();
+        let shape_prod: usize = shape.iter().product();
         assert_eq!(
-            grid.get("total").unwrap().shape(),
-            [nx, ny, nz].as_slice(),
-            "{:?}: dim {:?} ≠ array shape",
-            path,
-            grid.dim
+            total_len, shape_prod,
+            "{:?}: shape {:?} ≠ total array length {}",
+            path, shape, total_len
         );
     }
 }
@@ -268,13 +272,13 @@ fn test_bad_coord_mode_fails() {
 #[test]
 fn test_lenient_grid_overflow() {
     let path = chgcar_path("bad/CHGCAR.grid_overflow");
-    if let Ok(_frame) = read_chgcar(path.to_str().unwrap()) {
+    if let Ok(frame) = read_chgcar(path.to_str().unwrap()) {
         assert_valid_chgcar(&path);
-        let grid = _frame.get_grid("chgcar").unwrap();
-        let [nx, ny, nz] = grid.dim;
+        let grid = frame.get("grid").unwrap();
+        let shape_prod: usize = grid.shape().iter().product();
         assert_eq!(
-            grid.get("total").unwrap().len(),
-            nx * ny * nz,
+            grid.get_float("total").unwrap().len(),
+            shape_prod,
             "extra values must not inflate the array"
         );
     }
@@ -297,8 +301,8 @@ fn test_lenient_aug_truncated_parses() {
 fn test_lenient_spin_no_mag() {
     let path = chgcar_path("bad/CHGCAR.spin_no_mag");
     if let Ok(frame) = read_chgcar(path.to_str().unwrap()) {
-        let grid = frame.get_grid("chgcar").unwrap();
-        assert!(grid.contains("total"), "must still have total block");
+        let grid = frame.get("grid").unwrap();
+        assert!(grid.contains_key("total"), "must still have total column");
     }
     // Erroring is also acceptable.
 }

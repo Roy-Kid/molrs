@@ -22,12 +22,13 @@
 //!
 //! ## Grid stored in Frame
 //!
-//! The returned [`Frame`] carries a [`Grid`] under key `"chgcar"` containing:
+//! The returned [`Frame`] carries a `"grid"` [`Block`] with `set_shape([nx,
+//! ny, nz])` and one f64 column per scalar field:
 //!
-//! | Array key | Content                                   | Always? |
-//! |-----------|-------------------------------------------|---------|
-//! | `"total"` | Total charge density (raw: ρ·V_cell, e)  | yes     |
-//! | `"diff"`  | Spin density α−β (raw: ρ·V_cell, e)      | ISPIN=2 |
+//! | Column     | Content                                   | Always? |
+//! |------------|-------------------------------------------|---------|
+//! | `"total"`  | Total charge density (raw: ρ·V_cell, e)  | yes     |
+//! | `"diff"`   | Spin density α−β (raw: ρ·V_cell, e)      | ISPIN=2 |
 //!
 //! The values are stored **as-is** from the file (ρ × V_cell).
 //! To convert to charge density in e/Å³: divide by `simbox.volume()`.
@@ -36,7 +37,7 @@
 //!
 //! The VASP/FORTRAN data is x-fastest (column-major).
 //! `read_chgcar` converts to C row-major `(ix, iy, iz)` order so that
-//! `grid["total"][[ix, iy, iz]]` is `ρ(ix, iy, iz) × V`.
+//! the column data at index `ix*ny*nz + iy*nz + iz` is `ρ(ix, iy, iz) × V`.
 //!
 //! ## Atom positions
 //!
@@ -51,7 +52,6 @@ use ndarray::Array1;
 use molrs::block::Block;
 use molrs::error::MolRsError;
 use molrs::frame::Frame;
-use molrs::grid::Grid;
 use molrs::region::simbox::SimBox;
 use molrs::types::F;
 
@@ -115,8 +115,6 @@ pub fn read_chgcar_from_reader<R: BufRead>(mut reader: R) -> Result<Frame, MolRs
         row[1] = vals[1] * scale as f64;
         row[2] = vals[2] * scale as f64;
     }
-    let cell_f: [[F; 3]; 3] = cell.map(|row| row.map(|v| v as F));
-
     // Line 6: element symbols
     let symbols_line = next_line!();
     let symbols: Vec<&str> = symbols_line.split_whitespace().collect();
@@ -261,23 +259,30 @@ pub fn read_chgcar_from_reader<R: BufRead>(mut reader: R) -> Result<Frame, MolRs
     let [nx, ny, nz] = [dims[0], dims[1], dims[2]];
     let n_voxels = nx * ny * nz;
 
-    let mut grid = Grid::new(dim_line_to_dim(nx, ny, nz), [0.0; 3], cell_f, [true; 3]);
+    // -----------------------------------------------------------------------
+    // Build the volumetric Block ("grid"): row-major (z fastest),
+    // shape = [nx, ny, nz]. Spin and SOC channels are stored as additional
+    // f64 columns alongside "total".
+    // -----------------------------------------------------------------------
+    let mut grid_block = Block::new();
 
-    // -----------------------------------------------------------------------
-    // Read total charge density
-    // -----------------------------------------------------------------------
+    // Total charge density: VASP column-major → row-major.
     let total_vasp = read_volumetric_data(&mut reader, n_voxels, &mut line_no)?;
     let total = vasp_to_row_major(total_vasp, nx, ny, nz);
-    grid.insert("total", total)
-        .map_err(|e| MolRsError::parse(format!("grid insert error: {}", e)))?;
+    grid_block
+        .insert("total", Array1::from_vec(total).into_dyn())
+        .map_err(MolRsError::Block)?;
 
-    // -----------------------------------------------------------------------
-    // Optional: augmentation occupancies (skip) + spin density
-    // -----------------------------------------------------------------------
+    // Optional: augmentation occupancies (skip) + spin density.
     if let Some(diff) = try_read_optional_grid(&mut reader, n_voxels, nx, ny, nz, &mut line_no)? {
-        grid.insert("diff", diff)
-            .map_err(|e| MolRsError::parse(format!("grid insert error: {}", e)))?;
+        grid_block
+            .insert("diff", Array1::from_vec(diff).into_dyn())
+            .map_err(MolRsError::Block)?;
     }
+
+    grid_block
+        .set_shape(&[nx, ny, nz])
+        .map_err(MolRsError::Block)?;
 
     // -----------------------------------------------------------------------
     // Assemble Frame
@@ -288,7 +293,7 @@ pub fn read_chgcar_from_reader<R: BufRead>(mut reader: R) -> Result<Frame, MolRs
     }
     frame.simbox = Some(simbox);
     frame.insert("atoms", atoms);
-    frame.insert_grid("chgcar", grid);
+    frame.insert("grid", grid_block);
 
     Ok(frame)
 }
@@ -505,10 +510,6 @@ fn is_dim_line(line: &str, nx: usize, ny: usize, nz: usize) -> bool {
     toks[0].parse::<usize>().ok() == Some(nx)
         && toks[1].parse::<usize>().ok() == Some(ny)
         && toks[2].parse::<usize>().ok() == Some(nz)
-}
-
-fn dim_line_to_dim(nx: usize, ny: usize, nz: usize) -> [usize; 3] {
-    [nx, ny, nz]
 }
 
 // ---------------------------------------------------------------------------

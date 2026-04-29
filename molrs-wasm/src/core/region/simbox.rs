@@ -248,6 +248,38 @@ impl Box {
         WasmArray::from_vec(o.to_vec(), std::boxed::Box::new([3]))
     }
 
+    /// Return the box's 3×3 cell matrix `h` as a `WasmArray` with shape
+    /// `[9]`, **column-major** (column j of `h` is the j-th lattice
+    /// vector). Suitable for direct consumption by `marchingCubes` and
+    /// other code that expects the cell as a flat 3×3 column-major
+    /// `Float64Array`.
+    ///
+    /// # Returns
+    ///
+    /// `WasmArray` of length 9: `[h00, h10, h20, h01, h11, h21, h02, h12, h22]`,
+    /// in angstrom (A).
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const cell = box.hMatrix().toCopy(); // Float64Array, length 9
+    /// // col0 = a-vector = cell[0..3]
+    /// ```
+    #[wasm_bindgen(js_name = hMatrix)]
+    pub fn h_matrix(&self) -> WasmArray {
+        let h = self.inner.h_view();
+        // h_view is a 3×3 ndarray; emit it column-major to match the
+        // marching-cubes consumer's expectation. Iterate (col, row) so
+        // the flat output is [h[0,0], h[1,0], h[2,0], h[0,1], …].
+        let mut flat = Vec::with_capacity(9);
+        for j in 0..3 {
+            for i in 0..3 {
+                flat.push(h[[i, j]]);
+            }
+        }
+        WasmArray::from_vec(flat, std::boxed::Box::new([9]))
+    }
+
     /// Return the box edge lengths as a `WasmArray` with shape `[3]`.
     ///
     /// For orthorhombic boxes these are `[lx, ly, lz]`. For triclinic
@@ -262,6 +294,29 @@ impl Box {
     /// ```js
     /// const L = box.lengths().toCopy(); // Float32Array or Float64Array [10, 10, 10]
     /// ```
+    /// Return the per-axis periodic boundary flags as a `Uint8Array`
+    /// of length 3 (`[px, py, pz]`, 1 = periodic, 0 = open).
+    ///
+    /// Renderers that respect PBC (isosurface marching cubes,
+    /// bond minimum-image, atom wrap-around) need this to decide
+    /// whether to wrap coordinates across the cell.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const pbc = box.pbc(); // Uint8Array [1, 1, 1] for fully periodic
+    /// const fullyPeriodic = pbc[0] === 1 && pbc[1] === 1 && pbc[2] === 1;
+    /// ```
+    #[wasm_bindgen(js_name = pbc)]
+    pub fn pbc(&self) -> js_sys::Uint8Array {
+        let p = self.inner.pbc();
+        let arr = js_sys::Uint8Array::new_with_length(3);
+        arr.set_index(0, p[0] as u8);
+        arr.set_index(1, p[1] as u8);
+        arr.set_index(2, p[2] as u8);
+        arr
+    }
+
     pub fn lengths(&self) -> WasmArray {
         let l = self.inner.lengths();
         WasmArray::from_vec(l.to_vec(), std::boxed::Box::new([3]))

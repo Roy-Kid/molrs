@@ -18,7 +18,9 @@
 //! | `LAMMPSTrajReader` | LAMMPS dump trajectory | Yes | `"atoms"` block with columns from dump header |
 
 use crate::core::frame::Frame;
+use molrs_io::chgcar::read_chgcar_from_reader;
 use molrs_io::cif::CifReader as RsCifReader;
+use molrs_io::cube::read_cube_from_reader;
 use molrs_io::dcd::DcdReader as RsDcdReader;
 use molrs_io::lammps_data::LAMMPSDataReader;
 use molrs_io::lammps_dump::LAMMPSTrajReader;
@@ -26,7 +28,7 @@ use molrs_io::pdb::PDBReader;
 use molrs_io::reader::{FrameReader, Reader, TrajReader};
 use molrs_io::sdf::SDFReader;
 use molrs_io::xyz::XYZReader;
-use std::io::Cursor;
+use std::io::{BufReader, Cursor};
 use wasm_bindgen::prelude::*;
 
 /// XYZ / Extended XYZ file reader.
@@ -721,6 +723,149 @@ impl CifReader {
     /// # Errors
     ///
     /// Throws a `JsValue` string on parse errors.
+    #[wasm_bindgen(js_name = isEmpty)]
+    pub fn is_empty(&mut self) -> Result<bool, JsValue> {
+        Ok(self.len()? == 0)
+    }
+}
+
+/// Gaussian Cube file reader.
+///
+/// Cube files describe a single voxel grid with embedded atom geometry.
+/// The reader produces a [`Frame`] with:
+/// - `"atoms"` block: `element` (string), `atomic_number` (i32),
+///   `charge` (F), `x`/`y`/`z` (F, **always Å** — Bohr files are converted
+///   on read).
+/// - `"grid"` block: structural shape `[nx, ny, nz]` and one f64 column
+///   per scalar field — `density` for single-density files,
+///   `mo_<idx>` for negative-natoms multi-orbital files.
+/// - `simbox`: voxel cell × dims in Å.
+///
+/// Cube is inherently single-frame (only `step = 0` is valid).
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const content = await file.text();
+/// const reader  = new CubeReader(content);
+/// const frame   = reader.read(0);
+/// const grid    = frame.getBlock("grid");   // shape [nx, ny, nz]
+/// const density = grid.copyColF("density"); // owned Float64Array
+/// ```
+#[wasm_bindgen(js_name = CubeReader)]
+pub struct CubeReader {
+    content: Vec<u8>,
+    cached_len: Option<usize>,
+}
+
+#[wasm_bindgen(js_class = CubeReader)]
+impl CubeReader {
+    /// Create a new Cube reader from the file's text content.
+    #[wasm_bindgen(constructor)]
+    pub fn new(content: &str) -> CubeReader {
+        CubeReader {
+            content: content.as_bytes().to_vec(),
+            cached_len: None,
+        }
+    }
+
+    /// Read the frame at `step`. Cube files are single-frame, so any
+    /// `step != 0` returns `undefined`.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string on parse errors.
+    #[wasm_bindgen]
+    pub fn read(&mut self, step: usize) -> Result<Option<Frame>, JsValue> {
+        if step > 0 {
+            return Ok(None);
+        }
+        let reader = BufReader::new(Cursor::new(self.content.as_slice()));
+        let rs_frame = read_cube_from_reader(reader)
+            .map_err(|e| JsValue::from_str(&format!("Cube read error: {}", e)))?;
+        Ok(Some(Frame::from_rs(rs_frame)?))
+    }
+
+    /// Return the number of frames (always 0 or 1).
+    #[wasm_bindgen]
+    pub fn len(&mut self) -> Result<usize, JsValue> {
+        if let Some(n) = self.cached_len {
+            return Ok(n);
+        }
+        let n = if self.read(0)?.is_some() { 1 } else { 0 };
+        self.cached_len = Some(n);
+        Ok(n)
+    }
+
+    #[wasm_bindgen(js_name = isEmpty)]
+    pub fn is_empty(&mut self) -> Result<bool, JsValue> {
+        Ok(self.len()? == 0)
+    }
+}
+
+/// VASP CHGCAR / CHGDIF volumetric data reader.
+///
+/// Reads VASP-format charge density files (extension-less canonical name
+/// `CHGCAR` or `CHGCAR_*`). Produces a [`Frame`] with:
+/// - `"atoms"` block: `element` (string), `x`/`y`/`z` (F, Cartesian Å).
+/// - `"grid"` block: structural shape `[nx, ny, nz]`, columns
+///   `total` (always) and `diff` (when ISPIN=2).
+/// - `simbox`: triclinic POSCAR lattice in Å, fully periodic.
+///
+/// CHGCAR is single-frame; only `step = 0` is valid.
+///
+/// # Example (JavaScript)
+///
+/// ```js
+/// const content = await file.text();
+/// const reader  = new CHGCARReader(content);
+/// const frame   = reader.read(0);
+/// const grid    = frame.getBlock("grid");
+/// const total   = grid.copyColF("total");
+/// ```
+#[wasm_bindgen(js_name = CHGCARReader)]
+pub struct ChgcarReader {
+    content: Vec<u8>,
+    cached_len: Option<usize>,
+}
+
+#[wasm_bindgen(js_class = CHGCARReader)]
+impl ChgcarReader {
+    /// Create a new CHGCAR reader from the file's text content.
+    #[wasm_bindgen(constructor)]
+    pub fn new(content: &str) -> ChgcarReader {
+        ChgcarReader {
+            content: content.as_bytes().to_vec(),
+            cached_len: None,
+        }
+    }
+
+    /// Read the frame at `step`. CHGCAR is single-frame.
+    ///
+    /// # Errors
+    ///
+    /// Throws a `JsValue` string on parse errors.
+    #[wasm_bindgen]
+    pub fn read(&mut self, step: usize) -> Result<Option<Frame>, JsValue> {
+        if step > 0 {
+            return Ok(None);
+        }
+        let reader = BufReader::new(Cursor::new(self.content.as_slice()));
+        let rs_frame = read_chgcar_from_reader(reader)
+            .map_err(|e| JsValue::from_str(&format!("CHGCAR read error: {}", e)))?;
+        Ok(Some(Frame::from_rs(rs_frame)?))
+    }
+
+    #[wasm_bindgen]
+    pub fn len(&mut self) -> Result<usize, JsValue> {
+        if let Some(n) = self.cached_len {
+            return Ok(n);
+        }
+        let n = if self.read(0)?.is_some() { 1 } else { 0 };
+        self.cached_len = Some(n);
+        Ok(n)
+    }
+
     #[wasm_bindgen(js_name = isEmpty)]
     pub fn is_empty(&mut self) -> Result<bool, JsValue> {
         Ok(self.len()? == 0)
