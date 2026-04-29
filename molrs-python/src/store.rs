@@ -7,8 +7,6 @@
 //! This module only re-exports the alias and maps FFI errors onto
 //! Python exceptions.
 
-pub(crate) use molrs_ffi::SharedStore;
-
 use molrs_ffi::FfiError;
 use pyo3::exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;

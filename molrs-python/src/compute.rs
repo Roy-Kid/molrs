@@ -199,7 +199,7 @@ pub struct PyMSDResult {
 impl PyMSDResult {
     #[getter]
     fn mean(&self) -> f64 {
-        self.inner.mean as f64
+        self.inner.mean
     }
 
     #[getter]
@@ -313,7 +313,7 @@ impl PyMSD {
 // ---------------------------------------------------------------------------
 
 /// Per-frame cluster assignment.
-#[pyclass(name = "ClusterResult", unsendable)]
+#[pyclass(name = "ClusterResult", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyClusterResult {
     pub(crate) inner: ClusterResult,
@@ -406,7 +406,7 @@ impl PyCluster {
 // ---------------------------------------------------------------------------
 
 /// Geometric cluster centers for a single frame.
-#[pyclass(name = "ClusterCentersResult", unsendable)]
+#[pyclass(name = "ClusterCentersResult", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyClusterCentersResult {
     pub(crate) inner: ClusterCentersResult,
@@ -507,7 +507,7 @@ impl PyClusterCenters {
 // ---------------------------------------------------------------------------
 
 /// Per-frame mass-weighted cluster centers and total cluster masses.
-#[pyclass(name = "CenterOfMassResult", unsendable)]
+#[pyclass(name = "CenterOfMassResult", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyCenterOfMassResult {
     pub(crate) inner: COMResult,
@@ -876,7 +876,7 @@ impl PyRadiusOfGyration {
 ///
 /// Wrap each row (a 1-D float array) with `DescriptorRow(row)`; then pass a
 /// Python list of them to ``Pca2.compute`` / ``KMeans.compute``.
-#[pyclass(name = "DescriptorRow", unsendable)]
+#[pyclass(name = "DescriptorRow", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyDescriptorRow {
     row: Vec<F>,
@@ -904,7 +904,7 @@ impl molrs_compute::DescriptorRow for PyDescriptorRow {
 }
 
 /// Two-component PCA result.
-#[pyclass(name = "PcaResult", unsendable)]
+#[pyclass(name = "PcaResult", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyPcaResult {
     pub(crate) inner: PcaResult,

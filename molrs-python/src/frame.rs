@@ -56,7 +56,7 @@ use pyo3::types::PyDict;
 /// )
 /// grid['electron_density'] = np.ones((4, 4, 4), dtype=np.float32)
 /// ```
-#[pyclass(name = "Grid", unsendable)]
+#[pyclass(name = "Grid", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyGrid {
     pub(crate) inner: CoreGrid,
