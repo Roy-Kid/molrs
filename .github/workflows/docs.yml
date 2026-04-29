@@ -1,0 +1,95 @@
+name: Docs
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Create docs virtualenv
+        run: |
+          python -m venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
+
+      - name: Install Python docs dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install maturin numpy zensical mkdocstrings mkdocstrings-python
+
+      - name: Install wasm-pack and TypeDoc
+        run: |
+          cargo install wasm-pack
+          npm install --global typedoc
+
+      - name: Check Python stub exports
+        run: python scripts/check-python-stub-exports.py
+
+      - name: Install local Python binding for mkdocstrings
+        run: maturin develop -m molrs-python/Cargo.toml
+
+      - name: Build WASM package declarations
+        working-directory: molrs-wasm
+        run: wasm-pack build --release --target bundler --scope molcrafts --out-name molrs
+
+      - name: Validate generated TypeScript declarations
+        run: |
+          test -f molrs-wasm/pkg/molrs.d.ts
+          grep -q "/**" molrs-wasm/pkg/molrs.d.ts
+
+      - name: Build Zensical site
+        run: zensical build -f docs/zensical.toml --clean --strict
+
+      - name: Build WASM TypeDoc fallback reference
+        run: |
+          rm -rf docs/site/reference/wasm
+          typedoc --entryPoints molrs-wasm/pkg/molrs.d.ts --out docs/site/reference/wasm --skipErrorChecking
+
+      - name: Check Python reference anchors
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          html = Path("docs/site/reference/python/index.html").read_text(encoding="utf-8")
+          names = ["Frame", "Block", "Box", "Atomistic", "RDF", "MSD", "Cluster"]
+          missing = [name for name in names if name not in html]
+          if missing:
+              raise SystemExit(f"missing Python reference names: {missing}")
+          PY
+
+      - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.repository == 'MolCrafts/molrs'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/site
