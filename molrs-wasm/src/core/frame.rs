@@ -358,6 +358,29 @@ impl Frame {
             .unwrap_or_default()
     }
 
+    /// Return the names of all blocks attached to this frame.
+    ///
+    /// Iteration order matches the underlying `HashMap` and is therefore
+    /// not stable across runs — callers that need a deterministic order
+    /// must sort on the JS side. Returns an empty array if the frame
+    /// has been dropped.
+    ///
+    /// # Example (JavaScript)
+    ///
+    /// ```js
+    /// const names = frame.blockNames(); // e.g. ["atoms", "bonds"]
+    /// ```
+    #[wasm_bindgen(js_name = blockNames)]
+    pub fn block_names(&self) -> Vec<String> {
+        self.inner
+            .store
+            .borrow()
+            .with_frame(self.inner.id, |frame| {
+                frame.keys().map(|k| k.to_string()).collect::<Vec<String>>()
+            })
+            .unwrap_or_default()
+    }
+
     /// Set a per-frame metadata value.
     ///
     /// Stores `value` as the string backing for `name` on `frame.meta`.
