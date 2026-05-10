@@ -41,7 +41,8 @@ permissions:
 #   ci ────────────────────┤                ├─ publish-ff       ├─ publish-facade
 #      │                   │                └─ publish-embed ───┘
 #      ├─ publish-wasm
-#      └─ publish-python  (maturin publish, manylinux, trusted publishing)
+#      └─ build-python (matrix: linux, macos)  ─→  publish-python
+#         (maturin build per-runner → trusted publishing via gh-action-pypi-publish)
 #
 # Notes:
 #   - molrs-smiles was folded into molrs-io::smiles in v0.0.13; no longer
@@ -219,34 +220,57 @@ jobs:
           fi
 
   # ── Python (PyPI trusted publishing via maturin) ────────────────────────────
+  #
+  # Two-stage layout:
+  #   build-python  — matrix over (linux, macos), each runner produces its own
+  #                   wheel into a per-runner artifact. Single Python (3.13).
+  #   publish-python — downloads every artifact, hands the merged dist/ to
+  #                   pypa/gh-action-pypi-publish via Trusted Publishing.
+  #                   `skip-existing: true` makes a partial republish safe.
+
+  build-python:
+    needs: ci
+    if: github.repository == 'MolCrafts/molrs'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            args: --release --out dist --interpreter python3.13
+          - os: macos-latest
+            args: --release --out dist --interpreter python3.13 --target universal2-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: molrs-python
+          manylinux: auto
+          command: build
+          args: ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: molrs-python/dist
 
   publish-python:
-    needs: ci
+    needs: build-python
     if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Read python package version
-        id: pyver
-        run: |
-          set -euo pipefail
-          VERSION=$(grep -E '^version' molrs-python/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-      - name: Skip if molrs already on PyPI at this version
-        id: skip
-        run: |
-          set -euo pipefail
-          if curl -sfI "https://pypi.org/pypi/molrs/${{ steps.pyver.outputs.version }}/json" >/dev/null; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "✓ molrs ${{ steps.pyver.outputs.version }} already on PyPI; skipping"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.skip.outputs.skip != 'true'
-        uses: PyO3/maturin-action@v1
+      - uses: actions/download-artifact@v4
         with:
-          command: publish
-          working-directory: molrs-python
-          args: --no-sdist --find-interpreter
-          manylinux: auto
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
