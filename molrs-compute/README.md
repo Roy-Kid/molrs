@@ -1,21 +1,14 @@
 # molcrafts-molrs-compute
 
-Trajectory analysis for molrs: RDF, MSD, clustering, gyration / inertia tensors, PCA, k-means — built around a single unified `Compute` trait and a lightweight typed DAG.
+Trajectory analysis for molrs: RDF, MSD, clustering, gyration / inertia tensors,
+PCA, k-means — built around a single unified `Compute` trait.
 
 ## Core ideas
 
-```text
-         ┌────────────┐
-frames ──┤            │
-         │            ├──▶ Cluster ──┬──▶ COM ──┬──▶ Rg
-nlists ──┤   Graph    │              │         │
-         │            │              │         └──▶ Inertia
-masses ──┤            │              │
-         │            │              └──▶ GyrationTensor
-         └────────────┘
-```
-
-1. **`Compute`** — every analysis implements this trait:
+1. **`Compute`** — every analysis implements this trait. `&self` is an
+   immutable parameter bag; two `compute` calls with identical `frames` +
+   `args` always produce identical output. No hidden state, no interior
+   mutability.
 
    ```rust
    pub trait Compute {
@@ -29,74 +22,52 @@ masses ──┤            │              │
    }
    ```
 
-   A single frame is a length-1 slice. A trajectory is a longer slice. A dataset is still just a slice. Each impl decides how to interpret it.
+   A single frame is a length-1 slice. A trajectory is a longer slice. A
+   dataset is still just a slice. Each impl decides how to interpret it.
 
-2. **`Graph` / `Slot` / `Store`** — compose `Compute` nodes into a typed DAG. Each node runs exactly once per `run`, even if many downstream consumers share it (Cluster feeds Rg, Inertia, and Gyration? Cluster runs once).
+2. **`ComputeResult`** — every output implements it; accumulating outputs
+   override `finalize` to normalize. Callers should invoke `finalize` after
+   `compute` to obtain the user-facing final form.
 
-3. **`ComputeResult`** — every output implements it; accumulating outputs override `finalize` to normalize. `Graph::run` calls `finalize` on each node's output once before inserting it into the `Store`.
+3. **`DescriptorRow`** — flatten any Compute output into `&[F]` rows so PCA
+   and k-means can consume arbitrary upstream per-frame outputs as a matrix.
 
-4. **`DescriptorRow`** — flatten any Compute output into `&[F]` rows so PCA and k-means can consume arbitrary upstream per-frame outputs as a matrix.
+## Stateless `Compute` — orchestrate from the caller
 
-No `Accumulator`, no `Reducer`. No hidden state in any `Compute`. No free functions pretending not to be Compute nodes.
+Every analysis kernel in this crate is stateless. DAG orchestration
+(topological order, diamond reuse, external input validation) belongs to the
+caller. On the Python side, `molpy.compute.Workflow` does exactly that — it
+composes `Compute` nodes via Python's stdlib `graphlib`, calls each Rust
+kernel directly, and never touches any Rust-side Graph.
+
+See the **[MolPy Workflow tutorial](https://molcrafts.github.io/molpy/tutorials/workflow/)**
+for end-to-end examples (NeighborList → RDF, diamond reuse, cycle detection).
+
+No `Accumulator`, no `Reducer`. No hidden state in any `Compute`. No free
+functions pretending not to be Compute nodes.
 
 ## Usage
 
-### Single-frame
+### Direct call — single analysis
 
 ```rust
 use molrs::Frame;
 use molrs::neighbors::{NeighborList, NeighborQuery};
-use molrs_compute::{Graph, Inputs, RDF};
+use molrs_compute::RDF;
 
-let mut g = Graph::<Frame>::new();
-let nlists = g.input::<Vec<NeighborList>>();
-let rdf_slot = g.add(RDF::new(40, 5.0, 0.0)?, move |s| s.get(nlists));
-
-let frame: Frame = /* ... */;
-let nlist: NeighborList = /* ... */;
-let store = g.run(&[&frame], Inputs::new().with(nlists, vec![nlist]))?;
-let rdf = store.get(rdf_slot);
-println!("{:?}", rdf.rdf);
+let rdf = RDF::new(40, 5.0, 0.0)?;
+let result = rdf.compute(&[&frame], &vec![nlist])?;
+println!("{:?}", result.rdf);
 ```
 
-### Diamond reuse — shared intermediates run once
+### Chaining — caller wires outputs to inputs
 
 ```rust
-use molrs_compute::{
-    Cluster, CenterOfMass, ClusterCenters,
-    GyrationTensor, InertiaTensor, RadiusOfGyration,
-    Graph, Inputs,
-};
+use molrs_compute::{Cluster, CenterOfMass, RadiusOfGyration};
 
-let mut g = Graph::<Frame>::new();
-let nlists = g.input::<Vec<NeighborList>>();
-
-let clusters = g.add(Cluster::new(1),        move |s| s.get(nlists));
-let com      = g.add(CenterOfMass::new(),    move |s| s.get(clusters));
-let centers  = g.add(ClusterCenters::new(),  move |s| s.get(clusters));
-
-let rg       = g.add(RadiusOfGyration::new(), move |s| (s.get(clusters), s.get(com)));
-let inertia  = g.add(InertiaTensor::new(),    move |s| (s.get(clusters), s.get(com)));
-let gyration = g.add(GyrationTensor::new(),   move |s| (s.get(clusters), s.get(centers)));
-
-// One run. Cluster runs once, COM runs once, ClusterCenters runs once.
-let store = g.run(&frames, Inputs::new().with(nlists, per_frame_nlists))?;
-```
-
-### PCA + k-means on a dataset
-
-```rust
-use molrs_compute::{Graph, Inputs, RadiusOfGyration, Cluster, CenterOfMass, Pca2, KMeans};
-
-let mut g = Graph::<Frame>::new();
-let nlists = g.input::<Vec<NeighborList>>();
-let clusters = g.add(Cluster::new(1),     move |s| s.get(nlists));
-let com      = g.add(CenterOfMass::new(), move |s| s.get(clusters));
-let rg       = g.add(RadiusOfGyration::new(), move |s| (s.get(clusters), s.get(com)));
-
-// PCA consumes per-frame descriptor rows. `RgResult` impls `DescriptorRow`.
-let pca    = g.add(Pca2::<molrs_compute::RgResult>::new(), move |s| s.get(rg));
-let labels = g.add(KMeans::new(3, 100, 42)?, move |s| s.get(pca));
+let clusters = Cluster::new(1).compute(&frames, &nlists)?;
+let com = CenterOfMass::new().compute(&frames, &clusters)?;
+let rg = RadiusOfGyration::new().compute(&frames, (&clusters, &com))?;
 ```
 
 ## Available analyses
@@ -120,12 +91,6 @@ let labels = g.add(KMeans::new(3, 100, 42)?, move |s| s.get(pca));
 cargo test -p molcrafts-molrs-compute
 cargo bench -p molcrafts-molrs-compute
 ```
-
-Integration tests in `tests/graph_tests.rs` verify:
-
-- Diamond reuse: Cluster + COM + ClusterCenters each run exactly once when three leaves (Rg, Inertia, Gyration) depend on them.
-- Node errors are wrapped in `ComputeError::Node { node_id, source }`.
-- Missing inputs return `ComputeError::MissingInput`.
 
 ## Benchmarks
 
@@ -151,8 +116,7 @@ benches/
 ├── gyration_tensor.rs
 ├── inertia_tensor.rs
 ├── radius_of_gyration.rs
-├── msd.rs
-└── graph.rs                 # graph/diamond + graph/single_node_rdf gates
+└── msd.rs
 ```
 
 Narrow to a single kernel or axis:
@@ -162,8 +126,3 @@ cargo bench -p molcrafts-molrs-compute -- rdf
 cargo bench -p molcrafts-molrs-compute -- cluster/frame_sweep
 cargo bench -p molcrafts-molrs-compute -- gyration_tensor/size_sweep/50000
 ```
-
-`graph.rs` keeps two separate perf gates (not part of the per-kernel sweep):
-
-- Graph diamond vs. manual cascade ≤ 0.7× (sharing actually pays off).
-- Graph single-node vs. direct call ≤ 1.05× (Graph overhead bound).

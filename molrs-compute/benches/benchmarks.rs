@@ -1,7 +1,6 @@
 mod center_of_mass;
 mod cluster;
 mod cluster_centers;
-mod graph;
 mod gyration_tensor;
 mod helpers;
 mod inertia_tensor;
@@ -20,5 +19,4 @@ criterion_main!(
     gyration_tensor::benches,
     inertia_tensor::benches,
     radius_of_gyration::benches,
-    graph::benches,
 );
