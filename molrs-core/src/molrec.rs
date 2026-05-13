@@ -8,7 +8,6 @@ use serde_json::{Map as JsonMap, Value as JsonValue};
 use crate::MolRsError;
 use crate::block::Column;
 use crate::frame::Frame;
-use crate::grid::Grid;
 use crate::types::F;
 
 /// Hierarchical schema node used by `meta`, `method`, and `parameters`.
@@ -81,7 +80,6 @@ impl Trajectory {
 pub enum ObservableKind {
     Scalar,
     Vector,
-    Grid,
 }
 
 /// Raw observable payload.
@@ -89,8 +87,6 @@ pub enum ObservableKind {
 pub enum ObservableData {
     /// Typed ndarray-style data.
     Column(Column),
-    /// Volumetric grid data.
-    Grid(Grid),
 }
 
 /// Named observable with semantic metadata.
@@ -144,29 +140,10 @@ impl ObservableRecord {
         }
     }
 
-    /// Build a grid observable.
-    pub fn grid(name: impl Into<String>, grid: Grid) -> Self {
-        Self {
-            name: name.into(),
-            kind: ObservableKind::Grid,
-            description: String::new(),
-            time_dependent: false,
-            unit: None,
-            axes: Vec::new(),
-            sampling: None,
-            domain: None,
-            target: None,
-            extra: JsonMap::new(),
-            data: ObservableData::Grid(grid),
-        }
-    }
-
     /// Validate the observable payload against the declared kind.
     pub fn validate(&self) -> Result<(), MolRsError> {
         match (&self.kind, &self.data) {
             (ObservableKind::Scalar | ObservableKind::Vector, ObservableData::Column(_)) => Ok(()),
-            (ObservableKind::Grid, ObservableData::Grid(_)) => Ok(()),
-            _ => Err(MolRsError::validation("observable kind/data mismatch")),
         }
     }
 }
