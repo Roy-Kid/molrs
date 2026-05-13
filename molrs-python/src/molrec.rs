@@ -21,7 +21,7 @@ use pyo3::types::{PyAny, PyDict, PyList};
 use serde_json::{Map as JsonMap, Number as JsonNumber, Value as JsonValue};
 
 use crate::forcefield::PyForceField;
-use crate::frame::{PyFrame, PyGrid};
+use crate::frame::PyFrame;
 use crate::helpers::{NpF, molrs_error_to_pyerr};
 
 #[pyclass(name = "Trajectory", unsendable, from_py_object)]
@@ -51,12 +51,6 @@ pub struct PyScalarObservable {
 #[pyclass(name = "VectorObservable", unsendable, from_py_object)]
 #[derive(Clone)]
 pub struct PyVectorObservable {
-    pub(crate) inner: ObservableRecord,
-}
-
-#[pyclass(name = "GridObservable", unsendable, from_py_object)]
-#[derive(Clone)]
-pub struct PyGridObservable {
     pub(crate) inner: ObservableRecord,
 }
 
@@ -336,36 +330,6 @@ impl PyObservables {
             .add_observable(observable.inner.clone());
         Ok(observable)
     }
-
-    #[pyo3(signature = (name, grid, description="", unit=None, axes=None, time_dependent=false, sampling=None, domain=None, target=None))]
-    fn add_grid(
-        &self,
-        name: &str,
-        grid: &PyGrid,
-        description: &str,
-        unit: Option<String>,
-        axes: Option<Vec<String>>,
-        time_dependent: bool,
-        sampling: Option<String>,
-        domain: Option<String>,
-        target: Option<String>,
-    ) -> PyResult<PyGridObservable> {
-        let observable = PyGridObservable::new_impl(
-            name,
-            grid,
-            description,
-            unit,
-            axes,
-            time_dependent,
-            sampling,
-            domain,
-            target,
-        )?;
-        self.inner
-            .borrow_mut()
-            .add_observable(observable.inner.clone());
-        Ok(observable)
-    }
 }
 
 #[pymethods]
@@ -456,50 +420,6 @@ impl PyVectorObservable {
     }
 }
 
-#[pymethods]
-impl PyGridObservable {
-    #[new]
-    #[pyo3(signature = (name, grid, description="", unit=None, axes=None, time_dependent=false, sampling=None, domain=None, target=None))]
-    fn new(
-        name: &str,
-        grid: &PyGrid,
-        description: &str,
-        unit: Option<String>,
-        axes: Option<Vec<String>>,
-        time_dependent: bool,
-        sampling: Option<String>,
-        domain: Option<String>,
-        target: Option<String>,
-    ) -> PyResult<Self> {
-        Self::new_impl(
-            name,
-            grid,
-            description,
-            unit,
-            axes,
-            time_dependent,
-            sampling,
-            domain,
-            target,
-        )
-    }
-
-    #[getter]
-    fn name(&self) -> String {
-        self.inner.name.clone()
-    }
-
-    #[getter]
-    fn data<'py>(&self, py: Python<'py>) -> PyResult<Py<PyAny>> {
-        observable_data_to_pyobject(py, &self.inner.data)
-    }
-
-    #[getter]
-    fn kind(&self) -> &'static str {
-        "grid"
-    }
-}
-
 impl PyScalarObservable {
     fn new_impl(
         name: &str,
@@ -554,33 +474,6 @@ impl PyVectorObservable {
     }
 }
 
-impl PyGridObservable {
-    fn new_impl(
-        name: &str,
-        grid: &PyGrid,
-        description: &str,
-        unit: Option<String>,
-        axes: Option<Vec<String>>,
-        time_dependent: bool,
-        sampling: Option<String>,
-        domain: Option<String>,
-        target: Option<String>,
-    ) -> PyResult<Self> {
-        let mut inner = ObservableRecord::grid(name, grid.inner.clone());
-        apply_common_metadata(
-            &mut inner,
-            description,
-            unit,
-            axes,
-            time_dependent,
-            sampling,
-            domain,
-            target,
-        );
-        Ok(Self { inner })
-    }
-}
-
 fn apply_common_metadata(
     observable: &mut ObservableRecord,
     description: &str,
@@ -607,11 +500,8 @@ fn extract_observable(observable: &Bound<'_, PyAny>) -> PyResult<ObservableRecor
     if let Ok(observable) = observable.extract::<PyRef<'_, PyVectorObservable>>() {
         return Ok(observable.inner.clone());
     }
-    if let Ok(observable) = observable.extract::<PyRef<'_, PyGridObservable>>() {
-        return Ok(observable.inner.clone());
-    }
     Err(PyTypeError::new_err(
-        "expected ScalarObservable, VectorObservable, or GridObservable",
+        "expected ScalarObservable or VectorObservable",
     ))
 }
 
@@ -751,25 +641,12 @@ fn observable_to_pyobject(py: Python<'_>, observable: ObservableRecord) -> PyRes
             .into_bound(py)
             .into_any()
             .unbind()),
-        ObservableKind::Grid => Ok(Py::new(py, PyGridObservable { inner: observable })?
-            .into_bound(py)
-            .into_any()
-            .unbind()),
     }
 }
 
 fn observable_data_to_pyobject(py: Python<'_>, data: &ObservableData) -> PyResult<Py<PyAny>> {
     match data {
         ObservableData::Column(column) => column_to_pyobject(py, column),
-        ObservableData::Grid(grid) => Ok(Py::new(
-            py,
-            PyGrid {
-                inner: grid.clone(),
-            },
-        )?
-        .into_bound(py)
-        .into_any()
-        .unbind()),
     }
 }
 

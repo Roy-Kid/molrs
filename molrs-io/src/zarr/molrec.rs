@@ -20,11 +20,9 @@ use zarrs::node::{Node, NodeMetadata};
 use zarrs::storage::ReadableWritableListableStorage;
 
 #[cfg(not(feature = "filesystem"))]
-use crate::zarr::frame_io::{join_path, read_column, read_grid, read_system};
+use crate::zarr::frame_io::{join_path, read_column, read_system};
 #[cfg(feature = "filesystem")]
-use crate::zarr::frame_io::{
-    join_path, read_column, read_grid, read_system, write_column, write_grid, write_system,
-};
+use crate::zarr::frame_io::{join_path, read_column, read_system, write_column, write_system};
 use molrs::MolRsError;
 use molrs::frame::Frame;
 use molrs::molrec::{MolRec, ObservableData, ObservableKind, ObservableRecord, Trajectory};
@@ -319,7 +317,6 @@ fn write_observable(
         JsonValue::String(match observable.kind {
             ObservableKind::Scalar => "scalar".into(),
             ObservableKind::Vector => "vector".into(),
-            ObservableKind::Grid => "grid".into(),
         }),
     );
     attrs.insert(
@@ -358,7 +355,6 @@ fn write_observable(
 
     match &observable.data {
         ObservableData::Column(column) => write_column(store, &format!("{}/data", path), column)?,
-        ObservableData::Grid(grid) => write_grid(store, &format!("{}/data", path), grid)?,
     }
 
     Ok(())
@@ -377,7 +373,6 @@ fn read_observable(
     {
         "scalar" => ObservableKind::Scalar,
         "vector" => ObservableKind::Vector,
-        "grid" => ObservableKind::Grid,
         other => {
             return Err(MolRsError::zarr(format!(
                 "unsupported observable kind '{}'",
@@ -406,11 +401,7 @@ fn read_observable(
         .unwrap_or_default();
 
     let data_path = format!("{}/data", path);
-    let data = if kind == ObservableKind::Grid {
-        ObservableData::Grid(read_grid(store, &data_path)?)
-    } else {
-        ObservableData::Column(read_column(store, &data_path)?)
-    };
+    let data = ObservableData::Column(read_column(store, &data_path)?);
 
     Ok(ObservableRecord {
         name: attrs
@@ -523,22 +514,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use molrs::grid::Grid;
 
     #[test]
-    fn molrec_store_roundtrip_preserves_grid_in_frame() {
+    fn molrec_store_roundtrip_preserves_frame() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("record.zarr");
 
         let mut frame = Frame::new();
-        let mut grid = Grid::new(
-            [2, 2, 2],
-            [0.0; 3],
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            [false; 3],
-        );
-        grid.insert("density", vec![0.1; 8]).unwrap();
-        frame.insert_grid("electron_density", grid);
+        frame.meta.insert("key".into(), "value".into());
 
         let mut rec = MolRec::new(frame);
         rec.meta = serde_json::json!({"version": [0, 2]});
@@ -546,7 +529,7 @@ mod tests {
 
         write_molrec_file(&path, &rec).unwrap();
         let loaded = read_molrec_file(&path).unwrap();
-        assert!(loaded.frame.has_grid("electron_density"));
+        assert_eq!(loaded.frame.meta.get("key").unwrap(), "value");
         assert_eq!(loaded.method["type"], "workflow");
     }
 }
