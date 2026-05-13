@@ -52,6 +52,7 @@
 pub mod center_of_mass;
 pub mod cluster;
 pub mod cluster_centers;
+pub mod dielectric;
 pub mod error;
 pub mod gyration_tensor;
 pub mod inertia_tensor;
@@ -68,6 +69,10 @@ pub mod util;
 pub use center_of_mass::{COMResult, CenterOfMass};
 pub use cluster::{Cluster, ClusterResult};
 pub use cluster_centers::{ClusterCenters, ClusterCentersResult};
+pub use dielectric::{
+    DielectricSpectrum, compute_current_density, compute_dipole_moment, decompose_current,
+    einstein_helfand_spectrum, green_kubo_spectrum, static_dielectric_constant,
+};
 pub use error::ComputeError;
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};

@@ -617,6 +617,7 @@ name = "molcrafts-molrs-compute"
 version = "0.0.16"
 dependencies = [
  "molcrafts-molrs-core",
+ "molcrafts-molrs-signal",
  "ndarray",
  "rand",
  "rustfft",

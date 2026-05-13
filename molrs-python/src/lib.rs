@@ -66,6 +66,7 @@ use compute::{
     PyRadiusOfGyration,
 };
 
+mod dielectric;
 mod signal;
 
 /// Root Python module for the molrs library.
@@ -158,6 +159,9 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(signal::signal_acf_fft, m)?)?;
     m.add_function(wrap_pyfunction!(signal::signal_apply_window, m)?)?;
     m.add_function(wrap_pyfunction!(signal::signal_frequency_grid, m)?)?;
+
+    // Dielectric
+    dielectric::register_dielectric(m)?;
 
     Ok(())
 }

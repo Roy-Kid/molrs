@@ -881,6 +881,7 @@ version = "0.0.16"
 dependencies = [
  "criterion",
  "molcrafts-molrs-core",
+ "molcrafts-molrs-signal",
  "ndarray",
  "rand 0.9.2",
  "rayon",
