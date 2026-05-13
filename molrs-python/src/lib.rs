@@ -39,14 +39,12 @@ mod block;
 use block::PyBlock;
 
 mod frame;
-use frame::{PyFrame, PyGrid};
+use frame::PyFrame;
 
 mod io;
 
 mod molrec;
-use molrec::{
-    PyGridObservable, PyMolRec, PyObservables, PyScalarObservable, PyTrajectory, PyVectorObservable,
-};
+use molrec::{PyMolRec, PyObservables, PyScalarObservable, PyTrajectory, PyVectorObservable};
 
 mod region;
 use region::{PyHollowSphere, PyRegion, PySphere};
@@ -80,10 +78,9 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyNeighborQuery>()?;
     m.add_class::<PyNeighborList>()?;
 
-    // Block + Frame + Grid
+    // Block + Frame
     m.add_class::<PyBlock>()?;
     m.add_class::<PyFrame>()?;
-    m.add_class::<PyGrid>()?;
 
     // I/O + SMILES
     // Readers
@@ -111,7 +108,6 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyObservables>()?;
     m.add_class::<PyScalarObservable>()?;
     m.add_class::<PyVectorObservable>()?;
-    m.add_class::<PyGridObservable>()?;
 
     // Regions
     m.add_class::<PySphere>()?;

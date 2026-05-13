@@ -20,11 +20,11 @@ use crate::result::ComputeResult;
 ///   No hidden mutable state — two `compute` calls with identical `frames` +
 ///   `args` must produce identical [`Output`](Self::Output) values.
 /// - `Output` is always [`'static`](::std::marker::Send) +
-///   [`Send`] + [`Sync`] + [`Clone`]: it must be movable into a
-///   [`Store`](crate::Store) and shareable across downstream Compute nodes.
-/// - `Output: ComputeResult` — [`Graph::run`](crate::Graph) calls
-///   [`finalize`](ComputeResult::finalize) once per node before insertion, so
-///   the returned value is always in its user-facing final form.
+///   [`Send`] + [`Sync`] + [`Clone`]: it must be shareable across
+///   downstream consumers.
+/// - `Output: ComputeResult` — callers should invoke
+///   [`finalize`](ComputeResult::finalize) after `compute` to obtain
+///   the user-facing final form.
 ///
 /// # Example (conceptual)
 ///

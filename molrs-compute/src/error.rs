@@ -2,7 +2,10 @@ use std::fmt;
 
 use molrs::MolRsError;
 
-use crate::graph::NodeId;
+/// Node identifier (formerly from `crate::graph`, now defined locally
+/// since the graph module is decoupled from the crate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeId(pub u32);
 
 /// Error type for compute operations.
 #[derive(Debug)]

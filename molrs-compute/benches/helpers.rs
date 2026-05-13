@@ -143,8 +143,10 @@ pub fn build_deps(frames: &[&Frame], nlists: &Vec<NeighborList>) -> Deps {
 
 // --- legacy narrow-bench fixtures (kept for graph benches) ---------------
 
+#[allow(dead_code)]
 pub const BOX_SIZE: F = 30.0;
 
+#[allow(dead_code)]
 pub fn pbc_simbox(size: F) -> SimBox {
     SimBox::cube(
         size,
@@ -163,6 +165,7 @@ pub struct Fixture {
     pub nlist: NeighborList,
 }
 
+#[allow(dead_code)]
 pub fn fixture(n: usize, seed: u64) -> Fixture {
     let positions = random_positions(n, BOX_SIZE, seed);
     let simbox = pbc_simbox(BOX_SIZE);

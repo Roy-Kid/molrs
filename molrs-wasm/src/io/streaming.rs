@@ -24,7 +24,7 @@
 //! # JS lifetime contract
 //!
 //! Every numeric pointer returned from this module (input buffer,
-//! column data, grid array data) lives inside WASM linear memory.
+//! column data) lives inside WASM linear memory.
 //! `WebAssembly.Memory` may grow on any wasm-bindgen call, which
 //! detaches the previous `ArrayBuffer`. Therefore **callers MUST
 //! re-derive `new <Typed>Array(memory.buffer, ptr, len)` immediately
@@ -107,17 +107,11 @@ impl From<RsFrameIndexEntry> for WasmFrameIndexEntry {
 #[derive(Default)]
 struct FrameIndex {
     blocks: Vec<BlockIndex>,
-    grids: Vec<GridIndex>,
 }
 
 struct BlockIndex {
     name: String,
     columns: Vec<String>,
-}
-
-struct GridIndex {
-    name: String,
-    arrays: Vec<String>,
 }
 
 impl FrameIndex {
@@ -135,20 +129,7 @@ impl FrameIndex {
             .collect();
         blocks.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let mut grids: Vec<GridIndex> = frame
-            .grids()
-            .map(|(name, grid)| {
-                let mut arrays: Vec<String> = grid.keys().map(|k| k.to_string()).collect();
-                arrays.sort();
-                GridIndex {
-                    name: name.to_string(),
-                    arrays,
-                }
-            })
-            .collect();
-        grids.sort_by(|a, b| a.name.cmp(&b.name));
-
-        Self { blocks, grids }
+        Self { blocks }
     }
 }
 
@@ -345,7 +326,7 @@ macro_rules! impl_wasm_traj_stream {
             }
 
             /// Drop the cached output frame, releasing its memory and
-            /// invalidating any outstanding `columnPtr*` / `gridArrayPtr*`
+            /// invalidating any outstanding `columnPtr*` pointers.
             /// pointers. Subsequent extraction calls return 0 / empty
             /// until the next `parseRangeInInput`.
             #[wasm_bindgen(js_name = releaseFrame)]
@@ -567,157 +548,6 @@ macro_rules! impl_wasm_traj_stream {
                 let sb = frame.simbox.as_ref()?;
                 let pbc = sb.pbc();
                 Some(vec![pbc[0] as u8, pbc[1] as u8, pbc[2] as u8])
-            }
-
-            // ---------- grids ----------
-
-            /// Number of named grids attached to the current frame.
-            #[wasm_bindgen(js_name = gridCount)]
-            pub fn grid_count(&self) -> usize {
-                self.output_index.grids.len()
-            }
-
-            /// Name of grid `gridIdx`, or empty string if out of range.
-            #[wasm_bindgen(js_name = gridName)]
-            pub fn grid_name(&self, grid_idx: usize) -> String {
-                self.output_index
-                    .grids
-                    .get(grid_idx)
-                    .map(|g| g.name.clone())
-                    .unwrap_or_default()
-            }
-
-            /// Grid dimensions `[nx, ny, nz]` as a length-3 `Uint32Array`.
-            #[wasm_bindgen(js_name = gridShape)]
-            pub fn grid_shape(&self, grid_idx: usize) -> Vec<u32> {
-                let Some(frame) = self.output.as_ref() else {
-                    return Vec::new();
-                };
-                let Some(meta) = self.output_index.grids.get(grid_idx) else {
-                    return Vec::new();
-                };
-                let Some(grid) = frame.get_grid(&meta.name) else {
-                    return Vec::new();
-                };
-                vec![grid.dim[0] as u32, grid.dim[1] as u32, grid.dim[2] as u32]
-            }
-
-            /// Grid origin (Cartesian, Å) as a length-3 `Float64Array`.
-            #[wasm_bindgen(js_name = gridOrigin)]
-            pub fn grid_origin(&self, grid_idx: usize) -> Vec<f64> {
-                let Some(frame) = self.output.as_ref() else {
-                    return Vec::new();
-                };
-                let Some(meta) = self.output_index.grids.get(grid_idx) else {
-                    return Vec::new();
-                };
-                let Some(grid) = frame.get_grid(&meta.name) else {
-                    return Vec::new();
-                };
-                grid.origin.to_vec()
-            }
-
-            /// Grid lattice cell as a length-9 `Float64Array` (column-major:
-            /// `[col0_x, col0_y, col0_z, col1_x, col1_y, col1_z, col2_x, col2_y, col2_z]`).
-            #[wasm_bindgen(js_name = gridCell)]
-            pub fn grid_cell(&self, grid_idx: usize) -> Vec<f64> {
-                let Some(frame) = self.output.as_ref() else {
-                    return Vec::new();
-                };
-                let Some(meta) = self.output_index.grids.get(grid_idx) else {
-                    return Vec::new();
-                };
-                let Some(grid) = frame.get_grid(&meta.name) else {
-                    return Vec::new();
-                };
-                // `cell[i]` is column i; flatten column-major.
-                let mut out = Vec::with_capacity(9);
-                for col in 0..3 {
-                    for row in 0..3 {
-                        out.push(grid.cell[col][row]);
-                    }
-                }
-                out
-            }
-
-            /// Grid PBC flags as a length-3 `Uint8Array` (`1` = periodic,
-            /// `0` = open).
-            #[wasm_bindgen(js_name = gridPbc)]
-            pub fn grid_pbc(&self, grid_idx: usize) -> Vec<u8> {
-                let Some(frame) = self.output.as_ref() else {
-                    return Vec::new();
-                };
-                let Some(meta) = self.output_index.grids.get(grid_idx) else {
-                    return Vec::new();
-                };
-                let Some(grid) = frame.get_grid(&meta.name) else {
-                    return Vec::new();
-                };
-                vec![grid.pbc[0] as u8, grid.pbc[1] as u8, grid.pbc[2] as u8]
-            }
-
-            /// Number of named scalar arrays in grid `gridIdx`.
-            #[wasm_bindgen(js_name = gridArrayCount)]
-            pub fn grid_array_count(&self, grid_idx: usize) -> usize {
-                self.output_index
-                    .grids
-                    .get(grid_idx)
-                    .map(|g| g.arrays.len())
-                    .unwrap_or(0)
-            }
-
-            /// Name of scalar array `(gridIdx, arrayIdx)`, or empty string
-            /// if either index is out of range.
-            #[wasm_bindgen(js_name = gridArrayName)]
-            pub fn grid_array_name(&self, grid_idx: usize, array_idx: usize) -> String {
-                self.output_index
-                    .grids
-                    .get(grid_idx)
-                    .and_then(|g| g.arrays.get(array_idx))
-                    .cloned()
-                    .unwrap_or_default()
-            }
-
-            /// Pointer to the contiguous `f64` slice backing the grid
-            /// scalar field, or 0 (null) if either index is out of range.
-            ///
-            /// **Lifetime**: valid only until the next non-trivial wasm
-            /// call. See the module-level memory-grow contract.
-            #[wasm_bindgen(js_name = gridArrayPtrF64)]
-            pub fn grid_array_ptr_f64(&self, grid_idx: usize, array_idx: usize) -> *const f64 {
-                let Some(frame) = self.output.as_ref() else {
-                    return std::ptr::null();
-                };
-                let Some(meta) = self.output_index.grids.get(grid_idx) else {
-                    return std::ptr::null();
-                };
-                let Some(name) = meta.arrays.get(array_idx) else {
-                    return std::ptr::null();
-                };
-                let Some(grid) = frame.get_grid(&meta.name) else {
-                    return std::ptr::null();
-                };
-                grid.get_raw(name)
-                    .map(|s| s.as_ptr())
-                    .unwrap_or(std::ptr::null())
-            }
-
-            /// Length (number of `f64` elements) of the grid scalar field.
-            #[wasm_bindgen(js_name = gridArrayLen)]
-            pub fn grid_array_len(&self, grid_idx: usize, array_idx: usize) -> usize {
-                let Some(frame) = self.output.as_ref() else {
-                    return 0;
-                };
-                let Some(meta) = self.output_index.grids.get(grid_idx) else {
-                    return 0;
-                };
-                let Some(name) = meta.arrays.get(array_idx) else {
-                    return 0;
-                };
-                let Some(grid) = frame.get_grid(&meta.name) else {
-                    return 0;
-                };
-                grid.get_raw(name).map(|s| s.len()).unwrap_or(0)
             }
         }
     };

@@ -1,8 +1,20 @@
 //! Analysis compute modules for molrs molecular simulation.
 //!
 //! Trajectory analysis (RDF, MSD, clustering, gyration/inertia, PCA,
-//! k-means) built around a single unified [`Compute`] trait and a
-//! lightweight typed DAG ([`Graph`] / [`Slot`] / [`Store`]).
+//! k-means) built around a single unified [`Compute`] trait.
+//! Every analysis is stateless — orchestrate from the caller.
+//!
+//! # Stateless `Compute` — orchestrate from the caller
+//!
+//! Each [`Compute`] impl is a pure function: `&self` is an immutable
+//! parameter bag. Two `compute` calls with identical `frames` + `args`
+//! always produce identical output. There is no hidden mutable state,
+//! no DAG, no store — just the trait and per-analysis modules.
+//!
+//! For DAG orchestration (topological order, diamond reuse, external
+//! input validation), use `molpy.compute.Workflow` on the Python side.
+//! It composes `Compute` nodes via Python's stdlib `graphlib` and
+//! calls each Rust kernel directly.
 //!
 //! # Unified trait
 //!
@@ -16,21 +28,11 @@
 //! - **Matrix consumers** (PCA, k-means) take upstream per-frame outputs as
 //!   rows (via [`DescriptorRow`]).
 //!
-//! # Graph
-//!
-//! [`Graph`] composes Compute nodes into a typed DAG. A [`Slot<T>`] returned
-//! by `add` flows a node's [`Output`](Compute::Output) into later nodes' `Args`.
-//! Execution is single-pass and insertion-ordered; each node runs exactly once
-//! per [`run`](Graph::run) even if many downstream consumers share it — the
-//! canonical diamond `Rg + Inertia + Gyration → COM → Cluster` runs `Cluster`
-//! and `COM` once, not three times.
-//!
 //! # Results
 //!
 //! Every Compute output implements [`ComputeResult`]. Accumulating outputs
 //! (RDF) override [`finalize`](ComputeResult::finalize) to normalize; other
-//! outputs use the default no-op. [`Graph::run`] calls `finalize` once per
-//! node before inserting into the [`Store`].
+//! outputs use the default no-op.
 //!
 //! # Available analyses
 //!
@@ -51,7 +53,6 @@ pub mod center_of_mass;
 pub mod cluster;
 pub mod cluster_centers;
 pub mod error;
-pub mod graph;
 pub mod gyration_tensor;
 pub mod inertia_tensor;
 pub mod kmeans;
@@ -68,7 +69,6 @@ pub use center_of_mass::{COMResult, CenterOfMass};
 pub use cluster::{Cluster, ClusterResult};
 pub use cluster_centers::{ClusterCenters, ClusterCentersResult};
 pub use error::ComputeError;
-pub use graph::{Graph, Inputs, NodeId, Slot, Store};
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
 pub use kmeans::{KMeans, KMeansResult};
