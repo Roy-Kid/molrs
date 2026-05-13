@@ -72,6 +72,7 @@ from . import io  # molpy-compatible I/O facade (read_lammps_data, …)
 
 __all__ = [
     "io",
+    "signal",
     "Box",
     "LinkedCell",
     "NeighborQuery",

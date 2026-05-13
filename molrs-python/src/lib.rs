@@ -66,6 +66,8 @@ use compute::{
     PyRadiusOfGyration,
 };
 
+mod signal;
+
 /// Root Python module for the molrs library.
 ///
 /// Registered classes and free functions are listed in the module-level
@@ -151,6 +153,11 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPcaResult>()?;
     m.add_class::<PyKMeans>()?;
     m.add_class::<PyKMeansResult>()?;
+
+    // Signal processing
+    m.add_function(wrap_pyfunction!(signal::signal_acf_fft, m)?)?;
+    m.add_function(wrap_pyfunction!(signal::signal_apply_window, m)?)?;
+    m.add_function(wrap_pyfunction!(signal::signal_frequency_grid, m)?)?;
 
     Ok(())
 }

@@ -953,6 +953,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "molcrafts-molrs-signal"
+version = "0.0.16"
+dependencies = [
+ "ndarray",
+ "rand 0.9.2",
+ "rustfft",
+]
+
+[[package]]
 name = "monostate"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

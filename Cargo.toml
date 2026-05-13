@@ -7,6 +7,7 @@ members = [
     "molrs-ff",
     "molrs-embed",
     "molrs-cxxapi",
+    "molrs-signal",
 ]
 resolver = "3"
 
@@ -29,6 +30,7 @@ molrs_compute = { path = "molrs-compute", version = "0.0.16", package = "molcraf
 molrs_ff      = { path = "molrs-ff",      version = "0.0.16", package = "molcrafts-molrs-ff" }
 molrs_embed   = { path = "molrs-embed",   version = "0.0.16", package = "molcrafts-molrs-embed" }
 molrs_cxxapi  = { path = "molrs-cxxapi",  version = "0.0.16", package = "molcrafts-molrs-cxxapi" }
+molrs_signal  = { path = "molrs-signal", version = "0.0.16", package = "molcrafts-molrs-signal" }
 
 [profile.release]
 lto = "thin"
