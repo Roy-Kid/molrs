@@ -4,16 +4,14 @@ from .molrs import (
     LinkedCell,
     NeighborQuery,
     NeighborList,
-    # Block + Frame + Grid
+    # Block + Frame
     Block,
     Frame,
-    Grid,
     Trajectory,
     MolRec,
     Observables,
     ScalarObservable,
     VectorObservable,
-    GridObservable,
     # I/O
     read_pdb,
     read_xyz,
@@ -85,8 +83,6 @@ __all__ = [
     "Observables",
     "ScalarObservable",
     "VectorObservable",
-    "GridObservable",
-    "Grid",
     "read_pdb",
     "read_xyz",
     "read_xyz_trajectory",
