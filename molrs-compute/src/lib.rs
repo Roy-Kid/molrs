@@ -78,7 +78,8 @@ pub use density::{
     LocalDensity, LocalDensityResult, SphereVoxelization, SphereVoxelizationResult,
 };
 pub use diffraction::{
-    StaticStructureFactorDebye, StaticStructureFactorDebyeResult, StaticStructureFactorDirect,
+    DiffractionPattern, DiffractionPatternResult, StaticStructureFactorDebye,
+    StaticStructureFactorDebyeResult, StaticStructureFactorDirect,
     StaticStructureFactorDirectResult,
 };
 pub use environment::{
