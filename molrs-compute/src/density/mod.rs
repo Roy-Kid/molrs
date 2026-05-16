@@ -16,7 +16,9 @@
 pub mod correlation_function;
 pub mod gaussian_density;
 pub mod local_density;
+pub mod sphere_voxelization;
 
 pub use correlation_function::{CorrelationFunction, CorrelationFunctionResult};
 pub use gaussian_density::{GaussianDensity, GaussianDensityResult};
 pub use local_density::{LocalDensity, LocalDensityResult};
+pub use sphere_voxelization::{SphereVoxelization, SphereVoxelizationResult};

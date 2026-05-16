@@ -74,7 +74,7 @@ pub use cluster::{Cluster, ClusterProperties, ClusterPropertiesResult, ClusterRe
 pub use cluster_centers::{ClusterCenters, ClusterCentersResult};
 pub use density::{
     CorrelationFunction, CorrelationFunctionResult, GaussianDensity, GaussianDensityResult,
-    LocalDensity, LocalDensityResult,
+    LocalDensity, LocalDensityResult, SphereVoxelization, SphereVoxelizationResult,
 };
 pub use diffraction::{StaticStructureFactorDebye, StaticStructureFactorDebyeResult};
 pub use environment::{
