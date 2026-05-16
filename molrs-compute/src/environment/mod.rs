@@ -15,6 +15,7 @@ pub mod angular_separation;
 pub mod bond_order;
 pub mod local_bond_projection;
 pub mod local_descriptors;
+pub mod match_env;
 
 pub use angular_separation::{
     AngularSeparationGlobal, AngularSeparationGlobalResult, AngularSeparationNeighbor,
@@ -23,3 +24,4 @@ pub use angular_separation::{
 pub use bond_order::{BondOrder, BondOrderResult};
 pub use local_bond_projection::{LocalBondProjection, LocalBondProjectionResult};
 pub use local_descriptors::{LocalDescriptors, LocalDescriptorsResult};
+pub use match_env::{MatchEnv, MatchEnvResult};

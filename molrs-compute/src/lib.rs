@@ -85,7 +85,7 @@ pub use diffraction::{
 pub use environment::{
     AngularSeparationGlobal, AngularSeparationGlobalResult, AngularSeparationNeighbor,
     AngularSeparationNeighborResult, BondOrder, BondOrderResult, LocalBondProjection,
-    LocalBondProjectionResult, LocalDescriptors, LocalDescriptorsResult,
+    LocalBondProjectionResult, LocalDescriptors, LocalDescriptorsResult, MatchEnv, MatchEnvResult,
 };
 pub use error::ComputeError;
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
