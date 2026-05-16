@@ -10,8 +10,10 @@
 
 pub mod hexatic;
 pub mod nematic;
+pub mod solid_liquid;
 pub mod steinhardt;
 
 pub use hexatic::{Hexatic, HexaticResult};
 pub use nematic::{Nematic, NematicResult};
+pub use solid_liquid::{SolidLiquid, SolidLiquidResult};
 pub use steinhardt::{Steinhardt, SteinhardtResult, compute_qlm};
