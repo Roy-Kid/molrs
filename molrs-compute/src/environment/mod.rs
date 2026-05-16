@@ -13,9 +13,13 @@
 
 pub mod angular_separation;
 pub mod bond_order;
+pub mod local_bond_projection;
+pub mod local_descriptors;
 
 pub use angular_separation::{
     AngularSeparationGlobal, AngularSeparationGlobalResult, AngularSeparationNeighbor,
     AngularSeparationNeighborResult,
 };
 pub use bond_order::{BondOrder, BondOrderResult};
+pub use local_bond_projection::{LocalBondProjection, LocalBondProjectionResult};
+pub use local_descriptors::{LocalDescriptors, LocalDescriptorsResult};

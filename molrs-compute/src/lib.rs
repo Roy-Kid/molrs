@@ -79,7 +79,8 @@ pub use density::{
 pub use diffraction::{StaticStructureFactorDebye, StaticStructureFactorDebyeResult};
 pub use environment::{
     AngularSeparationGlobal, AngularSeparationGlobalResult, AngularSeparationNeighbor,
-    AngularSeparationNeighborResult, BondOrder, BondOrderResult,
+    AngularSeparationNeighborResult, BondOrder, BondOrderResult, LocalBondProjection,
+    LocalBondProjectionResult, LocalDescriptors, LocalDescriptorsResult,
 };
 pub use error::ComputeError;
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
