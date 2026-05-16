@@ -8,9 +8,11 @@
 //! `[−x_max, x_max] × [−y_max, y_max] × [−z_max, z_max]`. PMF is
 //! `−ln(ρ(x, y, z) / ρ_ref)` with `ρ_ref = N² / V_box`. Empty bins → `+∞`.
 //!
-//! First-pass implementation — no per-particle orientations yet (lab frame
-//! only). Adding a rotating reference frame follows the same pattern as
-//! [`LocalBondProjection`](super::super::environment::LocalBondProjection).
+//! When per-particle orientations are supplied as quaternions via
+//! [`PMFTXYZArgs::query_orientations`], every bond is rotated into the
+//! query particle's local frame before binning (matches freud's
+//! `query_orientations` argument). Without orientations the analyzer
+//! works in the lab frame.
 
 use molrs::frame_access::FrameAccess;
 use molrs::neighbors::NeighborList;
@@ -87,6 +89,7 @@ impl PMFTXYZ {
         &self,
         frame: &FA,
         nlist: &NeighborList,
+        orientations: Option<&[[F; 4]]>,
     ) -> Result<PMFTXYZResult, ComputeError> {
         let simbox = frame.simbox_ref().ok_or(ComputeError::MissingSimBox)?;
         let (lx, ly, lz) = match simbox.kind() {
@@ -106,10 +109,12 @@ impl PMFTXYZ {
 
         let mut counts = Array3::<u64>::zeros((self.n_x, self.n_y, self.n_z));
         let vectors = nlist.vectors();
+        let i_idx = nlist.query_point_indices();
+        let j_idx = nlist.point_indices();
         let n_pairs = nlist.n_pairs();
         let symmetric = matches!(nlist.mode(), molrs::neighbors::QueryMode::SelfQuery);
 
-        let mut push = |vx: F, vy: F, vz: F| {
+        let push = |vx: F, vy: F, vz: F, counts: &mut Array3<u64>| {
             if vx.abs() >= self.x_max || vy.abs() >= self.y_max || vz.abs() >= self.z_max {
                 return;
             }
@@ -123,9 +128,41 @@ impl PMFTXYZ {
             let vx = vectors[[k, 0]];
             let vy = vectors[[k, 1]];
             let vz = vectors[[k, 2]];
-            push(vx, vy, vz);
+            let (xl_i, yl_i, zl_i) = match orientations {
+                None => (vx, vy, vz),
+                Some(o) => {
+                    let i = i_idx[k] as usize;
+                    if i >= o.len() {
+                        return Err(ComputeError::DimensionMismatch {
+                            expected: i + 1,
+                            got: o.len(),
+                            what: "PMFTXYZ orientations length",
+                        });
+                    }
+                    // Rotate the lab-frame bond into i's local frame: use
+                    // q⁻¹ · v · q (with q⁻¹ = q_conj for unit quaternions).
+                    let r = rotate_by_quat_conj(o[i], [vx, vy, vz]);
+                    (r[0], r[1], r[2])
+                }
+            };
+            push(xl_i, yl_i, zl_i, &mut counts);
             if symmetric {
-                push(-vx, -vy, -vz);
+                let (xl_j, yl_j, zl_j) = match orientations {
+                    None => (-vx, -vy, -vz),
+                    Some(o) => {
+                        let j = j_idx[k] as usize;
+                        if j >= o.len() {
+                            return Err(ComputeError::DimensionMismatch {
+                                expected: j + 1,
+                                got: o.len(),
+                                what: "PMFTXYZ orientations length",
+                            });
+                        }
+                        let r = rotate_by_quat_conj(o[j], [-vx, -vy, -vz]);
+                        (r[0], r[1], r[2])
+                    }
+                };
+                push(xl_j, yl_j, zl_j, &mut counts);
             }
         }
 
@@ -173,28 +210,64 @@ impl PMFTXYZ {
     }
 }
 
+/// Rotate `v` by `q⁻¹` (= `q_conj` for unit quaternions). Used to bring a
+/// lab-frame bond vector into the query particle's local frame.
+///
+/// `q⁻¹ · v · q` expanded in component form, with q = (w, x, y, z).
+#[inline]
+fn rotate_by_quat_conj(q: [F; 4], v: [F; 3]) -> [F; 3] {
+    let (w, x, y, z) = (q[0], -q[1], -q[2], -q[3]);
+    let tx = 2.0 * (y * v[2] - z * v[1]);
+    let ty = 2.0 * (z * v[0] - x * v[2]);
+    let tz = 2.0 * (x * v[1] - y * v[0]);
+    [
+        v[0] + w * tx + (y * tz - z * ty),
+        v[1] + w * ty + (z * tx - x * tz),
+        v[2] + w * tz + (x * ty - y * tx),
+    ]
+}
+
+/// `Args` for [`PMFTXYZ`]. When `query_orientations` is `Some`, each entry
+/// is a per-frame `Vec<[F;4]>` of unit quaternions `(w, x, y, z)` used to
+/// rotate every bond into the query particle's local frame before binning.
+pub struct PMFTXYZArgs<'a> {
+    pub nlists: &'a [NeighborList],
+    pub query_orientations: Option<&'a [Vec<[F; 4]>]>,
+}
+
 impl Compute for PMFTXYZ {
-    type Args<'a> = &'a Vec<NeighborList>;
+    type Args<'a> = PMFTXYZArgs<'a>;
     type Output = Vec<PMFTXYZResult>;
 
     fn compute<'a, FA: FrameAccess + Sync + 'a>(
         &self,
         frames: &[&'a FA],
-        nlists: &'a Vec<NeighborList>,
+        args: PMFTXYZArgs<'a>,
     ) -> Result<Vec<PMFTXYZResult>, ComputeError> {
         if frames.is_empty() {
             return Err(ComputeError::EmptyInput);
         }
-        if frames.len() != nlists.len() {
+        if frames.len() != args.nlists.len() {
             return Err(ComputeError::DimensionMismatch {
                 expected: frames.len(),
-                got: nlists.len(),
+                got: args.nlists.len(),
                 what: "neighbor-list count",
             });
         }
+        if let Some(o) = args.query_orientations
+            && o.len() != frames.len()
+        {
+            return Err(ComputeError::DimensionMismatch {
+                expected: frames.len(),
+                got: o.len(),
+                what: "PMFTXYZ orientations frame count",
+            });
+        }
         let mut out = Vec::with_capacity(frames.len());
-        for (f, nl) in frames.iter().zip(nlists.iter()) {
-            out.push(self.one_frame(*f, nl)?);
+        for (k, f) in frames.iter().enumerate() {
+            let nl = &args.nlists[k];
+            let o = args.query_orientations.map(|o| o[k].as_slice());
+            out.push(self.one_frame(*f, nl, o)?);
         }
         Ok(out)
     }
@@ -271,7 +344,13 @@ mod tests {
         let nl = build_nlist(&frame, 1.5);
         let r = &PMFTXYZ::new(1.0, 1.0, 1.0, 8, 8, 8)
             .unwrap()
-            .compute(&[&frame], &vec![nl])
+            .compute(
+                &[&frame],
+                PMFTXYZArgs {
+                    nlists: &[nl],
+                    query_orientations: None,
+                },
+            )
             .unwrap()[0];
         let total: u64 = r.raw_counts.iter().copied().sum();
         assert_eq!(total, 2);
@@ -283,7 +362,13 @@ mod tests {
         let nl = build_nlist(&frame, 5.0);
         let r = &PMFTXYZ::new(1.0, 1.0, 1.0, 4, 4, 4)
             .unwrap()
-            .compute(&[&frame], &vec![nl])
+            .compute(
+                &[&frame],
+                PMFTXYZArgs {
+                    nlists: &[nl],
+                    query_orientations: None,
+                },
+            )
             .unwrap()[0];
         assert_eq!(r.raw_counts.iter().copied().sum::<u64>(), 0);
     }
@@ -292,5 +377,48 @@ mod tests {
     fn invalid_args_error() {
         assert!(PMFTXYZ::new(0.0, 1.0, 1.0, 4, 4, 4).is_err());
         assert!(PMFTXYZ::new(1.0, 1.0, 1.0, 0, 4, 4).is_err());
+    }
+
+    #[test]
+    fn quaternion_orientations_rotate_bond_into_local_frame() {
+        // Particle 0 at origin oriented at 90° about +z
+        // (quaternion (cos 45°, 0, 0, sin 45°)). Particle 1 at lab
+        // (1, 0, 0). In particle 0's local frame the bond runs along
+        // its −y axis: rotating the +x lab vector by q⁻¹ gives (0, -1, 0).
+        let frame = frame_with(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], 10.0, [false; 3]);
+        let nl = build_nlist(&frame, 1.5);
+        let q0 = [
+            std::f64::consts::FRAC_PI_4.cos(),
+            0.0,
+            0.0,
+            std::f64::consts::FRAC_PI_4.sin(),
+        ];
+        let identity = [1.0_f64, 0.0, 0.0, 0.0];
+        let orient = vec![q0, identity];
+
+        let r = &PMFTXYZ::new(1.5, 1.5, 1.5, 6, 6, 6)
+            .unwrap()
+            .compute(
+                &[&frame],
+                PMFTXYZArgs {
+                    nlists: std::slice::from_ref(&nl),
+                    query_orientations: Some(std::slice::from_ref(&orient)),
+                },
+            )
+            .unwrap()[0];
+
+        // Particle 0's contribution rotates into y < 0. Confirm the
+        // overall y-binning shifted into the negative half.
+        let mut found = false;
+        for ix in 0..6 {
+            for iy in 0..3 {
+                for iz in 0..6 {
+                    if r.raw_counts[[ix, iy, iz]] > 0 {
+                        found = true;
+                    }
+                }
+            }
+        }
+        assert!(found, "quaternion-rotated bond should land in y < 0 bins");
     }
 }

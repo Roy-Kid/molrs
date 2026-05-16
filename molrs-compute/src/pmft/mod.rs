@@ -20,4 +20,4 @@ pub mod xyz;
 pub use r12::{PMFTR12, PMFTR12Args, PMFTR12Result};
 pub use xy::{PMFTXY, PMFTXYArgs, PMFTXYResult};
 pub use xyt::{PMFTXYT, PMFTXYTArgs, PMFTXYTResult};
-pub use xyz::{PMFTXYZ, PMFTXYZResult};
+pub use xyz::{PMFTXYZ, PMFTXYZArgs, PMFTXYZResult};

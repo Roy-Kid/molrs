@@ -100,7 +100,7 @@ pub use order::{
 pub use pca::{Pca2, PcaResult};
 pub use pmft::{
     PMFTR12, PMFTR12Args, PMFTR12Result, PMFTXY, PMFTXYArgs, PMFTXYResult, PMFTXYT, PMFTXYTArgs,
-    PMFTXYTResult, PMFTXYZ, PMFTXYZResult,
+    PMFTXYTResult, PMFTXYZ, PMFTXYZArgs, PMFTXYZResult,
 };
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
 pub use rdf::{RDF, RDFResult};
