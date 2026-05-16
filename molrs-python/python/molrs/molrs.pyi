@@ -616,3 +616,115 @@ class KMeans:
 
     def __init__(self, k: int, max_iter: int = 100, seed: int = 0) -> None: ...
     def compute(self, pca: PcaResult) -> KMeansResult: ...
+
+# ---------------------------------------------------------------------------
+# freud-ported analyzers (added in 0.0.17)
+# ---------------------------------------------------------------------------
+
+class Steinhardt:
+    """Bond-orientational order parameters `q_ℓ` and `w_ℓ`."""
+
+    def __init__(
+        self,
+        l: Sequence[int],
+        average: bool = False,
+        wl: bool = False,
+        wl_normalize: bool = False,
+    ) -> None: ...
+    def compute(
+        self,
+        frames: Frame | Sequence[Frame],
+        nlists: NeighborList | Sequence[NeighborList],
+    ) -> list[dict]: ...
+
+class Nematic:
+    """Nematic order parameter via Q-tensor eigenvalue."""
+
+    def __init__(self) -> None: ...
+    def compute(
+        self,
+        frames: Frame | Sequence[Frame],
+        directors: Sequence[Sequence[float]],
+    ) -> tuple[float, ArrayF, ArrayF, ArrayF]: ...
+
+class Hexatic:
+    """2-D hexatic order parameter `ψ_k`."""
+
+    def __init__(self, k: int) -> None: ...
+    def compute(
+        self,
+        frames: Frame | Sequence[Frame],
+        nlists: NeighborList | Sequence[NeighborList],
+    ) -> list[ArrayF]: ...
+
+class SolidLiquid:
+    """Frenkel-ten Wolde solid/liquid classifier."""
+
+    def __init__(
+        self, l: int, q_threshold: float = 0.7, n_threshold: int = 6
+    ) -> None: ...
+    def compute(
+        self,
+        frames: Frame | Sequence[Frame],
+        nlists: NeighborList | Sequence[NeighborList],
+    ) -> list[tuple[npt.NDArray[np.uint32], list[bool]]]: ...
+
+class ClusterProperties:
+    """Per-cluster size / center / gyration tensor aggregator."""
+
+    def __init__(self) -> None: ...
+    def with_masses(self, masses: Sequence[float]) -> ClusterProperties: ...
+    def compute(
+        self,
+        frames: Frame | Sequence[Frame],
+        clusters: Sequence[ClusterResult],
+    ) -> list[dict]: ...
+
+class LocalDensity:
+    """Per-particle local number density in a sphere of radius r_max."""
+
+    def __init__(self, r_max: float, diameter: float = 0.0) -> None: ...
+    def compute(
+        self,
+        frames: Frame | Sequence[Frame],
+        nlists: NeighborList | Sequence[NeighborList],
+    ) -> list[tuple[ArrayF, ArrayF]]: ...
+
+class GaussianDensity:
+    """3-D Gaussian-smeared density grid."""
+
+    def __init__(self, nx: int, ny: int, nz: int, sigma: float) -> None: ...
+    def compute(self, frames: Frame | Sequence[Frame]) -> list[ArrayF]: ...
+
+class BondOrder:
+    """2-D (θ, φ) histogram of neighbor-bond vectors."""
+
+    def __init__(self, n_theta: int, n_phi: int) -> None: ...
+    def compute(
+        self,
+        frames: Frame | Sequence[Frame],
+        nlists: NeighborList | Sequence[NeighborList],
+    ) -> list[tuple[npt.NDArray[np.uint64], ArrayF, ArrayF, ArrayF]]: ...
+
+class StaticStructureFactorDebye:
+    """Closed-form Debye static structure factor S(k)."""
+
+    def __init__(self, k_values: Sequence[float]) -> None: ...
+    @staticmethod
+    def linspace(k_min: float, k_max: float, n: int) -> StaticStructureFactorDebye: ...
+    def compute(
+        self, frames: Frame | Sequence[Frame]
+    ) -> list[tuple[ArrayF, ArrayF, int]]: ...
+
+class PMFTXY:
+    """2-D (x, y) Pair Mode Fourier Transform."""
+
+    def __init__(
+        self, x_max: float, y_max: float, n_x: int, n_y: int
+    ) -> None: ...
+    def compute(
+        self,
+        frames: Frame | Sequence[Frame],
+        nlists: NeighborList | Sequence[NeighborList],
+        orientations: Sequence[Sequence[float]] | None = None,
+    ) -> list[tuple[npt.NDArray[np.uint64], ArrayF, ArrayF]]: ...
