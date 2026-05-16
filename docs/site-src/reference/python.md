@@ -101,40 +101,80 @@ tools and the docs build.
 
 ## Analysis
 
-::: molrs.RDF
+Analysis classes live under the `molrs.compute` subpackage, organized by
+domain. The layout mirrors freud and the underlying Rust crate
+(`molrs_compute::{density, order, environment, …}`).
 
-::: molrs.RDFResult
+### `molrs.compute.density`
 
-::: molrs.MSD
+::: molrs.compute.density.RDF
 
-::: molrs.MSDResult
+::: molrs.compute.density.RDFResult
 
-::: molrs.MSDTimeSeries
+::: molrs.compute.density.GaussianDensity
 
-::: molrs.Cluster
+::: molrs.compute.density.LocalDensity
 
-::: molrs.ClusterResult
+### `molrs.compute.order`
 
-::: molrs.ClusterCenters
+::: molrs.compute.order.Steinhardt
 
-::: molrs.ClusterCentersResult
+::: molrs.compute.order.Nematic
 
-::: molrs.CenterOfMass
+::: molrs.compute.order.Hexatic
 
-::: molrs.CenterOfMassResult
+::: molrs.compute.order.SolidLiquid
 
-::: molrs.GyrationTensor
+### `molrs.compute.environment`
 
-::: molrs.InertiaTensor
+::: molrs.compute.environment.BondOrder
 
-::: molrs.RadiusOfGyration
+### `molrs.compute.pmft`
 
-::: molrs.DescriptorRow
+::: molrs.compute.pmft.PMFTXY
 
-::: molrs.Pca2
+### `molrs.compute.diffraction`
 
-::: molrs.PcaResult
+::: molrs.compute.diffraction.StaticStructureFactorDebye
 
-::: molrs.KMeans
+### `molrs.compute.cluster`
 
-::: molrs.KMeansResult
+::: molrs.compute.cluster.Cluster
+
+::: molrs.compute.cluster.ClusterResult
+
+::: molrs.compute.cluster.ClusterCenters
+
+::: molrs.compute.cluster.ClusterCentersResult
+
+::: molrs.compute.cluster.ClusterProperties
+
+::: molrs.compute.cluster.CenterOfMass
+
+::: molrs.compute.cluster.CenterOfMassResult
+
+::: molrs.compute.cluster.GyrationTensor
+
+::: molrs.compute.cluster.InertiaTensor
+
+::: molrs.compute.cluster.RadiusOfGyration
+
+### `molrs.compute.msd`
+
+::: molrs.compute.msd.MSD
+
+::: molrs.compute.msd.MSDResult
+
+::: molrs.compute.msd.MSDTimeSeries
+
+### `molrs.compute.ml`
+
+::: molrs.compute.ml.DescriptorRow
+
+::: molrs.compute.ml.Pca2
+
+::: molrs.compute.ml.PcaResult
+
+::: molrs.compute.ml.KMeans
+
+::: molrs.compute.ml.KMeansResult
