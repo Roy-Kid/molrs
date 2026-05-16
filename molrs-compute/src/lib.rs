@@ -54,6 +54,7 @@ pub mod cluster;
 pub mod cluster_centers;
 pub mod density;
 pub mod diffraction;
+pub mod environment;
 pub mod error;
 pub mod gyration_tensor;
 pub mod inertia_tensor;
@@ -76,6 +77,10 @@ pub use density::{
     LocalDensity, LocalDensityResult,
 };
 pub use diffraction::{StaticStructureFactorDebye, StaticStructureFactorDebyeResult};
+pub use environment::{
+    AngularSeparationGlobal, AngularSeparationGlobalResult, AngularSeparationNeighbor,
+    AngularSeparationNeighborResult, BondOrder, BondOrderResult,
+};
 pub use error::ComputeError;
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
