@@ -1,5 +1,7 @@
+mod properties;
 mod result;
 
+pub use properties::{ClusterProperties, ClusterPropertiesResult};
 pub use result::ClusterResult;
 
 use molrs::frame_access::FrameAccess;

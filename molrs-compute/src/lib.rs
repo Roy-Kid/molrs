@@ -66,13 +66,13 @@ pub mod util;
 
 // Re-exports
 pub use center_of_mass::{COMResult, CenterOfMass};
-pub use cluster::{Cluster, ClusterResult};
+pub use cluster::{Cluster, ClusterProperties, ClusterPropertiesResult, ClusterResult};
 pub use cluster_centers::{ClusterCenters, ClusterCentersResult};
 pub use error::ComputeError;
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
 pub use kmeans::{KMeans, KMeansResult};
-pub use msd::{MSD, MSDResult, MSDTimeSeries};
+pub use msd::{MSD, MSDResult, MSDTimeSeries, MsdMode};
 pub use pca::{Pca2, PcaResult};
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
 pub use rdf::{RDF, RDFResult};
