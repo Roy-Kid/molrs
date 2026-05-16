@@ -74,7 +74,7 @@ pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
 pub use kmeans::{KMeans, KMeansResult};
 pub use msd::{MSD, MSDResult, MSDTimeSeries, MsdMode};
-pub use order::{Steinhardt, SteinhardtResult};
+pub use order::{Hexatic, HexaticResult, Nematic, NematicResult, Steinhardt, SteinhardtResult};
 pub use pca::{Pca2, PcaResult};
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
 pub use rdf::{RDF, RDFResult};

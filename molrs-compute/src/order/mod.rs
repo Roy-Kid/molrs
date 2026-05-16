@@ -8,6 +8,10 @@
 //! Future phases will add `Nematic`, `Hexatic`, `Cubatic`, `SolidLiquid`,
 //! `ContinuousCoordination`, `RotationalAutocorrelation`.
 
+pub mod hexatic;
+pub mod nematic;
 pub mod steinhardt;
 
+pub use hexatic::{Hexatic, HexaticResult};
+pub use nematic::{Nematic, NematicResult};
 pub use steinhardt::{Steinhardt, SteinhardtResult, compute_qlm};
