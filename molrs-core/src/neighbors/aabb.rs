@@ -194,6 +194,56 @@ impl AabbTree {
             }
         }
     }
+
+    /// Visit up to `k` nearest leaves to `p`, written into `top` as
+    /// `(d_sq, point_idx)` sorted ascending by `d_sq`. Uses branch-and-bound
+    /// with the worst-so-far distance as the prune radius.
+    fn knn(&self, p: [F; 3], k: usize, top: &mut Vec<(F, u32)>) {
+        if self.nodes.is_empty() || k == 0 {
+            return;
+        }
+        self.knn_dfs(self.root, p, k, top);
+    }
+
+    fn knn_dfs(&self, node: u32, p: [F; 3], k: usize, top: &mut Vec<(F, u32)>) {
+        let worst = if top.len() >= k {
+            top[k - 1].0
+        } else {
+            F::INFINITY
+        };
+        let aabb_d = self.nodes[node as usize].aabb().dist_sq_to(p);
+        if aabb_d > worst {
+            return;
+        }
+        match self.nodes[node as usize] {
+            Node::Leaf { point, aabb } => {
+                let d = aabb.dist_sq_to(p);
+                // Sorted insertion into top-k.
+                let mut pos = top.len();
+                while pos > 0 && top[pos - 1].0 > d {
+                    pos -= 1;
+                }
+                if pos < k {
+                    top.insert(pos, (d, point));
+                    if top.len() > k {
+                        top.truncate(k);
+                    }
+                }
+            }
+            Node::Inner { left, right, .. } => {
+                // Visit closer child first to tighten `worst` earlier.
+                let l_d = self.nodes[left as usize].aabb().dist_sq_to(p);
+                let r_d = self.nodes[right as usize].aabb().dist_sq_to(p);
+                if l_d <= r_d {
+                    self.knn_dfs(left, p, k, top);
+                    self.knn_dfs(right, p, k, top);
+                } else {
+                    self.knn_dfs(right, p, k, top);
+                    self.knn_dfs(left, p, k, top);
+                }
+            }
+        }
+    }
 }
 
 /// AABB-tree neighbor query.
@@ -341,6 +391,73 @@ impl AabbQuery {
         self.result = sorted;
         self.bx = Some(bx.clone());
         self.stored_pos = points.to_owned();
+    }
+
+    /// Find the `k` nearest neighbors of `query` in the most-recent build,
+    /// honoring PBC via the same image-shift enumeration as
+    /// [`build`](NbListAlgo::build).
+    ///
+    /// Returns up to `k` pairs `(j_index, mic_dist_sq)`, sorted ascending
+    /// by distance. Fewer than `k` may be returned if the system has fewer
+    /// than `k` points (or `k = 0`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if [`build`](NbListAlgo::build) hasn't been called yet.
+    pub fn query_knn(&self, query: [F; 3], k: usize) -> Vec<(u32, F)> {
+        if k == 0 || self.stored_pos.nrows() == 0 {
+            return Vec::new();
+        }
+        let bx = self.bx.as_ref().expect("query_knn before build");
+        // For k-NN we don't have an a-priori cutoff; the MIC bound on
+        // any pair-distance is at most half the box diagonal, so
+        // `diag * 0.5` is a safe and tight image-shift radius.
+        let diag = match bx.kind() {
+            BoxKind::Ortho { len, .. } => {
+                (len[0] * len[0] + len[1] * len[1] + len[2] * len[2]).sqrt()
+            }
+            BoxKind::Triclinic => {
+                let l = bx.lengths();
+                (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]).sqrt()
+            }
+        };
+        let shifts = Self::enumerate_shifts(bx, diag * 0.5);
+
+        // Collect per-original-index minimum-distance candidate.
+        let mut best_per_j: std::collections::HashMap<u32, F> = std::collections::HashMap::new();
+        let mut top: Vec<(F, u32)> = Vec::with_capacity(k + 1);
+        let pts = self.stored_pos.view();
+
+        for shift in &shifts {
+            let shifted = [
+                query[0] + shift[0],
+                query[1] + shift[1],
+                query[2] + shift[2],
+            ];
+            top.clear();
+            self.tree.knn(shifted, k, &mut top);
+            for &(_, j) in &top {
+                let r_j = [
+                    pts[[j as usize, 0]],
+                    pts[[j as usize, 1]],
+                    pts[[j as usize, 2]],
+                ];
+                let dr = bx.shortest_vector_impl(query, r_j);
+                let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
+                best_per_j
+                    .entry(j)
+                    .and_modify(|prev| {
+                        if d2 < *prev {
+                            *prev = d2;
+                        }
+                    })
+                    .or_insert(d2);
+            }
+        }
+        let mut out: Vec<(u32, F)> = best_per_j.into_iter().collect();
+        out.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        out.truncate(k);
+        out
     }
 }
 
@@ -510,5 +627,108 @@ mod tests {
         assert!(a.dist_sq_to([0.5, 0.5, 0.5]).abs() < 1e-12);
         assert!((a.dist_sq_to([2.0, 0.5, 0.5]) - 1.0).abs() < 1e-12);
         assert!((a.dist_sq_to([2.0, 2.0, 2.0]) - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn knn_finds_k_closest_on_line() {
+        // Points at x = 0, 1, 2, 3, 4. Query at x = 0.2 with k = 3 should
+        // return {0, 1, 2} sorted by distance.
+        let pts = array![
+            [0.0_f64, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+        ];
+        let bx = cube_bx(100.0, [false; 3]);
+        let mut aabb = AabbQuery::new(1.0);
+        aabb.build(pts.view(), &bx);
+        let knn = aabb.query_knn([0.2, 0.0, 0.0], 3);
+        assert_eq!(knn.len(), 3);
+        assert_eq!(knn[0].0, 0);
+        assert_eq!(knn[1].0, 1);
+        assert_eq!(knn[2].0, 2);
+        // Distances ascending: 0.2² < 0.8² < 1.8².
+        assert!(knn[0].1 < knn[1].1);
+        assert!(knn[1].1 < knn[2].1);
+    }
+
+    #[test]
+    fn knn_with_pbc_finds_wrap_neighbor() {
+        // x = 0.1 and 9.9 in a PBC box of length 10 → wrap distance 0.2.
+        // Query at x = 0 should find 0 (distance 0.1) and 1 (wrap distance 0.1).
+        let pts = array![[0.1_f64, 0.0, 0.0], [9.9, 0.0, 0.0]];
+        let bx = cube_bx(10.0, [true, true, true]);
+        let mut aabb = AabbQuery::new(1.0);
+        aabb.build(pts.view(), &bx);
+        let knn = aabb.query_knn([0.0, 0.0, 0.0], 2);
+        assert_eq!(knn.len(), 2);
+        // Both at distance² = 0.01 (approximately).
+        for &(_, d2) in &knn {
+            assert!(
+                (d2 - 0.01).abs() < 1e-9,
+                "expected wrap distance ~0.1; got d²={d2}"
+            );
+        }
+    }
+
+    #[test]
+    fn knn_k_larger_than_n_returns_all() {
+        let pts = array![[0.0_f64, 0.0, 0.0], [1.0, 0.0, 0.0]];
+        let bx = cube_bx(10.0, [false; 3]);
+        let mut aabb = AabbQuery::new(1.0);
+        aabb.build(pts.view(), &bx);
+        let knn = aabb.query_knn([0.5, 0.0, 0.0], 10);
+        assert_eq!(knn.len(), 2);
+    }
+
+    #[test]
+    fn knn_zero_k_returns_empty() {
+        let pts = array![[0.0_f64, 0.0, 0.0], [1.0, 0.0, 0.0]];
+        let bx = cube_bx(10.0, [false; 3]);
+        let mut aabb = AabbQuery::new(1.0);
+        aabb.build(pts.view(), &bx);
+        let knn = aabb.query_knn([0.5, 0.0, 0.0], 0);
+        assert_eq!(knn.len(), 0);
+    }
+
+    #[test]
+    fn knn_matches_brute_force_random() {
+        use rand::Rng;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        let mut rng = StdRng::seed_from_u64(11);
+        let n = 100;
+        let mut pts = FNx3::zeros((n, 3));
+        for i in 0..n {
+            pts[[i, 0]] = rng.random::<F>() * 10.0;
+            pts[[i, 1]] = rng.random::<F>() * 10.0;
+            pts[[i, 2]] = rng.random::<F>() * 10.0;
+        }
+        let bx = cube_bx(10.0, [true; 3]);
+        let mut aabb = AabbQuery::new(1.0);
+        aabb.build(pts.view(), &bx);
+
+        let q = [5.0_f64, 5.0, 5.0];
+        let k = 7;
+        let aabb_knn = aabb.query_knn(q, k);
+
+        // Brute-force reference.
+        let mut bf: Vec<(u32, F)> = (0..n)
+            .map(|j| {
+                let r_j = [pts[[j, 0]], pts[[j, 1]], pts[[j, 2]]];
+                let dr = bx.shortest_vector_impl(q, r_j);
+                let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
+                (j as u32, d2)
+            })
+            .collect();
+        bf.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        bf.truncate(k);
+
+        assert_eq!(aabb_knn.len(), bf.len());
+        for (a, b) in aabb_knn.iter().zip(bf.iter()) {
+            assert_eq!(a.0, b.0);
+            assert!((a.1 - b.1).abs() < 1e-12);
+        }
     }
 }

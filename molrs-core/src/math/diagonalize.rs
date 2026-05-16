@@ -38,6 +38,85 @@ pub fn eigvals_sym_3x3(a: &F3x3) -> F3 {
     vals
 }
 
+/// Largest eigenvalue (and its unit eigenvector) of a symmetric 4×4 matrix.
+///
+/// Uses cyclic Jacobi rotations — same algorithm as
+/// [`eigh_sym_3x3`], extended to the six off-diagonal pairs of a 4×4.
+/// Returns `(λ_max, v_max)` with `v_max` normalised.
+///
+/// Used by Horn's optimal-rotation method
+/// (point-cloud Kabsch alignment via the quaternion form): the largest
+/// eigenvalue eigenvector of the 4×4 `N` matrix built from the
+/// cross-covariance encodes the best-fit rotation quaternion.
+pub fn eigh_largest_sym_4x4(a: &[[F; 4]; 4]) -> (F, [F; 4]) {
+    let mut m: [[F; 4]; 4] = *a;
+    let mut v: [[F; 4]; 4] = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+
+    let pairs = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+    for _ in 0..MAX_SWEEPS {
+        let off: F = pairs.iter().map(|&(p, q)| m[p][q].abs()).sum();
+        if off < OFF_DIAG_TOL {
+            break;
+        }
+        for (p, q) in pairs {
+            let apq = m[p][q];
+            if apq.abs() < OFF_DIAG_TOL {
+                continue;
+            }
+            let app = m[p][p];
+            let aqq = m[q][q];
+            let theta = if (app - aqq).abs() < OFF_DIAG_TOL {
+                std::f64::consts::FRAC_PI_4 * apq.signum()
+            } else {
+                0.5 * (2.0 * apq).atan2(app - aqq)
+            };
+            let c = theta.cos();
+            let s = theta.sin();
+            let new_app = c * c * app + 2.0 * s * c * apq + s * s * aqq;
+            let new_aqq = s * s * app - 2.0 * s * c * apq + c * c * aqq;
+            m[p][p] = new_app;
+            m[q][q] = new_aqq;
+            m[p][q] = 0.0;
+            m[q][p] = 0.0;
+            for r in 0..4 {
+                if r != p && r != q {
+                    let arp = m[r][p];
+                    let arq = m[r][q];
+                    let nrp = c * arp + s * arq;
+                    let nrq = -s * arp + c * arq;
+                    m[r][p] = nrp;
+                    m[p][r] = nrp;
+                    m[r][q] = nrq;
+                    m[q][r] = nrq;
+                }
+            }
+            for r in 0..4 {
+                let vrp = v[r][p];
+                let vrq = v[r][q];
+                v[r][p] = c * vrp + s * vrq;
+                v[r][q] = -s * vrp + c * vrq;
+            }
+        }
+    }
+
+    // Find largest diagonal entry → corresponding column of `v` is the
+    // unit eigenvector.
+    let mut imax = 0usize;
+    let mut lmax = m[0][0];
+    for i in 1..4 {
+        if m[i][i] > lmax {
+            imax = i;
+            lmax = m[i][i];
+        }
+    }
+    (lmax, [v[0][imax], v[1][imax], v[2][imax], v[3][imax]])
+}
+
 /// Full symmetric eigen-decomposition `A = V · diag(λ) · Vᵀ`.
 ///
 /// Returns `(λ, V)` with `λ` sorted descending and `V[:, i]` the unit
@@ -225,5 +304,41 @@ mod tests {
         approx_eq(vals[0], 3.0, TOL);
         approx_eq(vals[1], 2.0, TOL);
         approx_eq(vals[2], 2.0, TOL);
+    }
+
+    #[test]
+    fn largest_eigenvalue_sym_4x4_diagonal() {
+        let m = [
+            [4.0_f64, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 7.0, 0.0],
+            [0.0, 0.0, 0.0, 2.0],
+        ];
+        let (lambda, v) = eigh_largest_sym_4x4(&m);
+        approx_eq(lambda, 7.0, TOL);
+        // Eigenvector aligned with axis 2.
+        approx_eq(v[0].abs(), 0.0, TOL);
+        approx_eq(v[1].abs(), 0.0, TOL);
+        approx_eq(v[2].abs(), 1.0, TOL);
+        approx_eq(v[3].abs(), 0.0, TOL);
+    }
+
+    #[test]
+    fn largest_eigenvalue_sym_4x4_general() {
+        // Rank-1 outer product: A = u·uᵀ with u = (1, 2, 3, 1).
+        // Has eigenvalues (|u|², 0, 0, 0) = (15, 0, 0, 0).
+        let u = [1.0_f64, 2.0, 3.0, 1.0];
+        let mut m = [[0.0_f64; 4]; 4];
+        for i in 0..4 {
+            for j in 0..4 {
+                m[i][j] = u[i] * u[j];
+            }
+        }
+        let (lambda, v) = eigh_largest_sym_4x4(&m);
+        approx_eq(lambda, 15.0, 1e-9);
+        // Eigenvector parallel to u (up to sign).
+        let dot: F = (0..4).map(|i| v[i] * u[i]).sum::<F>().abs();
+        let nu = 15.0_f64.sqrt();
+        approx_eq(dot, nu, 1e-9);
     }
 }

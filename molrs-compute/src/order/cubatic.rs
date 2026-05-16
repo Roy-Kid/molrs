@@ -50,13 +50,18 @@ pub struct CubaticResult {
 
 impl ComputeResult for CubaticResult {}
 
-/// Cubatic calculator. Stateless: SA seed and schedule live on the struct.
+/// Cubatic calculator. Stateless: SA seed, schedule, and chain count live
+/// on the struct.
 #[derive(Debug, Clone, Copy)]
 pub struct Cubatic {
     seed: u64,
     initial_temp: F,
     cooling_rate: F,
     n_steps: usize,
+    /// Number of independent SA chains run from different random initial
+    /// bases; the best score across chains is returned. Defaults to 4
+    /// — robust against local maxima.
+    n_chains: usize,
 }
 
 impl Default for Cubatic {
@@ -72,6 +77,7 @@ impl Cubatic {
             initial_temp: 1.0,
             cooling_rate: 0.95,
             n_steps: 500,
+            n_chains: 4,
         }
     }
 
@@ -89,6 +95,10 @@ impl Cubatic {
     }
     pub fn with_n_steps(mut self, n: usize) -> Self {
         self.n_steps = n;
+        self
+    }
+    pub fn with_n_chains(mut self, n: usize) -> Self {
+        self.n_chains = n.max(1);
         self
     }
 
@@ -112,36 +122,59 @@ impl Cubatic {
             return Err(ComputeError::EmptyInput);
         }
 
-        let mut rng = StdRng::seed_from_u64(self.seed);
+        let mut global_best_basis = [[1.0_f64, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let mut global_best_score = cubatic_score(&global_best_basis, &units);
 
-        // Start from the lab frame.
-        let mut basis = [[1.0_f64, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-        let mut score = cubatic_score(&basis, &units);
-        let mut best_basis = basis;
-        let mut best_score = score;
+        // Each chain starts from a different randomly-rotated basis and
+        // runs the same cooling schedule. Best of all chains wins —
+        // robust against single-chain trapping in local maxima.
+        for chain in 0..self.n_chains {
+            // Per-chain RNG seeded deterministically from (self.seed, chain).
+            let mut rng = StdRng::seed_from_u64(self.seed.wrapping_add(chain as u64));
 
-        let mut temp = self.initial_temp;
-        for _ in 0..self.n_steps {
-            let trial = perturb_basis(&basis, temp, &mut rng);
-            let s = cubatic_score(&trial, &units);
-            let d = s - score;
-            if d > 0.0 || rng.random::<F>() < (d / temp).exp() {
-                basis = trial;
-                score = s;
-                if score > best_score {
-                    best_score = score;
-                    best_basis = basis;
+            // Random initial basis: the lab frame on chain 0, perturbed
+            // copies on subsequent chains.
+            let mut basis = if chain == 0 {
+                [[1.0_f64, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+            } else {
+                perturb_basis(
+                    &[[1.0_f64, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    std::f64::consts::PI,
+                    &mut rng,
+                )
+            };
+            let mut score = cubatic_score(&basis, &units);
+            let mut best_basis = basis;
+            let mut best_score = score;
+
+            let mut temp = self.initial_temp;
+            for _ in 0..self.n_steps {
+                let trial = perturb_basis(&basis, temp, &mut rng);
+                let s = cubatic_score(&trial, &units);
+                let d = s - score;
+                if d > 0.0 || rng.random::<F>() < (d / temp).exp() {
+                    basis = trial;
+                    score = s;
+                    if score > best_score {
+                        best_score = score;
+                        best_basis = basis;
+                    }
+                }
+                temp *= self.cooling_rate;
+                if temp < 1e-6 {
+                    break;
                 }
             }
-            temp *= self.cooling_rate;
-            if temp < 1e-6 {
-                break;
+
+            if best_score > global_best_score {
+                global_best_score = best_score;
+                global_best_basis = best_basis;
             }
         }
 
         Ok(CubaticResult {
-            order: best_score,
-            director_basis: best_basis,
+            order: global_best_score,
+            director_basis: global_best_basis,
         })
     }
 }

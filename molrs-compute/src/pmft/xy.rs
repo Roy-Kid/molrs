@@ -15,9 +15,11 @@
 //! orthorhombic 2-D box). Empty bins return `+∞` for the PMF; the raw
 //! density and per-bin counts are also exposed.
 //!
-//! This first-pass implementation does **not** apply per-particle
-//! orientations (freud's `query_orientations` argument); a rotating
-//! reference frame will be added when the downstream consumers need it.
+//! When per-particle 2-D orientations are supplied via
+//! [`PMFTXYArgs::query_orientations`], every bond is rotated into the
+//! query particle's local frame before binning (matches freud's
+//! `query_orientations` argument). Without orientations the analyzer
+//! works in the lab frame.
 
 use molrs::frame_access::FrameAccess;
 use molrs::neighbors::NeighborList;
@@ -95,6 +97,7 @@ impl PMFTXY {
         &self,
         frame: &FA,
         nlist: &NeighborList,
+        orientations: Option<&[F]>,
     ) -> Result<PMFTXYResult, ComputeError> {
         let simbox = frame.simbox_ref().ok_or(ComputeError::MissingSimBox)?;
         let (lx, ly) = match simbox.kind() {
@@ -113,10 +116,12 @@ impl PMFTXY {
 
         let mut counts = Array2::<u64>::zeros((self.n_x, self.n_y));
         let vectors = nlist.vectors();
+        let i_idx = nlist.query_point_indices();
+        let j_idx = nlist.point_indices();
         let n_pairs = nlist.n_pairs();
         let symmetric = matches!(nlist.mode(), molrs::neighbors::QueryMode::SelfQuery);
 
-        let mut push = |dxp: F, dyp: F| {
+        let push = |dxp: F, dyp: F, counts: &mut Array2<u64>| {
             if dxp.abs() >= self.x_max || dyp.abs() >= self.y_max {
                 return;
             }
@@ -128,9 +133,43 @@ impl PMFTXY {
         for k in 0..n_pairs {
             let vx = vectors[[k, 0]];
             let vy = vectors[[k, 1]];
-            push(vx, vy);
+            // i-side accumulation: rotate bond into i's local frame if
+            // orientations are supplied.
+            let (xl_i, yl_i) = match orientations {
+                None => (vx, vy),
+                Some(o) => {
+                    let i = i_idx[k] as usize;
+                    if i >= o.len() {
+                        return Err(ComputeError::DimensionMismatch {
+                            expected: i + 1,
+                            got: o.len(),
+                            what: "PMFTXY orientations length",
+                        });
+                    }
+                    let c = o[i].cos();
+                    let s = o[i].sin();
+                    (c * vx + s * vy, -s * vx + c * vy)
+                }
+            };
+            push(xl_i, yl_i, &mut counts);
             if symmetric {
-                push(-vx, -vy);
+                let (xl_j, yl_j) = match orientations {
+                    None => (-vx, -vy),
+                    Some(o) => {
+                        let j = j_idx[k] as usize;
+                        if j >= o.len() {
+                            return Err(ComputeError::DimensionMismatch {
+                                expected: j + 1,
+                                got: o.len(),
+                                what: "PMFTXY orientations length",
+                            });
+                        }
+                        let c = o[j].cos();
+                        let s = o[j].sin();
+                        (c * -vx + s * -vy, -s * -vx + c * -vy)
+                    }
+                };
+                push(xl_j, yl_j, &mut counts);
             }
         }
 
@@ -174,28 +213,56 @@ impl PMFTXY {
     }
 }
 
+/// `Args` for [`PMFTXY`]. When `query_orientations` is `Some`, each entry
+/// is a per-frame `Vec<F>` of 2-D angles (radians) used to rotate every
+/// bond into the query particle's local frame before binning.
+pub struct PMFTXYArgs<'a> {
+    pub nlists: &'a [NeighborList],
+    pub query_orientations: Option<&'a [Vec<F>]>,
+}
+
+impl<'a> From<&'a Vec<NeighborList>> for PMFTXYArgs<'a> {
+    fn from(v: &'a Vec<NeighborList>) -> Self {
+        Self {
+            nlists: v.as_slice(),
+            query_orientations: None,
+        }
+    }
+}
+
 impl Compute for PMFTXY {
-    type Args<'a> = &'a Vec<NeighborList>;
+    type Args<'a> = PMFTXYArgs<'a>;
     type Output = Vec<PMFTXYResult>;
 
     fn compute<'a, FA: FrameAccess + Sync + 'a>(
         &self,
         frames: &[&'a FA],
-        nlists: &'a Vec<NeighborList>,
+        args: PMFTXYArgs<'a>,
     ) -> Result<Vec<PMFTXYResult>, ComputeError> {
         if frames.is_empty() {
             return Err(ComputeError::EmptyInput);
         }
-        if frames.len() != nlists.len() {
+        if frames.len() != args.nlists.len() {
             return Err(ComputeError::DimensionMismatch {
                 expected: frames.len(),
-                got: nlists.len(),
+                got: args.nlists.len(),
                 what: "neighbor-list count",
             });
         }
+        if let Some(o) = args.query_orientations
+            && o.len() != frames.len()
+        {
+            return Err(ComputeError::DimensionMismatch {
+                expected: frames.len(),
+                got: o.len(),
+                what: "PMFTXY orientations frame count",
+            });
+        }
         let mut out = Vec::with_capacity(frames.len());
-        for (f, nl) in frames.iter().zip(nlists.iter()) {
-            out.push(self.one_frame(*f, nl)?);
+        for (k, f) in frames.iter().enumerate() {
+            let nl = &args.nlists[k];
+            let o = args.query_orientations.map(|o| o[k].as_slice());
+            out.push(self.one_frame(*f, nl, o)?);
         }
         Ok(out)
     }
@@ -275,7 +342,13 @@ mod tests {
         let nl = build_nlist(&frame, 1.5);
         let r = &PMFTXY::new(2.0, 2.0, 8, 8)
             .unwrap()
-            .compute(&[&frame], &vec![nl])
+            .compute(
+                &[&frame],
+                PMFTXYArgs {
+                    nlists: &[nl],
+                    query_orientations: None,
+                },
+            )
             .unwrap()[0];
         let total: u64 = r.raw_counts.iter().copied().sum();
         assert_eq!(total, 2);
@@ -293,7 +366,13 @@ mod tests {
         let nl = build_nlist(&frame, 1.5);
         let r = &PMFTXY::new(2.0, 2.0, 4, 4)
             .unwrap()
-            .compute(&[&frame], &vec![nl])
+            .compute(
+                &[&frame],
+                PMFTXYArgs {
+                    nlists: &[nl],
+                    query_orientations: None,
+                },
+            )
             .unwrap()[0];
         let mut finite_count = 0;
         for v in r.pmf.iter() {
@@ -311,7 +390,13 @@ mod tests {
         let nl = build_nlist(&frame, 6.0);
         let r = &PMFTXY::new(2.0, 2.0, 8, 8)
             .unwrap()
-            .compute(&[&frame], &vec![nl])
+            .compute(
+                &[&frame],
+                PMFTXYArgs {
+                    nlists: &[nl],
+                    query_orientations: None,
+                },
+            )
             .unwrap()[0];
         assert_eq!(r.raw_counts.iter().copied().sum::<u64>(), 0);
     }
@@ -327,8 +412,51 @@ mod tests {
         let frames: Vec<&Frame> = Vec::new();
         let err = PMFTXY::new(2.0, 2.0, 4, 4)
             .unwrap()
-            .compute(&frames, &Vec::<NeighborList>::new())
+            .compute(
+                &frames,
+                PMFTXYArgs {
+                    nlists: &[],
+                    query_orientations: None,
+                },
+            )
             .unwrap_err();
         assert!(matches!(err, ComputeError::EmptyInput));
+    }
+
+    #[test]
+    fn orientations_rotate_bond_into_local_frame() {
+        // Particle 0 at origin, oriented at +π/2 (looking in +y). Particle 1
+        // at (1, 0, 0). In particle 0's local frame the bond is (0, -1, 0),
+        // so it lands in a `y < 0` bin. Without orientations the same bond
+        // would land in `x > 0`.
+        let frame = frame_with(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], 10.0, [false; 3]);
+        let nl = build_nlist(&frame, 1.5);
+        let orient = vec![std::f64::consts::FRAC_PI_2, 0.0];
+
+        let with_orient = &PMFTXY::new(2.0, 2.0, 8, 8)
+            .unwrap()
+            .compute(
+                &[&frame],
+                PMFTXYArgs {
+                    nlists: std::slice::from_ref(&nl),
+                    query_orientations: Some(std::slice::from_ref(&orient)),
+                },
+            )
+            .unwrap()[0];
+
+        // The i-side contribution from particle 0 must be in a y < 0 bin
+        // when orientations are applied.
+        let mut found_y_negative = false;
+        for ix in 0..8 {
+            for iy in 0..4 {
+                if with_orient.raw_counts[[ix, iy]] > 0 {
+                    found_y_negative = true;
+                }
+            }
+        }
+        assert!(
+            found_y_negative,
+            "rotated-frame bond should land in y < 0 bins"
+        );
     }
 }
