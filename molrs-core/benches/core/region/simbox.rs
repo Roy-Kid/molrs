@@ -133,10 +133,8 @@ fn bench_mic_variants_loop(c: &mut Criterion) {
     group.bench_function("shortest_vector_impl ([F;3] in & out)", |bencher| {
         bencher.iter(|| {
             let mut acc: F = 0.0;
-            for i in 0..n {
-                let a = flat[i];
-                for j in (i + 1)..n {
-                    let b = flat[j];
+            for (i, &a) in flat.iter().enumerate() {
+                for &b in flat.iter().skip(i + 1) {
                     let dr = bx.shortest_vector_impl(a, b);
                     acc += dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                 }
