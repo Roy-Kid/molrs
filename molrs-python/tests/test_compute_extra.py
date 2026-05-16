@@ -10,6 +10,18 @@ import pytest
 import molrs
 
 
+def _make_frame(pts, box_len=10.0):
+    """Wrap an (N, 3) ndarray into a Frame with simbox."""
+    f = molrs.Frame()
+    b = molrs.Block()
+    b.insert("x", np.ascontiguousarray(pts[:, 0], dtype=np.float64))
+    b.insert("y", np.ascontiguousarray(pts[:, 1], dtype=np.float64))
+    b.insert("z", np.ascontiguousarray(pts[:, 2], dtype=np.float64))
+    f["atoms"] = b
+    f.simbox = molrs.Box.cube(box_len)
+    return f
+
+
 def _octahedron_frame(cx=5.0, cy=5.0, cz=5.0, box_len=20.0):
     """Centre particle + ±x/y/z neighbors at unit distance."""
     pts = np.array(
@@ -24,18 +36,11 @@ def _octahedron_frame(cx=5.0, cy=5.0, cz=5.0, box_len=20.0):
         ],
         dtype=np.float64,
     )
-    f = molrs.Frame()
-    b = molrs.Block()
-    b.insert_float("x", pts[:, 0])
-    b.insert_float("y", pts[:, 1])
-    b.insert_float("z", pts[:, 2])
-    f.insert("atoms", b)
-    f.box = molrs.Box.cube(box_len)
-    return f, pts
+    return _make_frame(pts, box_len=box_len), pts
 
 
 def _nlist(frame, pts, cutoff=1.2):
-    nq = molrs.NeighborQuery(frame.box, pts, cutoff)
+    nq = molrs.NeighborQuery(frame.simbox, pts, cutoff)
     return nq.query_self()
 
 
@@ -131,15 +136,8 @@ class TestStaticStructureFactorDebye:
 
 class TestPMFTXY:
     def test_two_particles_two_bins(self):
-        frame, _ = _octahedron_frame()
         pts = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float64)
-        b = molrs.Block()
-        b.insert_float("x", pts[:, 0])
-        b.insert_float("y", pts[:, 1])
-        b.insert_float("z", pts[:, 2])
-        f = molrs.Frame()
-        f.insert("atoms", b)
-        f.box = molrs.Box.cube(10.0)
+        f = _make_frame(pts, box_len=10.0)
         nl = _nlist(f, pts, cutoff=1.5)
         out = molrs.PMFTXY(2.0, 2.0, 8, 8).compute(f, nl)
         counts, density, pmf = out[0]
@@ -149,16 +147,10 @@ class TestPMFTXY:
 class TestClusterProperties:
     def test_two_particle_uniform(self):
         pts = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=np.float64)
-        b = molrs.Block()
-        b.insert_float("x", pts[:, 0])
-        b.insert_float("y", pts[:, 1])
-        b.insert_float("z", pts[:, 2])
-        f = molrs.Frame()
-        f.insert("atoms", b)
-        f.box = molrs.Box.cube(10.0)
+        f = _make_frame(pts, box_len=10.0)
         nl = _nlist(f, pts, cutoff=3.0)
-        cl_results = molrs.Cluster(1).compute(f, nl)
-        out = molrs.ClusterProperties().compute(f, cl_results)
+        cl_result = molrs.Cluster(1).compute(f, nl)
+        out = molrs.ClusterProperties().compute(f, [cl_result])
         d = out[0]
         assert d["sizes"] == [2]
         # Centre of mass at (1, 0, 0).
