@@ -52,6 +52,8 @@
 pub mod center_of_mass;
 pub mod cluster;
 pub mod cluster_centers;
+pub mod density;
+pub mod diffraction;
 pub mod error;
 pub mod gyration_tensor;
 pub mod inertia_tensor;
@@ -69,6 +71,11 @@ pub mod util;
 pub use center_of_mass::{COMResult, CenterOfMass};
 pub use cluster::{Cluster, ClusterProperties, ClusterPropertiesResult, ClusterResult};
 pub use cluster_centers::{ClusterCenters, ClusterCentersResult};
+pub use density::{
+    CorrelationFunction, CorrelationFunctionResult, GaussianDensity, GaussianDensityResult,
+    LocalDensity, LocalDensityResult,
+};
+pub use diffraction::{StaticStructureFactorDebye, StaticStructureFactorDebyeResult};
 pub use error::ComputeError;
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
