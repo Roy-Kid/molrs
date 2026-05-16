@@ -68,6 +68,7 @@ use compute::{
 
 mod dielectric;
 mod signal;
+mod validate;
 
 /// Root Python module for the molrs library.
 ///
@@ -162,6 +163,9 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Dielectric
     dielectric::register_dielectric(m)?;
+
+    // Validation
+    validate::register_validate(m)?;
 
     Ok(())
 }
