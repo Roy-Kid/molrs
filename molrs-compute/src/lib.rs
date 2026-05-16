@@ -62,6 +62,7 @@ pub mod kmeans;
 pub mod msd;
 pub mod order;
 pub mod pca;
+pub mod pmft;
 pub mod radius_of_gyration;
 pub mod rdf;
 pub mod result;
@@ -96,6 +97,7 @@ pub use order::{
     SolidLiquidResult, Steinhardt, SteinhardtResult,
 };
 pub use pca::{Pca2, PcaResult};
+pub use pmft::{PMFTXY, PMFTXYResult, PMFTXYZ, PMFTXYZResult};
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
 pub use rdf::{RDF, RDFResult};
 pub use result::{ComputeResult, DescriptorRow};
