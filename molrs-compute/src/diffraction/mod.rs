@@ -10,5 +10,7 @@
 //! `DiffractionPattern` (both FFT-based).
 
 pub mod debye;
+pub mod direct;
 
 pub use debye::{StaticStructureFactorDebye, StaticStructureFactorDebyeResult};
+pub use direct::{StaticStructureFactorDirect, StaticStructureFactorDirectResult};

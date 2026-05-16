@@ -76,7 +76,10 @@ pub use density::{
     CorrelationFunction, CorrelationFunctionResult, GaussianDensity, GaussianDensityResult,
     LocalDensity, LocalDensityResult, SphereVoxelization, SphereVoxelizationResult,
 };
-pub use diffraction::{StaticStructureFactorDebye, StaticStructureFactorDebyeResult};
+pub use diffraction::{
+    StaticStructureFactorDebye, StaticStructureFactorDebyeResult, StaticStructureFactorDirect,
+    StaticStructureFactorDirectResult,
+};
 pub use environment::{
     AngularSeparationGlobal, AngularSeparationGlobalResult, AngularSeparationNeighbor,
     AngularSeparationNeighborResult, BondOrder, BondOrderResult, LocalBondProjection,
@@ -88,8 +91,9 @@ pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
 pub use kmeans::{KMeans, KMeansResult};
 pub use msd::{MSD, MSDResult, MSDTimeSeries, MsdMode};
 pub use order::{
-    Hexatic, HexaticResult, Nematic, NematicResult, SolidLiquid, SolidLiquidResult, Steinhardt,
-    SteinhardtResult,
+    ContinuousCoordination, ContinuousCoordinationResult, Hexatic, HexaticResult, Nematic,
+    NematicResult, RotationalAutocorrelation, RotationalAutocorrelationResult, SolidLiquid,
+    SolidLiquidResult, Steinhardt, SteinhardtResult,
 };
 pub use pca::{Pca2, PcaResult};
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
