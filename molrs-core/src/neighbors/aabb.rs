@@ -12,28 +12,32 @@
 //! point is farther than the cutoff. Average query cost is
 //! `O(log N + n_hits)`.
 //!
-//! # PBC handling
+//! # PBC handling — MIC-based, no ghost atoms
 //!
-//! When the [`SimBox`] declares any periodic axis, we expand the point
-//! set with [`periodic_buffer`](super::periodic_buffer::periodic_buffer)
-//! using the cutoff as the per-axis buffer distance, build the tree over
-//! the extended set, then deduplicate (i, j_original) pairs to keep the
-//! shortest minimum-image displacement. This matches `LinkCell`'s output
-//! semantics on cross-image pairs.
+//! Periodicity is handled the same way [`LinkCell`](super::linkcell::LinkCell)
+//! does it: the tree is built **only on the original `N` points**, never
+//! on a ghost-expanded set. For each query point we enumerate the small
+//! set of lattice-image shifts that could bring a tree point within
+//! `cutoff` of the query, run a (non-periodic) ball query for each shift,
+//! then pin every hit's displacement to the canonical minimum-image vector
+//! returned by [`SimBox::shortest_vector_raw`].
 //!
-//! # Trade-offs vs `LinkCell`
+//! Number of image shifts per axis is `ceil(cutoff / L_axis)`, so:
+//! - `cutoff < L_axis / 2` (the typical MD case): only the trivial
+//!   `(0, 0, 0)` shift — exactly one tree query per particle.
+//! - `cutoff ≥ L_axis / 2`: up to `27` shifts in 3-D.
 //!
-//! For uniform-density systems with bond-length cutoffs LinkCell is
-//! faster (single hash lookup per cell visit). AABBQuery wins for
-//! non-uniform systems and for ball queries where the cutoff varies per
-//! query point — both are the cases freud's `AABBQuery` was designed
-//! for.
+//! This keeps memory bounded by the original `N` points (no
+//! `O(N · n_images)` ghost copies) and aligns the PBC story with the rest
+//! of `molrs-core::neighbors`: every algorithm gets its periodicity from
+//! `SimBox`, never from `PeriodicBuffer`. `PeriodicBuffer` remains a
+//! standalone user-facing utility for explicit ghost-atom workflows
+//! (visualisation, exports).
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
-use crate::neighbors::periodic_buffer::periodic_buffer;
 use crate::neighbors::{NbListAlgo, NeighborList, QueryMode};
-use crate::region::simbox::SimBox;
+use crate::region::simbox::{BoxKind, SimBox};
 use crate::types::{F, FNx3, FNx3View};
 
 #[derive(Debug, Clone, Copy)]
@@ -83,9 +87,7 @@ impl Aabb {
 
 #[derive(Debug, Clone)]
 enum Node {
-    /// Leaf: holds the index into the point array.
     Leaf { point: u32, aabb: Aabb },
-    /// Internal: indices into the `nodes` arena.
     Inner { left: u32, right: u32, aabb: Aabb },
 }
 
@@ -132,7 +134,6 @@ impl AabbTree {
             });
             return (self.nodes.len() - 1) as u32;
         }
-        // Compute parent AABB and longest axis.
         let mut amin = [F::INFINITY; 3];
         let mut amax = [F::NEG_INFINITY; 3];
         for &i in idx.iter() {
@@ -154,7 +155,6 @@ impl AabbTree {
                 ext = e;
             }
         }
-        // Partition `idx` around the median along `ax`.
         idx.sort_unstable_by(|a, b| {
             points[[*a as usize, ax]]
                 .partial_cmp(&points[[*b as usize, ax]])
@@ -172,7 +172,6 @@ impl AabbTree {
         (self.nodes.len() - 1) as u32
     }
 
-    /// Visit every leaf whose point is within `radius` of `p`.
     fn query(&self, p: [F; 3], radius_sq: F, mut hit: impl FnMut(u32)) {
         if self.nodes.is_empty() {
             return;
@@ -203,12 +202,7 @@ pub struct AabbQuery {
     cutoff: F,
     bx: Option<SimBox>,
     result: NeighborList,
-    /// The actual points the tree was built on (may include ghosts).
-    tree_points: FNx3,
-    /// Map from `tree_points` row index back to the original point index.
-    tree_to_orig: Vec<u32>,
     tree: AabbTree,
-    /// Stored original positions (for `visit_pairs` on demand).
     stored_pos: FNx3,
 }
 
@@ -218,8 +212,6 @@ impl AabbQuery {
             cutoff,
             bx: None,
             result: NeighborList::empty(),
-            tree_points: FNx3::zeros((0, 3)),
-            tree_to_orig: Vec::new(),
             tree: AabbTree::default(),
             stored_pos: FNx3::zeros((0, 3)),
         }
@@ -229,78 +221,124 @@ impl AabbQuery {
         self.cutoff
     }
 
-    fn build_extended_set(&mut self, points: FNx3View<'_>, bx: &SimBox) {
+    /// Enumerate lattice-image shifts whose magnitude could bring a tree
+    /// point within `cutoff` of a query point. For each periodic axis,
+    /// the image range is `[−ceil(cutoff/L), +ceil(cutoff/L)]`; non-PBC
+    /// axes contribute only the zero shift.
+    fn enumerate_shifts(bx: &SimBox, cutoff: F) -> Vec<[F; 3]> {
         let pbc = bx.pbc();
-        let any_pbc = pbc.iter().any(|&p| p);
-        if !any_pbc {
-            self.tree_points = points.to_owned();
-            self.tree_to_orig = (0..points.nrows() as u32).collect();
-            return;
+        let lengths = match bx.kind() {
+            BoxKind::Ortho { len, .. } => [len[0], len[1], len[2]],
+            BoxKind::Triclinic => {
+                let l = bx.lengths();
+                [l[0], l[1], l[2]]
+            }
+        };
+        let range = |ax_len: F, periodic: bool| -> (i32, i32) {
+            if !periodic || ax_len <= 0.0 {
+                (0, 0)
+            } else {
+                let n = (cutoff / ax_len).ceil() as i32;
+                (-n, n)
+            }
+        };
+        let (nxn, nxp) = range(lengths[0], pbc[0]);
+        let (nyn, nyp) = range(lengths[1], pbc[1]);
+        let (nzn, nzp) = range(lengths[2], pbc[2]);
+
+        // For ortho boxes the shift is axis-aligned and trivial. For
+        // triclinic we use the lattice-vector basis.
+        let mut shifts: Vec<[F; 3]> = Vec::new();
+        let lat = match bx.kind() {
+            BoxKind::Ortho { .. } => None,
+            BoxKind::Triclinic => Some([bx.lattice(0), bx.lattice(1), bx.lattice(2)]),
+        };
+        for ix in nxn..=nxp {
+            for iy in nyn..=nyp {
+                for iz in nzn..=nzp {
+                    let (dx, dy, dz) = match &lat {
+                        None => (
+                            ix as F * lengths[0],
+                            iy as F * lengths[1],
+                            iz as F * lengths[2],
+                        ),
+                        Some(a) => (
+                            ix as F * a[0][0] + iy as F * a[1][0] + iz as F * a[2][0],
+                            ix as F * a[0][1] + iy as F * a[1][1] + iz as F * a[2][1],
+                            ix as F * a[0][2] + iy as F * a[1][2] + iz as F * a[2][2],
+                        ),
+                    };
+                    shifts.push([dx, dy, dz]);
+                }
+            }
         }
-        let buf = [self.cutoff; 3];
-        let pb = periodic_buffer(points, bx, buf);
-        self.tree_points = pb.positions;
-        self.tree_to_orig = pb.indices;
+        shifts
     }
 
     fn compute_pairs(&mut self, points: FNx3View<'_>, bx: &SimBox) {
         self.result.clear();
-        self.build_extended_set(points, bx);
-        self.tree = AabbTree::build(self.tree_points.view());
-
+        self.tree = AabbTree::build(points);
         let n = points.nrows();
         let cutoff_sq = self.cutoff * self.cutoff;
+        let shifts = Self::enumerate_shifts(bx, self.cutoff);
 
-        // For self-query MIC dedup: for each (i, j_orig), keep shortest
-        // displacement.
-        let mut best: HashMap<(u32, u32), (F, [F; 3])> = HashMap::new();
+        // Track which (i, j) pairs we've already emitted; the MIC
+        // displacement gives the canonical d² regardless of which image
+        // produced the hit, so we only need to emit each pair once.
+        let mut seen: HashSet<(u32, u32)> = HashSet::new();
 
         for i in 0..n {
-            let pi = [points[[i, 0]], points[[i, 1]], points[[i, 2]]];
-            let tree_to_orig = &self.tree_to_orig;
-            let tp = &self.tree_points;
-            let mut hits: Vec<u32> = Vec::new();
-            self.tree.query(pi, cutoff_sq, |idx| hits.push(idx));
-            for tree_idx in hits {
-                let j_orig = tree_to_orig[tree_idx as usize];
-                if j_orig as usize == i {
-                    // Skip the self-image (i, i)
-                    if tp[[tree_idx as usize, 0]] == pi[0]
-                        && tp[[tree_idx as usize, 1]] == pi[1]
-                        && tp[[tree_idx as usize, 2]] == pi[2]
-                    {
-                        continue;
+            let r_i = [points[[i, 0]], points[[i, 1]], points[[i, 2]]];
+            for shift in &shifts {
+                let shifted = [r_i[0] + shift[0], r_i[1] + shift[1], r_i[2] + shift[2]];
+                self.tree.query(shifted, cutoff_sq, |j| {
+                    let i_u = i as u32;
+                    if i_u >= j {
+                        return; // self-query half-shell: i < j only
                     }
-                }
-                // i < j_orig for self-query half-shell.
-                let i_u = i as u32;
-                if i_u >= j_orig {
-                    continue;
-                }
-                let dx = tp[[tree_idx as usize, 0]] - pi[0];
-                let dy = tp[[tree_idx as usize, 1]] - pi[1];
-                let dz = tp[[tree_idx as usize, 2]] - pi[2];
-                let d2 = dx * dx + dy * dy + dz * dz;
-                let key = (i_u, j_orig);
-                match best.get(&key) {
-                    Some(&(prev_d2, _)) if prev_d2 <= d2 => {}
-                    _ => {
-                        best.insert(key, (d2, [dx, dy, dz]));
+                    let key = (i_u, j);
+                    if seen.contains(&key) {
+                        return;
                     }
-                }
+                    let r_j = [
+                        points[[j as usize, 0]],
+                        points[[j as usize, 1]],
+                        points[[j as usize, 2]],
+                    ];
+                    let dr = bx.shortest_vector_raw(r_i, r_j);
+                    let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
+                    if d2 <= cutoff_sq {
+                        seen.insert(key);
+                        self.result.push(i_u, j, d2, dr);
+                    }
+                });
             }
         }
 
-        // Sort emitted pairs lexicographically for deterministic output.
-        let mut keys: Vec<(u32, u32)> = best.keys().copied().collect();
-        keys.sort_unstable();
-        for (i, j) in keys {
-            let (d2, dr) = best[&(i, j)];
-            self.result.push(i, j, d2, dr);
+        // Sort the emitted pairs lexicographically for deterministic output
+        // (matches LinkCell semantics).
+        let n_pairs = self.result.n_pairs();
+        let mut order: Vec<usize> = (0..n_pairs).collect();
+        order.sort_unstable_by_key(|&k| {
+            (
+                self.result.query_point_indices()[k],
+                self.result.point_indices()[k],
+            )
+        });
+        let mut sorted = NeighborList::with_mode(QueryMode::SelfQuery, n, n);
+        for k in order {
+            sorted.push(
+                self.result.query_point_indices()[k],
+                self.result.point_indices()[k],
+                self.result.dist_sq()[k],
+                [
+                    self.result.vectors()[[k, 0]],
+                    self.result.vectors()[[k, 1]],
+                    self.result.vectors()[[k, 2]],
+                ],
+            );
         }
-        self.result.mode = QueryMode::SelfQuery;
-        self.result.num_points = n;
-        self.result.num_query_points = n;
+        self.result = sorted;
         self.bx = Some(bx.clone());
         self.stored_pos = points.to_owned();
     }
@@ -381,7 +419,6 @@ mod tests {
 
     #[test]
     fn matches_brute_force_with_pbc() {
-        // Two atoms straddling the periodic boundary.
         let pts = array![[0.5_f64, 5.0, 5.0], [9.5, 5.0, 5.0]];
         let bx = cube_bx(10.0, [true, true, true]);
         let mut aabb = AabbQuery::new(2.0);
@@ -395,6 +432,33 @@ mod tests {
         let d2_b = bf.query().dist_sq()[0];
         assert!((d2_a - 1.0).abs() < 1e-12);
         assert!((d2_a - d2_b).abs() < 1e-12);
+    }
+
+    #[test]
+    fn cutoff_below_box_size_enumerates_27_pbc_images() {
+        // Tree is built on raw positions (no wrapping), so the +1 and −1
+        // image shifts are needed to catch wrap-pairs near each boundary,
+        // even when cutoff < L/2.
+        let bx = cube_bx(10.0, [true; 3]);
+        let shifts = AabbQuery::enumerate_shifts(&bx, 2.0);
+        assert_eq!(shifts.len(), 27);
+    }
+
+    #[test]
+    fn non_pbc_box_has_only_zero_shift() {
+        let bx = cube_bx(10.0, [false; 3]);
+        let shifts = AabbQuery::enumerate_shifts(&bx, 2.0);
+        assert_eq!(shifts.len(), 1);
+        assert_eq!(shifts[0], [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn cutoff_above_full_box_enumerates_more_images() {
+        // With cutoff > L, the second image ring is needed too.
+        let bx = cube_bx(10.0, [true; 3]);
+        let shifts = AabbQuery::enumerate_shifts(&bx, 12.0);
+        // ceil(12/10) = 2 → [-2, 2] = 5 per axis → 125 total
+        assert_eq!(shifts.len(), 125);
     }
 
     #[test]
@@ -415,9 +479,7 @@ mod tests {
         aabb.build(pts.view(), &bx);
         let mut bf = BruteForce::new(1.5);
         bf.build(pts.view(), &bx);
-        // Pair counts must agree.
         assert_eq!(aabb.query().n_pairs(), bf.query().n_pairs());
-        // Sets of (i, j) must agree.
         let mut a: Vec<(u32, u32)> = (0..aabb.query().n_pairs())
             .map(|k| {
                 (
@@ -445,11 +507,8 @@ mod tests {
             min: [0.0_f64, 0.0, 0.0],
             max: [1.0, 1.0, 1.0],
         };
-        // Inside → 0.
         assert!(a.dist_sq_to([0.5, 0.5, 0.5]).abs() < 1e-12);
-        // Distance from (2, 0.5, 0.5) → (2 - 1)² = 1.
         assert!((a.dist_sq_to([2.0, 0.5, 0.5]) - 1.0).abs() < 1e-12);
-        // Diagonal from (2, 2, 2) → 3 · 1².
         assert!((a.dist_sq_to([2.0, 2.0, 2.0]) - 3.0).abs() < 1e-12);
     }
 }
