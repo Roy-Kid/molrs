@@ -20,7 +20,7 @@
 //! set of lattice-image shifts that could bring a tree point within
 //! `cutoff` of the query, run a (non-periodic) ball query for each shift,
 //! then pin every hit's displacement to the canonical minimum-image vector
-//! returned by [`SimBox::shortest_vector_raw`].
+//! returned by [`SimBox::shortest_vector_impl`].
 //!
 //! Number of image shifts per axis is `ceil(cutoff / L_axis)`, so:
 //! - `cutoff < L_axis / 2` (the typical MD case): only the trivial
@@ -305,7 +305,7 @@ impl AabbQuery {
                         points[[j as usize, 1]],
                         points[[j as usize, 2]],
                     ];
-                    let dr = bx.shortest_vector_raw(r_i, r_j);
+                    let dr = bx.shortest_vector_impl(r_i, r_j);
                     let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                     if d2 <= cutoff_sq {
                         seen.insert(key);
