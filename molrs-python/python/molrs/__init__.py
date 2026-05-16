@@ -66,6 +66,17 @@ from .molrs import (
     PcaResult,
     KMeans,
     KMeansResult,
+    # Freud-ported analyzers (registered by compute_extra::register)
+    Steinhardt,
+    Nematic,
+    Hexatic,
+    SolidLiquid,
+    ClusterProperties,
+    LocalDensity,
+    GaussianDensity,
+    BondOrder,
+    StaticStructureFactorDebye,
+    PMFTXY,
 )
 
 from . import io  # molpy-compatible I/O facade (read_lammps_data, …)
@@ -131,4 +142,14 @@ __all__ = [
     "PcaResult",
     "KMeans",
     "KMeansResult",
+    "Steinhardt",
+    "Nematic",
+    "Hexatic",
+    "SolidLiquid",
+    "ClusterProperties",
+    "LocalDensity",
+    "GaussianDensity",
+    "BondOrder",
+    "StaticStructureFactorDebye",
+    "PMFTXY",
 ]
