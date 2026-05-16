@@ -11,8 +11,6 @@ tools and the docs build.
 
 ::: molrs.Block
 
-::: molrs.Grid
-
 ::: molrs.Frame
 
 ## Topology and SMILES
@@ -100,8 +98,6 @@ tools and the docs build.
 ::: molrs.ScalarObservable
 
 ::: molrs.VectorObservable
-
-::: molrs.GridObservable
 
 ## Analysis
 
