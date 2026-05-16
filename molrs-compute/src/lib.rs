@@ -93,12 +93,15 @@ pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
 pub use kmeans::{KMeans, KMeansResult};
 pub use msd::{MSD, MSDResult, MSDTimeSeries, MsdMode};
 pub use order::{
-    ContinuousCoordination, ContinuousCoordinationResult, Hexatic, HexaticResult, Nematic,
-    NematicResult, RotationalAutocorrelation, RotationalAutocorrelationResult, SolidLiquid,
-    SolidLiquidResult, Steinhardt, SteinhardtResult,
+    ContinuousCoordination, ContinuousCoordinationResult, Cubatic, CubaticResult, Hexatic,
+    HexaticResult, Nematic, NematicResult, RotationalAutocorrelation,
+    RotationalAutocorrelationResult, SolidLiquid, SolidLiquidResult, Steinhardt, SteinhardtResult,
 };
 pub use pca::{Pca2, PcaResult};
-pub use pmft::{PMFTXY, PMFTXYResult, PMFTXYZ, PMFTXYZResult};
+pub use pmft::{
+    PMFTR12, PMFTR12Args, PMFTR12Result, PMFTXY, PMFTXYResult, PMFTXYT, PMFTXYTArgs, PMFTXYTResult,
+    PMFTXYZ, PMFTXYZResult,
+};
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
 pub use rdf::{RDF, RDFResult};
 pub use result::{ComputeResult, DescriptorRow};

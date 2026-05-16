@@ -12,8 +12,12 @@
 //! pattern needed for full PMFTXYZ-with-orientations is encapsulated by
 //! this module's eventual `base.rs`.
 
+pub mod r12;
 pub mod xy;
+pub mod xyt;
 pub mod xyz;
 
+pub use r12::{PMFTR12, PMFTR12Args, PMFTR12Result};
 pub use xy::{PMFTXY, PMFTXYResult};
+pub use xyt::{PMFTXYT, PMFTXYTArgs, PMFTXYTResult};
 pub use xyz::{PMFTXYZ, PMFTXYZResult};

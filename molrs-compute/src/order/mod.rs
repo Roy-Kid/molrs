@@ -9,6 +9,7 @@
 //! `ContinuousCoordination`, `RotationalAutocorrelation`.
 
 pub mod continuous_coordination;
+pub mod cubatic;
 pub mod hexatic;
 pub mod nematic;
 pub mod rotational_autocorrelation;
@@ -16,6 +17,7 @@ pub mod solid_liquid;
 pub mod steinhardt;
 
 pub use continuous_coordination::{ContinuousCoordination, ContinuousCoordinationResult};
+pub use cubatic::{Cubatic, CubaticResult};
 pub use hexatic::{Hexatic, HexaticResult};
 pub use nematic::{Nematic, NematicResult};
 pub use rotational_autocorrelation::{RotationalAutocorrelation, RotationalAutocorrelationResult};
