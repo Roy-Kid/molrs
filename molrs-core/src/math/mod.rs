@@ -2,6 +2,17 @@
 //!
 //! Default: hand-written 3x3 routines (WASM-friendly, zero external deps).
 //! Feature `blas`: use ndarray-linalg for determinant and inverse (requires LAPACK backend).
+//!
+//! Specialised numerical sub-modules for spherical harmonics, Wigner symbols,
+//! and the symmetric 3×3 eigensolver live alongside the linear-algebra core
+//! and are used by `molrs-compute::order`, `molrs-compute::environment`, and
+//! other downstream analyzers ported from `freud`.
+
+pub mod complex;
+pub mod diagonalize;
+pub mod spherical_harmonics;
+pub mod wigner3j;
+pub mod wigner_d;
 
 use ndarray::{Array2, ArrayView2, array};
 

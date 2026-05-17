@@ -32,15 +32,27 @@ pub struct RDFResult {
     pub r_min: F,
     /// Number of frames fed into `n_r` / `volume` / `n_points`.
     pub n_frames: usize,
+    /// Dimensionality used for the shell-volume normalization (2 or 3).
+    /// Defaults to 3.
+    pub dimensionality: u8,
     /// Whether `finalize` has already been called.
     pub finalized: bool,
 }
 
 impl RDFResult {
+    /// Shell volume between `r_inner` and `r_outer` for the configured
+    /// dimensionality. 3-D: `(4/3) π (r_o³ − r_i³)`. 2-D: `π (r_o² − r_i²)`.
+    fn shell_volume(&self, r_inner: F, r_outer: F) -> F {
+        let pi: F = std::f64::consts::PI;
+        match self.dimensionality {
+            2 => pi * (r_outer.powi(2) - r_inner.powi(2)),
+            _ => (4.0 / 3.0) * pi * (r_outer.powi(3) - r_inner.powi(3)),
+        }
+    }
+
     fn compute_normalized(&self) -> Array1<F> {
         let nf = self.n_frames.max(1) as F;
         let vol = self.volume / nf;
-        let pi: F = std::f64::consts::PI as F;
         let n_bins = self.n_r.len();
         let mut gr = Array1::<F>::zeros(n_bins);
 
@@ -54,7 +66,7 @@ impl RDFResult {
                 for i in 0..n_bins {
                     let r_inner = self.bin_edges[i];
                     let r_outer = self.bin_edges[i + 1];
-                    let v_shell = (4.0 / 3.0) * pi * (r_outer.powi(3) - r_inner.powi(3));
+                    let v_shell = self.shell_volume(r_inner, r_outer);
                     let ideal_count = rho * v_shell * n * nf;
                     if ideal_count > 0.0 {
                         gr[i] = 2.0 * self.n_r[i] / ideal_count;
@@ -70,7 +82,7 @@ impl RDFResult {
                 for i in 0..n_bins {
                     let r_inner = self.bin_edges[i];
                     let r_outer = self.bin_edges[i + 1];
-                    let v_shell = (4.0 / 3.0) * pi * (r_outer.powi(3) - r_inner.powi(3));
+                    let v_shell = self.shell_volume(r_inner, r_outer);
                     let ideal_count = n_a * n_b * v_shell / vol * nf;
                     if ideal_count > 0.0 {
                         gr[i] = self.n_r[i] / ideal_count;

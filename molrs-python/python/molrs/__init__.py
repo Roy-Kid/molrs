@@ -1,3 +1,19 @@
+"""molrs — Rust-backed molecular simulation primitives.
+
+Top-level re-exports cover core data structures, I/O, regions, embedding,
+force fields, and the SMILES front-end. Analysis classes live under the
+:mod:`molrs.compute` package, namespaced by domain:
+
+* :mod:`molrs.compute.density` — RDF, GaussianDensity, LocalDensity
+* :mod:`molrs.compute.order` — Steinhardt, Nematic, Hexatic, SolidLiquid
+* :mod:`molrs.compute.environment` — BondOrder
+* :mod:`molrs.compute.pmft` — PMFTXY
+* :mod:`molrs.compute.diffraction` — StaticStructureFactorDebye
+* :mod:`molrs.compute.cluster` — Cluster, ClusterProperties, gyration / inertia / COM
+* :mod:`molrs.compute.msd` — MSD
+* :mod:`molrs.compute.ml` — PCA, K-means, descriptor rows
+"""
+
 from .molrs import (
     # SimBox + neighbors
     Box,
@@ -46,32 +62,14 @@ from .molrs import (
     Potentials,
     read_forcefield_xml,
     extract_coords,
-    # Compute analyses
-    RDF,
-    RDFResult,
-    MSD,
-    MSDResult,
-    MSDTimeSeries,
-    Cluster,
-    ClusterResult,
-    ClusterCenters,
-    ClusterCentersResult,
-    CenterOfMass,
-    CenterOfMassResult,
-    GyrationTensor,
-    InertiaTensor,
-    RadiusOfGyration,
-    DescriptorRow,
-    Pca2,
-    PcaResult,
-    KMeans,
-    KMeansResult,
 )
 
 from . import io  # molpy-compatible I/O facade (read_lammps_data, …)
+from . import compute  # analysis subpackage — molrs.compute.{density,order,…}
 
 __all__ = [
     "io",
+    "compute",
     "Box",
     "LinkedCell",
     "NeighborQuery",
@@ -112,23 +110,4 @@ __all__ = [
     "Potentials",
     "read_forcefield_xml",
     "extract_coords",
-    "RDF",
-    "RDFResult",
-    "MSD",
-    "MSDResult",
-    "MSDTimeSeries",
-    "Cluster",
-    "ClusterResult",
-    "ClusterCenters",
-    "ClusterCentersResult",
-    "CenterOfMass",
-    "CenterOfMassResult",
-    "GyrationTensor",
-    "InertiaTensor",
-    "RadiusOfGyration",
-    "DescriptorRow",
-    "Pca2",
-    "PcaResult",
-    "KMeans",
-    "KMeansResult",
 ]

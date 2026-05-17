@@ -46,7 +46,8 @@ def make_frame(offset: float) -> molrs.Frame:
 
 frames = [make_frame(0.0), make_frame(0.1), make_frame(0.2)]
 
-msd = molrs.MSD()
+from molrs.compute.msd import MSD
+msd = MSD()
 series = msd.compute(frames)
 
 print("points:", len(series))
@@ -87,8 +88,9 @@ frame.simbox = molrs.Box.cube(20.0)
 nq = molrs.NeighborQuery(frame.simbox, points, cutoff=1.0)
 nlist = nq.query_self()
 
-clusters = molrs.Cluster(min_cluster_size=1).compute(frame, nlist)
-centers = molrs.ClusterCenters().compute(frame, clusters)
+from molrs.compute.cluster import Cluster, ClusterCenters
+clusters = Cluster(min_cluster_size=1).compute(frame, nlist)
+centers = ClusterCenters().compute(frame, clusters)
 
 print("clusters:", clusters.num_clusters)
 print("sizes:", clusters.cluster_sizes)

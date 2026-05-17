@@ -117,7 +117,7 @@ impl LinkCell {
             for si in start..end {
                 let oj = self.sorted_idx[si];
                 let pj = pos_at(&self.sorted_pos, si);
-                let dr = bx.shortest_vector_raw(qp, pj);
+                let dr = bx.shortest_vector_impl(qp, pj);
                 let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                 callback(oj, d2, dr);
             }
@@ -192,7 +192,7 @@ impl NbListAlgo for LinkCell {
                 let oi = self.sorted_idx[si];
                 for sj in (si + 1)..end {
                     let pj = pos_at(&self.sorted_pos, sj);
-                    let dr = self.bx.shortest_vector_raw(pi, pj);
+                    let dr = self.bx.shortest_vector_impl(pi, pj);
                     let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                     if d2 <= cutoff2 {
                         visitor.visit_pair(oi, self.sorted_idx[sj], d2, dr);
@@ -214,7 +214,7 @@ impl NbListAlgo for LinkCell {
                     for sj in nc_start..nc_end {
                         let oj = self.sorted_idx[sj];
                         let pj = pos_at(&self.sorted_pos, sj);
-                        let dr = self.bx.shortest_vector_raw(pi, pj);
+                        let dr = self.bx.shortest_vector_impl(pi, pj);
                         let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                         if d2 <= cutoff2 {
                             if oi < oj {
@@ -317,7 +317,7 @@ impl LinkCell {
                 let oi = self.sorted_idx[si];
                 for sj in (si + 1)..end {
                     let pj = pos_at(&self.sorted_pos, sj);
-                    let dr = self.bx.shortest_vector_raw(pi, pj);
+                    let dr = self.bx.shortest_vector_impl(pi, pj);
                     let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                     if d2 <= cutoff2 {
                         self.result.push(oi, self.sorted_idx[sj], d2, dr);
@@ -340,7 +340,7 @@ impl LinkCell {
                     for sj in nc_start..nc_end {
                         let oj = self.sorted_idx[sj];
                         let pj = pos_at(&self.sorted_pos, sj);
-                        let dr = self.bx.shortest_vector_raw(pi, pj);
+                        let dr = self.bx.shortest_vector_impl(pi, pj);
                         let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                         if d2 <= cutoff2 {
                             if oi < oj {
@@ -396,7 +396,7 @@ impl LinkCell {
                     let oi = sorted_idx[si];
                     for sj in (si + 1)..end {
                         let pj = pos_at(sorted_pos, sj);
-                        let dr = bx.shortest_vector_raw(pi, pj);
+                        let dr = bx.shortest_vector_impl(pi, pj);
                         let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                         if d2 <= cutoff2 {
                             acc.push(oi, sorted_idx[sj], d2, dr);
@@ -420,7 +420,7 @@ impl LinkCell {
                         for sj in nc_start..nc_end {
                             let oj = sorted_idx[sj];
                             let pj = pos_at(sorted_pos, sj);
-                            let dr = bx.shortest_vector_raw(pi, pj);
+                            let dr = bx.shortest_vector_impl(pi, pj);
                             let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                             if d2 <= cutoff2 {
                                 if oi < oj {
@@ -465,7 +465,7 @@ impl LinkCell {
                 let oi = self.sorted_idx[si];
                 for sj in (si + 1)..end {
                     let pj = pos_at(&self.sorted_pos, sj);
-                    let dr = self.bx.shortest_vector_raw(pi, pj);
+                    let dr = self.bx.shortest_vector_impl(pi, pj);
                     let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                     if d2 <= cutoff2 {
                         self.result.push(oi, self.sorted_idx[sj], d2, dr);
@@ -485,7 +485,7 @@ impl LinkCell {
                     for sj in nc_start..nc_end {
                         let oj = self.sorted_idx[sj];
                         let pj = pos_at(&self.sorted_pos, sj);
-                        let dr = self.bx.shortest_vector_raw(pi, pj);
+                        let dr = self.bx.shortest_vector_impl(pi, pj);
                         let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                         if d2 <= cutoff2 {
                             if oi < oj {
