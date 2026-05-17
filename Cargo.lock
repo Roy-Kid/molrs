@@ -873,6 +873,7 @@ dependencies = [
  "molcrafts-molrs-embed",
  "molcrafts-molrs-ff",
  "molcrafts-molrs-io",
+ "molcrafts-molrs-signal",
 ]
 
 [[package]]
@@ -881,6 +882,7 @@ version = "0.0.16"
 dependencies = [
  "criterion",
  "molcrafts-molrs-core",
+ "molcrafts-molrs-signal",
  "ndarray",
  "rand 0.9.2",
  "rayon",
@@ -950,6 +952,15 @@ dependencies = [
  "serde_json",
  "tempfile",
  "zarrs",
+]
+
+[[package]]
+name = "molcrafts-molrs-signal"
+version = "0.0.16"
+dependencies = [
+ "ndarray",
+ "rand 0.9.2",
+ "rustfft",
 ]
 
 [[package]]

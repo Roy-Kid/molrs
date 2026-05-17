@@ -24,6 +24,7 @@
 //! - `smiles`   — SMILES parser
 //! - `ff`       — force fields (MMFF94, PME, typifier)
 //! - `embed`    — 3D coordinate generation
+//! - `signal`   — signal processing (FFT-based ACF, windowing, frequency grids)
 //! - `full`     — everything above
 //!
 //! Core flags forwarded to `molrs-core`: `rayon`, `zarr`, `filesystem`, `blas`.
@@ -53,3 +54,6 @@ pub use molrs_ff as ff;
 
 #[cfg(feature = "embed")]
 pub use molrs_embed as embed;
+
+#[cfg(feature = "signal")]
+pub use molrs_signal as signal;

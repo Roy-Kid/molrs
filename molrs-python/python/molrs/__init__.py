@@ -66,10 +66,16 @@ from .molrs import (
 
 from . import io  # molpy-compatible I/O facade (read_lammps_data, …)
 from . import compute  # analysis subpackage — molrs.compute.{density,order,…}
+from . import signal
+from . import validate
+from . import dielectric
 
 __all__ = [
     "io",
     "compute",
+    "signal",
+    "validate",
+    "dielectric",
     "Box",
     "LinkedCell",
     "NeighborQuery",

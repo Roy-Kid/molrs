@@ -67,6 +67,9 @@ use compute::{
 };
 
 mod compute_extra;
+mod dielectric;
+mod signal;
+mod validate;
 
 /// Root Python module for the molrs library.
 ///
@@ -156,6 +159,17 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Additional analyzers ported from freud (Steinhardt, Nematic, …).
     compute_extra::register(m)?;
+
+    // Signal processing
+    m.add_function(wrap_pyfunction!(signal::signal_acf_fft, m)?)?;
+    m.add_function(wrap_pyfunction!(signal::signal_apply_window, m)?)?;
+    m.add_function(wrap_pyfunction!(signal::signal_frequency_grid, m)?)?;
+
+    // Dielectric
+    dielectric::register_dielectric(m)?;
+
+    // Validation
+    validate::register_validate(m)?;
 
     Ok(())
 }
