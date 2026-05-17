@@ -619,25 +619,16 @@ impl PyCenterOfMass {
 
 fn tensor_list_into_pyarray<'py>(
     py: Python<'py>,
-    batched: bool,
+    _batched: bool,
     tensors: Vec<[[F; 3]; 3]>,
 ) -> Bound<'py, PyArrayDyn<NpF>> {
     let n = tensors.len();
-    if !batched {
-        let flat: Vec<NpF> = tensors[0]
-            .iter()
-            .flat_map(|row| row.iter().map(|&v| v as NpF))
-            .collect();
-        return ndarray::ArrayD::from_shape_vec(vec![3, 3], flat)
-            .expect("tensor shape")
-            .into_pyarray(py);
-    }
     let flat: Vec<NpF> = tensors
         .iter()
         .flat_map(|t| t.iter().flat_map(|row| row.iter().map(|&v| v as NpF)))
         .collect();
     ndarray::ArrayD::from_shape_vec(vec![n, 3, 3], flat)
-        .expect("tensor batch shape")
+        .expect("tensor shape")
         .into_pyarray(py)
 }
 
