@@ -67,6 +67,7 @@ pub mod pmft;
 pub mod radius_of_gyration;
 pub mod rdf;
 pub mod result;
+pub mod spectra;
 pub mod traits;
 pub mod util;
 
@@ -110,4 +111,5 @@ pub use pmft::{
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
 pub use rdf::{RDF, RDFResult};
 pub use result::{ComputeResult, DescriptorRow};
+pub use spectra::{RamanSpectrum, Spectrum, ir_spectrum, power_spectrum, raman_spectrum};
 pub use traits::Compute;

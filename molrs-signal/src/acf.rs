@@ -2,14 +2,36 @@ use ndarray::Array1;
 use rustfft::num_traits::Zero;
 use rustfft::{FftPlanner, num_complex::Complex64};
 
-/// Raw FFT-based autocorrelation via Wiener-Khinchin theorem.
+/// Linear autocorrelation via the Wiener-Khinchin theorem (FFT-based).
 ///
-/// Returns the un-normalized autocorrelation of `data` up to `max_lag`.
-/// The caller is responsible for normalization.
+/// Returns the un-normalized linear autocorrelation `r[t] = Σ_{τ=0}^{n-1-t} x[τ]·x[τ+t]`
+/// for `t = 0, 1, …, max_lag`. The caller is responsible for any further
+/// normalization (e.g. division by `(n - t)` for the unbiased estimator,
+/// or by `r[0]` for the normalized ACF).
 ///
-/// Algorithm: zero-pad to next power of 2 >= 2*max_lag, forward FFT,
-/// squared magnitude, inverse FFT, extract first (max_lag + 1) entries.
+/// Reference: Wiener (1930) "Generalized harmonic analysis";
+/// Khinchin (1934). Implementation follows the standard linear-ACF recipe
+/// (Press et al., *Numerical Recipes* §13.2): zero-pad to ≥ 2·n,
+/// forward FFT, take the squared magnitude, inverse FFT.
+///
+/// Padding to `(2·n).next_power_of_two()` is required: with `n_pad = n`
+/// the inverse FFT yields the *circular* autocorrelation, whose tail
+/// wraps around and contaminates the lag-t entries with `r_linear[n − t]`.
 pub fn acf_fft(data: &Array1<f64>, max_lag: usize) -> Result<Array1<f64>, SignalError> {
+    let mut planner = FftPlanner::new();
+    acf_fft_with_planner(&mut planner, data, max_lag)
+}
+
+/// Same as [`acf_fft`] but reuses the caller-provided `FftPlanner`.
+///
+/// `rustfft` caches plans inside the planner, so passing one planner across
+/// many calls (e.g. component-wise ACFs in dielectric spectra) avoids paying
+/// the plan-construction cost on every invocation.
+pub fn acf_fft_with_planner(
+    planner: &mut FftPlanner<f64>,
+    data: &Array1<f64>,
+    max_lag: usize,
+) -> Result<Array1<f64>, SignalError> {
     let n = data.len();
     if n == 0 {
         return Err(SignalError::EmptyInput);
@@ -18,9 +40,8 @@ pub fn acf_fft(data: &Array1<f64>, max_lag: usize) -> Result<Array1<f64>, Signal
         return Err(SignalError::MaxLagTooLarge { max_lag, len: n });
     }
 
-    let n_pad = n;
+    let n_pad = (2 * n).next_power_of_two();
 
-    let mut planner = FftPlanner::new();
     let fwd = planner.plan_fft_forward(n_pad);
     let inv = planner.plan_fft_inverse(n_pad);
 
@@ -45,10 +66,15 @@ pub fn acf_fft(data: &Array1<f64>, max_lag: usize) -> Result<Array1<f64>, Signal
     Ok(result)
 }
 
+/// Failure modes for `molrs-signal` primitives.
 #[derive(Debug, PartialEq)]
 pub enum SignalError {
+    /// Input array has length 0.
     EmptyInput,
+    /// `max_lag` does not satisfy `max_lag < data.len()`.
     MaxLagTooLarge { max_lag: usize, len: usize },
+    /// Window/axis-aware operation was asked to operate along an axis
+    /// that does not exist on the input.
     AxisOutOfBounds { axis: usize, ndim: usize },
 }
 
@@ -86,13 +112,19 @@ mod tests {
     }
 
     #[test]
-    fn test_acf_constant_signal_all_lags_equal() {
+    fn test_acf_constant_signal_linear_decay() {
+        // Linear ACF of constant c over n samples: r[t] = (n - t) · c²
         let data = arr1(&[3.0, 3.0, 3.0]);
         let result = acf_fft(&data, 2).unwrap();
         assert_eq!(result.len(), 3);
-        let expected = 3.0 * 3.0_f64.powi(2); // 27
-        for v in result.iter() {
-            assert!((v - expected).abs() < 1e-10);
+        let c_sq = 3.0_f64.powi(2);
+        let n = 3.0;
+        for (t, v) in result.iter().enumerate() {
+            let expected = (n - t as f64) * c_sq;
+            assert!(
+                (v - expected).abs() < 1e-10,
+                "lag {t}: got {v}, expected {expected}",
+            );
         }
     }
 

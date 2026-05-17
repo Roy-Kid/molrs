@@ -2,15 +2,42 @@ use ndarray::ArrayD;
 
 use super::acf::SignalError;
 
+/// Window function used to suppress spectral leakage when Fourier-
+/// transforming a finite-length signal.
+///
+/// Both variants use the **symmetric** (`N − 1` denominator) form
+/// matching `scipy.signal.windows.{hann,blackman}(M, sym=True)`. For
+/// pure spectral analysis the periodic (`sym=False`) form is sometimes
+/// preferred; if needed, add a `periodic` variant rather than changing
+/// the existing semantics.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WindowType {
+    /// Hann window: `w[n] = 0.5 · (1 − cos(2π·n/(N−1)))`.
     Hann,
+    /// Approximate Blackman window with the textbook three-term
+    /// coefficients `(0.42, 0.5, 0.08)`. Use the exact Blackman
+    /// coefficients `(0.42659, 0.49656, 0.07685)` only if added as a
+    /// separate variant.
     Blackman,
+    /// Squared-cosine window: `w[n] = cos²(π·n / (2·(N−1)))`.
+    ///
+    /// This is the default window in SchNetPack's vibrational-spectra
+    /// module. It tapers to zero at the last sample (`w[N−1] = 0`),
+    /// unlike Hann which goes to zero at both ends. Preferred for
+    /// one-sided autocorrelation signals where only the right edge
+    /// needs suppression.
+    CosineSq,
 }
 
-/// Apply a window function to `data` along the specified `axis`.
+/// Apply a window function element-wise along `axis`.
 ///
-/// Returns a new array; the input is never mutated.
+/// Returns a new array of the same shape; the input is never mutated.
+/// The window is applied multiplicatively, with no amplitude
+/// correction (callers that need a normalized window energy must
+/// rescale themselves).
+///
+/// # Errors
+/// * `AxisOutOfBounds` if `axis >= data.ndim()`.
 pub fn apply_window(
     data: &ArrayD<f64>,
     window: WindowType,
@@ -47,6 +74,16 @@ pub fn apply_window(
                         + 0.08
                             * (4.0 * std::f64::consts::PI * n as f64 / (window_len - 1) as f64)
                                 .cos()
+                }
+            })
+            .collect(),
+        WindowType::CosineSq => (0..window_len)
+            .map(|n| {
+                if window_len == 1 {
+                    1.0
+                } else {
+                    let angle = std::f64::consts::PI * n as f64 / (2.0 * (window_len - 1) as f64);
+                    angle.cos().powi(2)
                 }
             })
             .collect(),
@@ -162,5 +199,75 @@ mod tests {
             err,
             SignalError::AxisOutOfBounds { axis: 2, ndim: 2 }
         ));
+    }
+
+    fn cosine_sq_analytical(n: usize, idx: usize) -> f64 {
+        if n == 1 {
+            return 1.0;
+        }
+        let angle = std::f64::consts::PI * idx as f64 / (2.0 * (n - 1) as f64);
+        angle.cos().powi(2)
+    }
+
+    #[test]
+    fn test_cosine_sq_1d_matches_analytical() {
+        let n = 5;
+        let data = ArrayD::from_shape_vec(ndarray::IxDyn(&[n]), vec![1.0; n]).unwrap();
+        let result = apply_window(&data, WindowType::CosineSq, 0).unwrap();
+        assert_eq!(result.shape(), &[5]);
+        for (i, v) in result.iter().enumerate() {
+            let expected = cosine_sq_analytical(n, i);
+            assert!(
+                (v - expected).abs() < 1e-12,
+                "CosineSq idx {i}: {v} != {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cosine_sq_boundary_values() {
+        let n = 100;
+        let data = ArrayD::from_elem(ndarray::IxDyn(&[n]), 1.0);
+        let result = apply_window(&data, WindowType::CosineSq, 0).unwrap();
+        // w[0] = cos²(0) = 1.0
+        assert!((result[0] - 1.0).abs() < 1e-10);
+        // w[N-1] = cos²(π/2) = 0.0
+        assert!((result[n - 1] - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_cosine_sq_midpoint() {
+        let n = 5;
+        let data = ArrayD::from_elem(ndarray::IxDyn(&[n]), 1.0);
+        let result = apply_window(&data, WindowType::CosineSq, 0).unwrap();
+        // w[2] for N=5: cos²(π*2/(2*4)) = cos²(π/4) = 0.5
+        assert!((result[2] - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_cosine_sq_single_element() {
+        let data = ArrayD::from_elem(ndarray::IxDyn(&[1]), 1.0);
+        let result = apply_window(&data, WindowType::CosineSq, 0).unwrap();
+        assert!((result[0] - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_cosine_sq_2d_axis1() {
+        let data = ArrayD::from_elem(ndarray::IxDyn(&[3, 5]), 1.0);
+        let result = apply_window(&data, WindowType::CosineSq, 1).unwrap();
+        assert_eq!(result.shape(), &[3, 5]);
+        let expected_row = (0..5)
+            .map(|i| cosine_sq_analytical(5, i))
+            .collect::<Vec<_>>();
+        for row in 0..3 {
+            for col in 0..5 {
+                let v = result[[row, col]];
+                assert!(
+                    (v - expected_row[col]).abs() < 1e-12,
+                    "CosineSq 2D [{row},{col}]: {v} != {}",
+                    expected_row[col]
+                );
+            }
+        }
     }
 }
