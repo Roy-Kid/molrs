@@ -175,7 +175,6 @@ fn acf_to_spectrum(
     dt: f64,
     n_pad: usize,
 ) -> (Array1<f64>, Array1<f64>, Array1<f64>) {
-    let _n_acf = acf.len();
     let mut planner = FftPlanner::new();
     let fwd = planner.plan_fft_forward(n_pad);
 
@@ -183,14 +182,12 @@ fn acf_to_spectrum(
     complex_data.resize(n_pad, Complex64::zero());
     fwd.process(&mut complex_data);
 
-    let n_freq = n_pad / 2 + 1;
-    let d_omega = 2.0 * std::f64::consts::PI / (n_pad as f64 * dt);
-    let mut frequencies = Array1::zeros(n_freq);
+    let frequencies = sig::frequency_grid(n_pad, dt);
+    let n_freq = frequencies.len();
     let mut eps_real = Array1::zeros(n_freq);
     let mut eps_imag = Array1::zeros(n_freq);
 
     for j in 0..n_freq {
-        frequencies[j] = j as f64 * d_omega;
         let z = complex_data[j];
         eps_real[j] = z.re / n_pad as f64;
         eps_imag[j] = -z.im / n_pad as f64;
