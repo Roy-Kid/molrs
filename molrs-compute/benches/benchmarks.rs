@@ -1,12 +1,14 @@
 mod center_of_mass;
 mod cluster;
 mod cluster_centers;
+mod dielectric;
 mod gyration_tensor;
 mod helpers;
 mod inertia_tensor;
 mod msd;
 mod radius_of_gyration;
 mod rdf;
+mod spectra;
 
 use criterion::criterion_main;
 
@@ -19,4 +21,6 @@ criterion_main!(
     gyration_tensor::benches,
     inertia_tensor::benches,
     radius_of_gyration::benches,
+    dielectric::benches,
+    spectra::benches,
 );

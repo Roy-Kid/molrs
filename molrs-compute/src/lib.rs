@@ -80,8 +80,9 @@ pub use density::{
     LocalDensity, LocalDensityResult, SphereVoxelization, SphereVoxelizationResult,
 };
 pub use dielectric::{
-    DielectricSpectrum, compute_current_density, compute_dipole_moment, decompose_current,
-    einstein_helfand_spectrum, green_kubo_spectrum, static_dielectric_constant,
+    DielectricSpectrum, StaticDielectricResult, compute_current_density, compute_dipole_moment,
+    decompose_current, einstein_helfand_spectrum, green_kubo_spectrum, static_dielectric_constant,
+    static_dielectric_constant_components,
 };
 pub use diffraction::{
     DiffractionPattern, DiffractionPatternResult, StaticStructureFactorDebye,
