@@ -9,12 +9,14 @@
 //! | XYZ | [`read_xyz`], [`read_xyz_traj`] | [`write_xyz`] |
 //! | LAMMPS data | [`read_lammps`] | [`write_lammps`] |
 //! | LAMMPS dump | [`read_lammps_traj`] | [`write_lammps_traj`] |
+//! | GRO | [`read_gro`] | [`write_gro`] |
 
 use crate::frame::PyFrame;
 use crate::helpers::{io_error_to_pyerr, molrs_error_to_pyerr, smiles_error_to_pyerr};
 use crate::molgraph::PyAtomistic;
 use molrs_io::chgcar::read_chgcar;
 use molrs_io::cube::{read_cube, write_cube};
+use molrs_io::gro::{read_gro as read_gro_rs, write_gro as write_gro_rs};
 use molrs_io::lammps_data::{read_lammps_data, write_lammps_data};
 use molrs_io::lammps_dump::{
     LAMMPSTrajReader, open_lammps_dump, read_lammps_dump, write_lammps_dump,
@@ -255,6 +257,67 @@ impl PyLAMMPSTrajReader {
             Err(_) => "LAMMPSTrajReader(<unread>)".to_string(),
         }
     }
+}
+
+/// Read all frames from a GROMACS GRO file.
+///
+/// GRO is a fixed-column text format used by GROMACS for input structures and
+/// single-precision trajectories. Each frame contains an ``"atoms"`` block
+/// with columns ``resid``, ``resname``, ``atom_name``, ``atom_id``,
+/// ``x``/``y``/``z`` (in nm), and optional ``vx``/``vy``/``vz``. The
+/// simulation box is stored in ``frame.simbox``.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a ``.gro`` file on disk.
+///
+/// Returns
+/// -------
+/// list[Frame]
+///     All frames in the file (single-frame files return a one-element list).
+///
+/// Raises
+/// ------
+/// IOError
+///     If the file cannot be opened or parsed.
+///
+/// Examples
+/// --------
+/// >>> frames = molrs.read_gro("system.gro")
+/// >>> frame = frames[0]
+/// >>> atoms = frame["atoms"]
+/// >>> atoms.view("atom_name")
+#[pyfunction]
+pub fn read_gro(path: &str) -> PyResult<Vec<PyFrame>> {
+    let frames = read_gro_rs(path).map_err(io_error_to_pyerr)?;
+    frames.into_iter().map(PyFrame::from_core_frame).collect()
+}
+
+/// Write a Frame to a GROMACS GRO file.
+///
+/// The Frame must contain an ``"atoms"`` block with at least ``x``, ``y``,
+/// ``z`` columns (in nm). Optional columns: ``resid``, ``resname``,
+/// ``atom_name``, ``atom_id``, ``vx``, ``vy``, ``vz``. The box is taken
+/// from ``frame.simbox``.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frame : Frame
+///     Frame to write.
+///
+/// Raises
+/// ------
+/// IOError
+///     If the file cannot be written.
+/// ValueError
+///     If the frame is missing the ``"atoms"`` block or coordinate columns.
+#[pyfunction]
+pub fn write_gro(path: &str, frame: &PyFrame) -> PyResult<()> {
+    let core_frame = frame.clone_core_frame()?;
+    write_gro_rs(path, &core_frame).map_err(io_error_to_pyerr)
 }
 
 /// Read a VASP CHGCAR or CHGDIF file.
