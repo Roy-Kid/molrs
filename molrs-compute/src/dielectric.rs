@@ -45,9 +45,9 @@ use crate::error::ComputeError;
 
 /// Result of a dielectric spectrum computation.
 ///
-/// `epsilon_imag` is the *loss* spectrum and is reported as `+ε″(ω)`
-/// (positive by convention; FT sign convention is e^{−iωt}, so the
-/// raw imaginary part is negated before storage).
+/// The complex permittivity is `ε*(ω) = ε′(ω) − i·ε″(ω)`. `epsilon_imag`
+/// stores `ε″(ω)` with the **positive-loss** convention (≥ 0 for stable
+/// causal systems). FT convention throughout: `X(ω) = ∫₀^∞ f(t) e^{−iωt} dt`.
 #[derive(Debug, Clone)]
 pub struct DielectricSpectrum {
     /// Angular frequency grid, rad·ps⁻¹, length `n_pad/2 + 1` with
@@ -417,6 +417,9 @@ fn parse_window_type(s: &str) -> Result<sig::WindowType, ComputeError> {
     match s {
         "hann" => Ok(sig::WindowType::Hann),
         "blackman" => Ok(sig::WindowType::Blackman),
+        // Preferred for one-sided ACFs (1 at t=0, 0 at t=max_lag).
+        // Hann/Blackman zero out C(0), the static-ε signal.
+        "cosine_sq" => Ok(sig::WindowType::CosineSq),
         other => Err(ComputeError::OutOfRange {
             field: "window_type",
             value: other.into(),
@@ -424,13 +427,27 @@ fn parse_window_type(s: &str) -> Result<sig::WindowType, ComputeError> {
     }
 }
 
-/// `(frequencies, raw_real, raw_imag)` triple returned by `windowed_acf_spectrum`.
+/// `(frequencies, spec_re, spec_im)` triple returned by `windowed_acf_spectrum`.
+///
+/// `spec_re` and `spec_im` are the real and imaginary parts of the continuous
+/// one-sided Fourier transform `X(ω) = ∫₀^∞ C(t) w(t) e^{−iωt} dt`,
+/// where C(t) is the per-component-summed dipole/current ACF and w(t) is the
+/// chosen window. No physical prefactor (β, V, k_B T, ε₀, …) is applied.
 type RawSpectrum = (Array1<f64>, Array1<f64>, Array1<f64>);
 
-/// Compute the windowed one-sided FT of the per-component-summed ACF of
-/// `series[start.., :]`. Returns `(frequencies, raw_real, raw_imag)` where
-/// the raw spectrum carries no physical prefactor — callers attach their
-/// own (dielectric, conductivity, …).
+/// Continuous-FT-of-ACF of `series[start.., :]`, summed over the 3 Cartesian
+/// components and windowed.
+///
+/// Returns `(frequencies, spec_re, spec_im)` where `spec_re + i·spec_im` is
+/// the continuous FT `X(ω)` evaluated on the rfft frequency grid.
+///
+/// The conversion from `rustfft`'s unscaled DFT to the continuous FT uses the
+/// rectangle rule: `∫₀^T f(t) e^{−iωt} dt ≈ dt · DFT[f](ω_k)` (Press et al.,
+/// *Numerical Recipes* §13.9).
+///
+/// `sig::acf_fft` returns the linear un-normalized ACF
+/// `r[k] = Σ_{τ=0}^{N−1−k} x[τ]·x[τ+k] ≈ (N − k)·C(k)`. We convert to the
+/// unbiased estimator `C(k) = r[k] / (N − k)` before windowing.
 fn windowed_acf_spectrum(
     series: &Array2<f64>,
     start: usize,
@@ -439,6 +456,13 @@ fn windowed_acf_spectrum(
     window_type: &str,
 ) -> Result<RawSpectrum, ComputeError> {
     let n_frames = series.shape()[0];
+    let n_eff = n_frames - start;
+    if n_eff <= max_lag {
+        return Err(ComputeError::OutOfRange {
+            field: "max_correlation_time",
+            value: format!("{max_lag} >= effective_length {n_eff}"),
+        });
+    }
     let wt = parse_window_type(window_type)?;
 
     // One planner amortizes plan construction across the 3 component ACFs
@@ -458,6 +482,10 @@ fn windowed_acf_spectrum(
             acf_sum[k] += acf[k];
         }
     }
+    // Linear-ACF → unbiased ensemble estimator C(k·dt) = ⟨x(0)·x(k·dt)⟩.
+    for k in 0..=max_lag {
+        acf_sum[k] /= (n_eff - k) as f64;
+    }
 
     let acf_dyn = ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&[max_lag + 1]), acf_sum.to_vec())
         .map_err(|e| ComputeError::BadShape {
@@ -476,7 +504,11 @@ fn windowed_acf_spectrum(
 
 // ── Frequency-domain spectra ───────────────────────────────────────────────
 
-/// Convert windowed ACF to frequency-domain spectrum via one-sided FT.
+/// Convert windowed ACF to the continuous one-sided FT via DFT.
+///
+/// Returns `X.re` and `X.im` where `X(ω_k) = ∫₀^T C(t)·w(t) e^{−iωt} dt`
+/// under the `e^{−iωt}` Fourier convention. Scaling uses the rectangle-rule
+/// `dt` factor, not the FFT's internal `1/n_pad`.
 fn acf_to_spectrum(
     planner: &mut FftPlanner<f64>,
     acf: &Array1<f64>,
@@ -491,43 +523,71 @@ fn acf_to_spectrum(
 
     let frequencies = sig::frequency_grid(n_pad, dt);
     let n_freq = frequencies.len();
-    let mut eps_real = Array1::zeros(n_freq);
-    let mut eps_imag = Array1::zeros(n_freq);
+    let mut spec_re = Array1::zeros(n_freq);
+    let mut spec_im = Array1::zeros(n_freq);
 
     for j in 0..n_freq {
         let z = complex_data[j];
-        eps_real[j] = z.re / n_pad as f64;
-        eps_imag[j] = -z.im / n_pad as f64;
+        spec_re[j] = z.re * dt;
+        spec_im[j] = z.im * dt;
     }
 
-    (frequencies, eps_real, eps_imag)
+    (frequencies, spec_re, spec_im)
 }
 
-/// Einstein–Helfand route to the frequency-dependent permittivity.
+/// Dipole-ACF route to the frequency-dependent permittivity (Caillol-Levesque-
+/// Weis Eq. (30); a.k.a. the Kubo / fluctuation-dissipation route).
 ///
-/// Algorithm: compute the per-component dipole-autocorrelation
-/// `C(t) = ⟨**M**(0)·**M**(t)⟩` via [`molrs_signal::acf_fft`], sum the
-/// three Cartesian ACFs, apply a Hann or Blackman window to suppress
-/// finite-length artifacts, zero-pad to a power of two, and take a
-/// one-sided forward FT. The result is normalized by the static
-/// prefactor `(4π/3) · KAPPA / (V·k_B·T)` and added to ε_∞ to obtain
-/// ε*(ω).
+/// Implements
 ///
-/// At ω = 0 the spectrum recovers the Neumann static formula (see
-/// [`static_dielectric_constant`]); at high ω it tends to ε_∞.
+/// ```text
+///     χ(ω) = (β / (3V)) · [ ⟨M·M⟩ − iω · X(ω) ]
+///     ε*(ω) − ε_∞ = χ(ω) / ε₀
+/// ```
+///
+/// where `X(ω) = ∫₀^∞ ⟨M(0)·M(t)⟩ e^{−iωt} dt` is the one-sided FT of the
+/// dipole-moment autocorrelation. With `X = X_re + i·X_im` and prefactor
+/// `A = (4π·KAPPA)/(3·V·k_B·T) = β/(3V·ε₀)`, separating real/imaginary parts
+/// under the positive-loss convention `ε* = ε′ − i·ε″`:
+///
+/// ```text
+///     ε′(ω) − ε_∞ = A · ( ⟨M·M⟩ + ω · X_im )
+///     ε″(ω)       = A · ω · X_re
+/// ```
+///
+/// At `ω = 0` this contracts to the Neumann static formula
+/// `ε(0) − ε_∞ = A · ⟨|δM|²⟩`, exactly matching
+/// [`static_dielectric_constant`]; at large `ω` the spectrum tends to `ε_∞`.
+///
+/// # Algorithm
+/// 1. Compute `⟨|δM|²⟩` via centered variance (numerically stable when
+///    `|⟨M⟩| ≫ |δM|`; same form as [`static_dielectric_constant`]).
+/// 2. Compute the un-normalized linear ACF of each component via
+///    [`molrs_signal::acf_fft`], sum to a scalar `r[k]`, then divide by
+///    `(N − k)` to obtain the unbiased estimator `C(k)`.
+/// 3. Apply the requested window. For one-sided ACFs `"cosine_sq"` is
+///    preferred — `"hann"` and `"blackman"` zero out `C(0)`, biasing the
+///    spectrum at high ω; the static `⟨M·M⟩` term still recovers correctly.
+/// 4. Zero-pad to `n_pad = (2·(max_lag+1)).next_power_of_two()` and take a
+///    forward FFT scaled by `dt` (rectangle-rule discrete-to-continuous FT).
+/// 5. Combine `⟨M·M⟩` and `X(ω)` per the formulas above.
 ///
 /// # Arguments
-/// * `dipole_moments` — `(n_frames, 3)`, **e · Å**.
+/// * `dipole_moments` — `(n_frames, 3)`, **e · Å**, unwrapped across PBC.
 /// * `dt` — frame spacing, **ps**.
 /// * `volume`, `temperature` — **Å³**, **K**.
-/// * `epsilon_inf` — high-frequency permittivity (dimensionless).
+/// * `epsilon_inf` — high-frequency / electronic permittivity (dimensionless).
 /// * `max_correlation_time` — longest ACF lag, in **frames**;
 ///   clamped to `n_frames − 1`. Practical choice: ≤ 1/10 of `n_frames`
-///   to keep statistical noise low.
-/// * `window_type` — `"hann"` or `"blackman"` (symmetric variant).
+///   to keep statistical noise low. Sets the frequency resolution
+///   `Δω = 2π / (n_pad · dt)`.
+/// * `window_type` — `"cosine_sq"` (recommended), `"hann"`, or `"blackman"`.
 ///
-/// # Reference
-/// Caillol, Levesque & Weis, *J. Chem. Phys.* **85**, 6645 (1986).
+/// # References
+/// - Caillol, Levesque & Weis, *J. Chem. Phys.* **85**, 6645 (1986),
+///   Kubo-relation derivation (their Eq. (30)).
+/// - Neumann, *Mol. Phys.* **50**, 841 (1983), static-limit identity used to
+///   verify `ε(ω = 0) = ε_static`.
 pub fn einstein_helfand_spectrum(
     dipole_moments: &Array2<f64>,
     dt: f64,
@@ -542,7 +602,27 @@ pub fn einstein_helfand_spectrum(
     let n_frames = dipole_moments.shape()[0];
     let max_lag = max_correlation_time.min(n_frames - 1);
 
-    let (frequencies, raw_real, raw_imag) =
+    // ⟨|δM|²⟩ — the static term in Eq. (30). Centered form for FP stability.
+    let n = n_frames as f64;
+    let mut mean_m = [0.0_f64; 3];
+    for t in 0..n_frames {
+        for d in 0..3 {
+            mean_m[d] += dipole_moments[[t, d]];
+        }
+    }
+    for m in mean_m.iter_mut() {
+        *m /= n;
+    }
+    let mut m_sq = 0.0;
+    for t in 0..n_frames {
+        for d in 0..3 {
+            let dev = dipole_moments[[t, d]] - mean_m[d];
+            m_sq += dev * dev;
+        }
+    }
+    m_sq /= n;
+
+    let (frequencies, spec_re, spec_im) =
         windowed_acf_spectrum(dipole_moments, 0, max_lag, dt, window_type)?;
 
     let prefactor = FOUR_PI_OVER_3 * KAPPA / (volume * K_B * temperature);
@@ -550,8 +630,9 @@ pub fn einstein_helfand_spectrum(
     let mut eps_real = Array1::zeros(n_freq);
     let mut eps_imag = Array1::zeros(n_freq);
     for j in 0..n_freq {
-        eps_real[j] = epsilon_inf + prefactor * raw_real[j];
-        eps_imag[j] = prefactor * raw_imag[j];
+        let omega = frequencies[j];
+        eps_real[j] = epsilon_inf + prefactor * (m_sq + omega * spec_im[j]);
+        eps_imag[j] = prefactor * omega * spec_re[j];
     }
 
     Ok(DielectricSpectrum {
@@ -565,21 +646,35 @@ pub fn einstein_helfand_spectrum(
 
 /// Green–Kubo route: current-ACF → conductivity → permittivity.
 ///
-/// Computes σ(ω) from the autocorrelation of the system current
-/// density **J**(t) via
+/// Implements
 ///
-/// `σ(ω) = (V / (3·k_B·T)) · ∫ ⟨**J**(0)·**J**(t)⟩ e^{−iωt} dt`
+/// ```text
+///     σ(ω) = (V / (3·k_B·T)) · ∫₀^∞ ⟨J(0)·J(t)⟩ e^{−iωt} dt = σ′ + i·σ″
+///     ε*(ω) − ε_∞ = −i · σ(ω) / (ω · ε₀)
+/// ```
 ///
-/// (Hansen & McDonald, *Theory of Simple Liquids*, Eq. 7.7.20). The
+/// (Hansen & McDonald, *Theory of Simple Liquids*, Eq. 7.7.20; equivalent to
+/// Eq. (39) of Caillol-Levesque-Weis after substituting `J = Ṁ/V`). The
 /// prefactor uses `V/(3·k_B·T)` because the input is current density
-/// `**J** = **Ṁ**/V`; the textbook formula `1/(3·V·k_B·T)` applies to
-/// the total **Ṁ** instead. Conversion to permittivity uses
-/// `ε*(ω) = ε_∞ + i·σ(ω) / (ε₀·ω)`, with `1/ε₀ = 4π·KAPPA` in
-/// LAMMPS real units.
+/// `J = Ṁ/V`; the textbook formula `1/(3·V·k_B·T)` applies to total `Ṁ`.
+/// Separating real/imaginary parts under `ε* = ε′ − i·ε″`:
 ///
-/// Row 0 of `current_density` is skipped automatically (it is `NaN`
-/// by construction; see [`compute_current_density`]). The effective
-/// ACF is therefore over `n_frames − 1` samples.
+/// ```text
+///     ε′(ω) − ε_∞ = σ″(ω) / (ω · ε₀)
+///     ε″(ω)       = σ′(ω) / (ω · ε₀)
+/// ```
+///
+/// with `1/ε₀ = 4π·KAPPA` in LAMMPS real units. In the limit of a Debye
+/// relaxation this is equivalent to the [`einstein_helfand_spectrum`] result
+/// (verified by `test_einstein_helfand_recovers_debye`).
+///
+/// Row 0 of `current_density` is skipped automatically (it is `NaN` by
+/// construction; see [`compute_current_density`]). The effective ACF is
+/// therefore over `n_frames − 1` samples.
+///
+/// The DC bin (`ω = 0`) is regularized to `(ε_∞, 0)`; the physical static
+/// limit must be taken from [`static_dielectric_constant`] for insulators or
+/// extrapolated from low-ω bins for conductors.
 ///
 /// # Arguments
 /// * `current_density` — `(n_frames, 3)` as returned by
@@ -588,8 +683,10 @@ pub fn einstein_helfand_spectrum(
 ///   `max_correlation_time`, `window_type` — see
 ///   [`einstein_helfand_spectrum`].
 ///
-/// # Reference
-/// Caillol, Levesque & Weis, *J. Chem. Phys.* **85**, 6645 (1986).
+/// # References
+/// - Caillol, Levesque & Weis, *J. Chem. Phys.* **85**, 6645 (1986), Eqs.
+///   (36)–(39).
+/// - Hansen & McDonald, *Theory of Simple Liquids*, Eq. 7.7.20.
 pub fn green_kubo_spectrum(
     current_density: &Array2<f64>,
     dt: f64,
@@ -609,38 +706,32 @@ pub fn green_kubo_spectrum(
     let effective_len = n_frames - start;
     let max_lag = max_correlation_time.min(effective_len.saturating_sub(1));
 
-    let (frequencies, raw_real, raw_imag) =
+    let (frequencies, spec_re, spec_im) =
         windowed_acf_spectrum(current_density, start, max_lag, dt, window_type)?;
 
-    // Convert conductivity spectrum to dielectric.
-    // Standard Green-Kubo (Hansen & McDonald, Theory of Simple Liquids, Eq. 7.7.20):
-    //   σ(ω) = (1 / (3·V·k_B·T)) · ∫ ⟨Ṁ(0)·Ṁ(t)⟩ e^{-iωt} dt
-    // With J(t) = Ṁ(t) / V (current density, as compute_current_density returns):
-    //   ⟨Ṁ·Ṁ⟩ = V² · ⟨J·J⟩  ⇒  σ(ω) = (V / (3·k_B·T)) · FT[⟨J·J⟩]
-    // Then  ε*(ω) = ε_∞ + i·σ(ω) / (ε₀·ω);  in MD real units  1/ε₀ = 4π·KAPPA.
+    // σ(ω) = sigma_prefactor · (spec_re + i·spec_im) under e^{−iωt}.
+    // ε*(ω) − ε_∞ = −i·σ(ω)/(ω·ε₀):
+    //   ε′(ω) − ε_∞ = σ″/(ω·ε₀) = (1/ε₀)·sigma_prefactor·spec_im/ω
+    //   ε″(ω)       = σ′/(ω·ε₀) = (1/ε₀)·sigma_prefactor·spec_re/ω
+    // With J(t) = Ṁ(t)/V: ⟨Ṁ·Ṁ⟩ = V²·⟨J·J⟩, so the textbook
+    // 1/(3·V·k_B·T) prefactor for Ṁ becomes V/(3·k_B·T) for J.
+    // 1/ε₀ = 4π·KAPPA in MD real units.
     let sigma_prefactor = volume / (3.0 * K_B * temperature);
     let n_freq = frequencies.len();
     let mut eps_real = Array1::zeros(n_freq);
     let mut eps_imag = Array1::zeros(n_freq);
     let eps0_factor = 4.0 * std::f64::consts::PI * KAPPA;
-    // Treat any ω closer to zero than half the smallest non-zero bin as DC.
-    // (frequencies[1] = Δω; bin 0 = 0; nothing legitimately lands in between.)
-    let dc_cutoff = if n_freq > 1 {
-        0.5 * frequencies[1]
-    } else {
-        0.0
-    };
     for j in 0..n_freq {
-        let sigma_re = sigma_prefactor * raw_real[j];
-        let sigma_im = sigma_prefactor * raw_imag[j];
         let omega = frequencies[j];
-        if omega < dc_cutoff {
-            // DC limit: numerical regularization. The true ω→0 limit is
-            // ε_static for insulators and singular for conductors; here we
-            // just suppress the 0/0 at the DC bin.
+        if omega == 0.0 {
+            // DC bin: σ/ω is 0/0. The true static limit lives in
+            // `static_dielectric_constant`; this routine regularizes the bin
+            // to (ε_∞, 0) and the caller must consult the static helper.
             eps_real[j] = epsilon_inf;
             eps_imag[j] = 0.0;
         } else {
+            let sigma_re = sigma_prefactor * spec_re[j];
+            let sigma_im = sigma_prefactor * spec_im[j];
             eps_real[j] = epsilon_inf + eps0_factor * sigma_im / omega;
             eps_imag[j] = eps0_factor * sigma_re / omega;
         }
@@ -883,6 +974,82 @@ mod tests {
         // Isotropic mean matches scalar version.
         let scalar = static_dielectric_constant(&dm, 1000.0, 300.0, 1.0).unwrap();
         assert!((result.eps_mean - scalar).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_einstein_helfand_recovers_static_limit() {
+        // Eq. (30) of Caillol-Levesque-Weis contracts at ω=0 to
+        // χ(0) = (β/(3V))·⟨M²⟩, i.e. ε(0) - ε_∞ = (4π·KAPPA/(3·V·k_B·T))·⟨|δM|²⟩.
+        // The spectrum's DC bin must therefore equal `static_dielectric_constant`
+        // exactly (up to FP roundoff).
+        use rand::Rng;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        let mut rng = StdRng::seed_from_u64(42);
+        let n = 256;
+        let mut dm = Array2::<f64>::zeros((n, 3));
+        for t in 0..n {
+            for d in 0..3 {
+                dm[[t, d]] = rng.random::<f64>() - 0.5;
+            }
+        }
+        let vol = 1000.0;
+        let temp = 300.0;
+        let eps_inf = 1.5;
+        let static_eps = static_dielectric_constant(&dm, vol, temp, eps_inf).unwrap();
+        for window in ["hann", "blackman", "cosine_sq"] {
+            let spectrum =
+                einstein_helfand_spectrum(&dm, 0.001, vol, temp, eps_inf, 50, window).unwrap();
+            let dc = spectrum.epsilon_real[0];
+            assert!(
+                (dc - static_eps).abs() < 1e-10,
+                "window={window}: ε(ω=0)={dc} should equal static_dielectric_constant={static_eps}",
+            );
+            // ε″(ω=0) = 0 by the (β/(3V·ε₀))·ω·X_re structure of Eq. (30).
+            assert!(
+                spectrum.epsilon_imag[0].abs() < 1e-12,
+                "window={window}: ε″(0)={} should be 0",
+                spectrum.epsilon_imag[0],
+            );
+        }
+    }
+
+    #[test]
+    fn test_einstein_helfand_loss_positive() {
+        // For a relaxing polar system the dissipative spectrum ε″(ω) must be
+        // ≥ 0 at every frequency (causality / passivity). Eq. (30) gives
+        // ε″(ω) = (β/(3V·ε₀))·ω·X_re(ω); X_re(ω) = ∫C(t)cos(ωt)dt ≥ 0 only on
+        // average, so individual bins of a finite-sample spectrum may dip
+        // slightly negative — but the *macroscopic* envelope must be non-
+        // negative within statistical noise.
+        use rand::Rng;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        let mut rng = StdRng::seed_from_u64(11);
+        let n = 2048;
+        let mut dm = Array2::<f64>::zeros((n, 3));
+        // AR(1) with exponential ACF; supplies positive C(t) over [0, ∞).
+        let a: f64 = (-0.01_f64).exp();
+        for d in 0..3 {
+            let mut prev = 0.0;
+            for t in 0..n {
+                let noise: f64 =
+                    (0..12).map(|_| rng.random::<f64>() - 0.5).sum::<f64>() * (1.0 - a * a).sqrt();
+                prev = a * prev + noise;
+                dm[[t, d]] = prev;
+            }
+        }
+        let spectrum =
+            einstein_helfand_spectrum(&dm, 1.0, 1000.0, 300.0, 1.0, 100, "cosine_sq").unwrap();
+        // ε″(0) is exactly zero by Eq. (30) at ω=0; non-DC bins should be
+        // mostly positive.
+        assert_eq!(spectrum.epsilon_imag[0], 0.0);
+        let mean_loss: f64 = spectrum.epsilon_imag.iter().skip(1).sum::<f64>()
+            / (spectrum.epsilon_imag.len() - 1) as f64;
+        assert!(
+            mean_loss > 0.0,
+            "mean ε″ over ω > 0 should be positive, got {mean_loss}",
+        );
     }
 
     #[test]

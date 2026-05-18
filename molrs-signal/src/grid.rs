@@ -1,9 +1,16 @@
 use ndarray::Array1;
 use std::f64::consts::PI;
 
-/// Generate equally-spaced angular frequencies from 0 to ω_Nyq = π/dt.
+/// Equally-spaced one-sided angular-frequency grid.
 ///
-/// Returns an array of length `n_fft / 2 + 1` with spacing Δω = 2π / (n_fft * dt).
+/// `ω_k = k · 2π / (n_fft · dt)` for `k = 0, 1, …, n_fft/2` —
+/// length `n_fft/2 + 1`, spacing `Δω = 2π / (n_fft · dt)`, Nyquist
+/// `π / dt`. Bin 0 is DC.
+///
+/// # Units
+/// `dt` is the time-domain sample spacing; the output is in
+/// `rad / [time]` where `[time]` matches the unit of `dt`. For LAMMPS
+/// real units (`dt` in ps) the grid is in `rad · ps⁻¹`.
 pub fn frequency_grid(n_fft: usize, dt: f64) -> Array1<f64> {
     let n_points = n_fft / 2 + 1;
     let t_total = n_fft as f64 * dt;

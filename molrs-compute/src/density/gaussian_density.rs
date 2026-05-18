@@ -132,9 +132,16 @@ impl GaussianDensity {
         let r_max_sq = self.r_max * self.r_max;
 
         // Number of voxels covered by r_max along each axis.
-        let half_kx = (self.r_max / dx).ceil() as isize;
-        let half_ky = (self.r_max / dy).ceil() as isize;
-        let half_kz = (self.r_max / dz).ceil() as isize;
+        //
+        // Use `floor` (not `ceil`) to match freud's `GaussianDensity::compute`,
+        // which iterates `ix ∈ [cx - floor(r_max/dx), cx + floor(r_max/dx)]`.
+        // `ceil` over-iterates by one shell of voxels at radial distance just
+        // inside r_max (their centres satisfy r < r_max but axial offset is
+        // r_max − dx/2 ≤ |ddx| < r_max), accumulating a uniform ≈5e-3 offset
+        // per bulk voxel at N ≳ 10⁴ versus freud's grid.
+        let half_kx = (self.r_max / dx).floor() as isize;
+        let half_ky = (self.r_max / dy).floor() as isize;
+        let half_kz = (self.r_max / dz).floor() as isize;
 
         for p in 0..n {
             let px = xs[p];

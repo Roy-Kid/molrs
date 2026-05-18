@@ -184,15 +184,15 @@ pub fn raman_spectrum(
 
 ## Tasks
 
-- [ ] Add `CosineSq` variant to `WindowType` in `molrs-signal/src/window.rs` with `w[n] = cos²(π·n / (2·(N−1)))` formula and unit tests
-- [ ] Write failing tests for `power_spectrum()` in `molrs-compute/src/spectra/power_spectrum.rs`
-- [ ] Implement `power_spectrum()` in `molrs-compute/src/spectra/power_spectrum.rs` — VACF → FT → VDOS pipeline
-- [ ] Write failing tests for `ir_spectrum()` in `molrs-compute/src/spectra/ir_spectrum.rs`
-- [ ] Implement `ir_spectrum()` in `molrs-compute/src/spectra/ir_spectrum.rs` — central-difference dipole flux → ACF → FT → ω² scaling
-- [ ] Write failing tests for `raman_spectrum()` in `molrs-compute/src/spectra/raman_spectrum.rs`
-- [ ] Implement `raman_spectrum()` in `molrs-compute/src/spectra/raman_spectrum.rs` — isotropic/anisotropic decomposition, Bose factor, parallel/perpendicular
-- [ ] Wire shared helpers (ACF-to-spectrum, frequency conversion, input validation) in `molrs-compute/src/spectra/mod.rs` and add `pub mod spectra` to `molrs-compute/src/lib.rs`
-- [ ] Run full check + test suite (`cargo test --all-features`, `cargo clippy -- -D warnings`)
+- [x] Add `CosineSq` variant to `WindowType` in `molrs-signal/src/window.rs` with `w[n] = cos²(π·n / (2·(N−1)))` formula and unit tests
+- [x] Write failing tests for `power_spectrum()` in `molrs-compute/src/spectra/power_spectrum.rs`
+- [x] Implement `power_spectrum()` in `molrs-compute/src/spectra/power_spectrum.rs` — VACF → FT → VDOS pipeline
+- [x] Write failing tests for `ir_spectrum()` in `molrs-compute/src/spectra/ir_spectrum.rs`
+- [x] Implement `ir_spectrum()` in `molrs-compute/src/spectra/ir_spectrum.rs` — central-difference dipole flux → ACF → FT → ω² scaling
+- [x] Write failing tests for `raman_spectrum()` in `molrs-compute/src/spectra/raman_spectrum.rs`
+- [x] Implement `raman_spectrum()` in `molrs-compute/src/spectra/raman_spectrum.rs` — isotropic/anisotropic decomposition, Bose factor, parallel/perpendicular
+- [x] Wire shared helpers (ACF-to-spectrum, frequency conversion, input validation) in `molrs-compute/src/spectra/mod.rs` and add `pub mod spectra` to `molrs-compute/src/lib.rs`
+- [x] Run full check + test suite (`cargo test --all-features`, `cargo clippy -- -D warnings`)
 
 ## Testing strategy
 
