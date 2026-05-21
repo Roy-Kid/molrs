@@ -1,120 +1,115 @@
-# molrs
+<div align="center">
 
-[![Crates.io](https://img.shields.io/crates/v/molcrafts-molrs.svg)](https://crates.io/crates/molcrafts-molrs)
-[![Documentation](https://docs.rs/molcrafts-molrs/badge.svg)](https://docs.rs/molcrafts-molrs)
-[![Site](https://img.shields.io/badge/docs-Zensical-0f766e.svg)](https://molcrafts.github.io/molrs/)
-[![PyPI](https://img.shields.io/pypi/v/molcrafts-molrs.svg)](https://pypi.org/project/molcrafts-molrs/)
-[![npm](https://img.shields.io/npm/v/@molcrafts/molrs.svg)](https://www.npmjs.com/package/@molcrafts/molrs)
-[![License](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+<h1>
+  <img src=".github/assets/moko.svg" alt="" height="48" align="absmiddle">
+  &nbsp;molrs
+</h1>
 
-A molecular modeling toolkit with Rust and Python interfaces.
+<p><strong>Rust core for molecular modeling — data structures, I/O, and compute kernels, native and in the browser.</strong></p>
 
-Molecular packing (Packmol port) was split out into its own repository
-[`MolCrafts/molpack`](https://github.com/MolCrafts/molpack) (crates.io:
-`molcrafts-molpack`, PyPI: `molcrafts-molpack`). Add it as a separate
-dependency when needed.
+<p>
+  <a href="https://img.shields.io/github/actions/workflow/status/MolCrafts/molrs/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI"><img src="https://img.shields.io/github/actions/workflow/status/MolCrafts/molrs/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI" alt="CI"></a>
+  <a href="https://crates.io/crates/molcrafts-molrs"><img src="https://img.shields.io/crates/v/molcrafts-molrs?style=flat-square&logo=rust&logoColor=white" alt="crates.io"></a>
+  <a href="https://docs.rs/molcrafts-molrs"><img src="https://img.shields.io/docsrs/molcrafts-molrs?style=flat-square&logo=docsdotrs&logoColor=white" alt="docs.rs"></a>
+  <a href="https://pypi.org/project/molcrafts-molrs/"><img src="https://img.shields.io/pypi/v/molcrafts-molrs?style=flat-square&logo=pypi&logoColor=white&label=PyPI" alt="PyPI"></a>
+  <a href="https://www.npmjs.com/package/@molcrafts/molrs"><img src="https://img.shields.io/npm/v/@molcrafts/molrs?style=flat-square&logo=npm&logoColor=white" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSD--3--Clause-18432B?style=flat-square" alt="License"></a>
+</p>
+
+<p>
+  <a href="https://molcrafts.github.io/molrs/"><b>Documentation</b></a> &nbsp;&middot;&nbsp;
+  <a href="#quick-start"><b>Quick start</b></a> &nbsp;&middot;&nbsp;
+  <a href="#molcrafts-ecosystem"><b>Ecosystem</b></a>
+</p>
+
+</div>
+
+molrs is a Rust workspace for molecular modeling: a column-oriented data model, format readers and writers, trajectory analysis, force fields, and 3D structure generation. The same code runs natively, from Python (PyO3), and in the browser (WASM).
+
+> **Under active development.** Public APIs may change between minor releases.
+
+## Vision
+
+Molecular modeling tools have long forced a choice between fast and reusable. The performance-critical kernels live in aging C and Fortran, while the science is written in Python wrappers that cannot run anywhere a Python interpreter does not. molrs exists to dissolve that split: one correct, well-tested implementation of the molecular data model and its compute kernels, written once in Rust.
+
+That single implementation is meant to be portable everywhere molecules are studied — a native library, a Python package, and a WebAssembly module that runs in a browser tab with no install. The aspiration is that a researcher, a pipeline, and an interactive web tool can all reach for the exact same neighbor search, the same RDF, the same force-field evaluation, and get identical numbers.
+
+By becoming the dependable core the rest of the MolCrafts ecosystem builds on, molrs aims to make high-performance, reference-grade molecular computation something you take for granted rather than something you reimplement.
+
+## Capabilities
+
+| Crate | Capability |
+|-------|------------|
+| `molcrafts-molrs` | Unified façade — re-exports every sub-crate under one namespace, opt in via feature flags |
+| `molcrafts-molrs-core` | Frame / Block column store, MolGraph topology, elements, rings, stereochemistry, Gasteiger charges, hydrogen perception, simulation boxes, neighbor search (LinkCell / brute force) |
+| `molcrafts-molrs-io` | Readers / writers for PDB, XYZ, mol2, SDF, CIF, GRO, POSCAR, CHGCAR, Cube, LAMMPS data/dump, DCD, Zarr V3 trajectories — plus a SMILES/SMARTS parser |
+| `molcrafts-molrs-compute` | Trajectory analysis: RDF, MSD, clustering, gyration / inertia tensors, PCA, k-means, density, diffraction, PMFT, order parameters, dielectric, environment matching |
+| `molcrafts-molrs-ff` | Force fields and potentials — MMFF94 bond/angle/torsion/oop/vdW/electrostatics, LJ, PME — with an atom typifier |
+| `molcrafts-molrs-embed` | 3D coordinate generation: distance geometry, fragment assembly, optimization, rotor search, stereo guards |
+| `molcrafts-molrs-signal` | Signal processing — FFT-based autocorrelation, window functions, frequency grids |
+| `molcrafts-molrs-cxxapi` | CXX bridge for zero-copy integration with Atomiverse C++ |
 
 ## Install
 
-| Platform | Package | Install |
-|----------|---------|---------|
-| Rust | `molcrafts-molrs` | `cargo add molcrafts-molrs` |
-| Rust packing | `molcrafts-molpack` | `cargo add molcrafts-molpack` |
-| Python | `molcrafts-molrs` | `pip install molcrafts-molrs` |
-| Python packing | `molcrafts-molpack` | `pip install molcrafts-molpack` |
-| npm | `@molcrafts/molrs` | `npm install @molcrafts/molrs` |
+```bash
+cargo add molcrafts-molrs
+```
 
-## Features
+Opt into sub-systems via feature flags; `full` enables everything:
 
-- **Frame / Block** — hierarchical, column-oriented molecular data model
-- **MolGraph** — petgraph-based molecular topology with SMILES parser
-- **Embed** — 3D coordinate generation (distance geometry + MMFF94 minimization)
-- **Neighbor search** — O(N) LinkCell with freud-style `AABBQuery` API
-- **Compute** — RDF, MSD, cluster analysis (self-query & cross-query)
-- **Force field** — MMFF94 bond/angle/torsion/vdw/electrostatic potentials
-- **I/O** — PDB, XYZ, LAMMPS data, Zarr V3 trajectories
-- **Packing** — see [`molpack`](https://github.com/MolCrafts/molpack) (separate crate)
-- **Bindings** — Python (PyO3/maturin) and WASM (wasm-bindgen)
+```toml
+molcrafts-molrs = { version = "0.0.16", features = ["io", "smiles", "embed"] }
+```
 
-## Documentation
-
-- Zensical site: <https://molcrafts.github.io/molrs/>
-- Rust API reference: <https://docs.rs/molcrafts-molrs>
-- Python API reference: <https://molcrafts.github.io/molrs/reference/python/>
-- WASM API reference: <https://molcrafts.github.io/molrs/reference/wasm/>
-
-## Crates
-
-| Crate | Description |
-|-------|-------------|
-| [`molcrafts-molrs`](https://crates.io/crates/molcrafts-molrs) | Core library |
-| [`molcrafts-molpack`](https://crates.io/crates/molcrafts-molpack) | Molecular packing (separate repo) |
-| [`molcrafts-molrs-core`](https://crates.io/crates/molcrafts-molrs-core) | Frame, Block, topology, boxes, neighbor search |
-| [`molcrafts-molrs-io`](https://crates.io/crates/molcrafts-molrs-io) | PDB, XYZ, LAMMPS, CHGCAR, Cube, Zarr |
-| [`molcrafts-molrs-compute`](https://crates.io/crates/molcrafts-molrs-compute) | RDF, MSD, clusters, descriptors |
-| [`molcrafts-molrs-ff`](https://crates.io/crates/molcrafts-molrs-ff) | MMFF94 typing and potentials |
-| [`molcrafts-molrs-embed`](https://crates.io/crates/molcrafts-molrs-embed) | 3D coordinate generation |
+Python: `pip install molcrafts-molrs` (import as `molrs`). Browser: `npm install @molcrafts/molrs`.
 
 ## Quick start
-
-### Rust
 
 ```rust
 use molrs::embed::{generate_3d, EmbedOptions};
 use molrs::smiles::{parse_smiles, to_atomistic};
 
-let ir = parse_smiles("c1ccccc1").unwrap();         // benzene
+let ir = parse_smiles("c1ccccc1").unwrap();          // benzene
 let mol = to_atomistic(&ir).unwrap();
 let (mol3d, _report) = generate_3d(&mol, EmbedOptions::default()).unwrap();
 ```
 
-### Python
+Python and JavaScript/TypeScript quickstarts live in the documentation.
 
-```python
-import molrs
+## Documentation
 
-ir = molrs.parse_smiles("CCO")
-mol = ir.to_atomistic()
-result = molrs.generate_3d(mol, molrs.EmbedOptions(speed="fast", seed=42))
-frame = result.mol.to_frame()
-```
+- [Documentation site](https://molcrafts.github.io/molrs/) — guides and references
+- [Getting started](https://molcrafts.github.io/molrs/getting-started/installation/) — Rust, Python, and WASM quickstarts
+- [Guides](https://molcrafts.github.io/molrs/guides/data-model/) — data model, SMILES, neighbor search, 3D embedding, force fields, I/O, trajectory analysis
+- [Rust API reference](https://docs.rs/molcrafts-molrs) — full rustdoc on docs.rs
 
-### JavaScript / TypeScript
+## MolCrafts ecosystem
 
-```js
-import init, { parseSMILES, generate3D, writeFrame } from "@molcrafts/molrs";
+| Project | Role |
+|---------|------|
+| [molpy](https://github.com/MolCrafts/molpy)     | Python toolkit — the shared molecular data model & workflow layer |
+| **molrs** | Rust core — molecular data structures & compute kernels (native + WASM) — this repo |
+| [molpack](https://github.com/MolCrafts/molpack) | Packmol-grade molecular packing (Rust + Python) |
+| [molvis](https://github.com/MolCrafts/molvis)   | WebGL molecular visualization & editing |
+| [molexp](https://github.com/MolCrafts/molexp)   | Workflow & experiment-management platform |
+| [molnex](https://github.com/MolCrafts/molnex)   | Molecular machine-learning framework |
+| [molq](https://github.com/MolCrafts/molq)       | Unified job queue — local / SLURM / PBS / LSF |
+| [molcfg](https://github.com/MolCrafts/molcfg)   | Layered configuration library |
+| [mollog](https://github.com/MolCrafts/mollog)   | Structured logging, stdlib-compatible |
+| [molhub](https://github.com/MolCrafts/molhub)   | Molecular dataset hub |
+| [molmcp](https://github.com/MolCrafts/molmcp)   | MCP server for the ecosystem |
+| [molrec](https://github.com/MolCrafts/molrec)   | Atomistic record specification |
 
-await init();
-const frame = parseSMILES("CCO").toFrame();
-const mol3d = generate3D(frame, "fast");
-console.log(writeFrame(mol3d, "xyz"));
-```
+## Contributing
 
-## Build & Test
-
-```bash
-# Rust
-cargo build --workspace
-cargo test --workspace --lib --tests --examples
-
-# Python
-cd molrs-python && maturin build && pip install target/wheels/*.whl && pytest -q
-
-# WASM
-cd molrs-wasm && wasm-pack build --target bundler --scope molcrafts --out-name molrs
-
-# C API
-cargo build --manifest-path molrs-capi/Cargo.toml
-cd molrs-capi && cmake -S tests/cpp -B build-test && cmake --build build-test && ctest --test-dir build-test
-```
-
-## Support Matrix
-
-- Rust MSRV: 1.85
-- Python: 3.9+
-- Python package name: `molcrafts-molrs`
-- Python import name: `molrs`
+See [CONTRIBUTING](https://molcrafts.github.io/molrs/contributing/) for development setup and guidelines.
 
 ## License
 
-BSD-3-Clause
+BSD-3-Clause — see [LICENSE](LICENSE).
+
+<hr>
+
+<div align="center">
+<sub>Crafted with 💚 by <a href="https://github.com/MolCrafts">MolCrafts</a></sub>
+</div>
