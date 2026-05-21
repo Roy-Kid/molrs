@@ -535,42 +535,130 @@ fn acf_to_spectrum(
     (frequencies, spec_re, spec_im)
 }
 
+/// Centered dipole-ACF → one-sided cosine² taper → derivative → one-sided FT.
+///
+/// Returns `(frequencies, dre, dim)` where `dre + i·dim ≈ Ĉ′(ω) =
+/// ∫₀^∞ C′(t) e^{−iωt} dt` and `C(t) = ⟨δM(0)·δM(t)⟩` is the **fluctuation**
+/// (mean-subtracted) dipole autocorrelation.
+///
+/// Transforming the ACF *derivative* — rather than forming `ω·X(ω)` from the
+/// transform `X(ω)` of the ACF itself — is what keeps the loss spectrum
+/// finite. The discrete `X(ω)` carries a frequency-independent floor of order
+/// `dt·C(0)` contributed by the `t = 0` sample, so `ω·X(ω)` diverges linearly
+/// toward the Nyquist frequency. `C′(t)` instead vanishes at both ends
+/// (`C′(0) = 0` because the ACF is even; `C′(t → ∞) = 0`), so its transform
+/// decays correctly and `ε*(ω) − ε_∞ = −A·Ĉ′(ω)` stays well behaved.
+///
+/// The taper is the one-sided `cos²(π k / 2 L)` window — 1 at `C(0)`, 0 at
+/// `C(L)`. A symmetric Hann/Blackman window would zero `C(0)`, the static-ε
+/// signal, and is never valid for a strictly one-sided ACF.
+fn windowed_acf_derivative_spectrum(
+    series: &Array2<f64>,
+    max_lag: usize,
+    dt: f64,
+) -> Result<RawSpectrum, ComputeError> {
+    let n_frames = series.shape()[0];
+    if n_frames <= max_lag {
+        return Err(ComputeError::OutOfRange {
+            field: "max_correlation_time",
+            value: format!("{max_lag} >= n_frames {n_frames}"),
+        });
+    }
+
+    // Per-component means: the EH route needs the *fluctuation* ACF
+    // ⟨δM(0)·δM(t)⟩ so that C(0) equals the centered variance ⟨|δM|²⟩.
+    let mut mean = [0.0_f64; 3];
+    for t in 0..n_frames {
+        for d in 0..3 {
+            mean[d] += series[[t, d]];
+        }
+    }
+    for m in mean.iter_mut() {
+        *m /= n_frames as f64;
+    }
+
+    let mut planner = FftPlanner::new();
+    let mut acf = Array1::<f64>::zeros(max_lag + 1);
+    for d in 0..3 {
+        let col: Array1<f64> = (0..n_frames).map(|t| series[[t, d]] - mean[d]).collect();
+        let component = sig::acf_fft_with_planner(&mut planner, &col, max_lag).map_err(|e| {
+            ComputeError::OutOfRange {
+                field: "acf_fft",
+                value: e.to_string(),
+            }
+        })?;
+        for k in 0..=max_lag {
+            acf[k] += component[k];
+        }
+    }
+    // Unbiased linear-ACF estimator C(k·dt) = ⟨δx(0)·δx(k·dt)⟩.
+    for k in 0..=max_lag {
+        acf[k] /= (n_frames - k) as f64;
+    }
+
+    // One-sided cosine² taper: 1 at C(0), 0 at C(max_lag).
+    let denom = 2.0 * max_lag.max(1) as f64;
+    for k in 0..=max_lag {
+        let angle = std::f64::consts::PI * k as f64 / denom;
+        acf[k] *= angle.cos().powi(2);
+    }
+
+    // Central finite-difference derivative of the windowed ACF. C′(0) = 0
+    // exactly because the autocorrelation is even; the tail uses a one-sided
+    // stencil (the taper has already driven C(max_lag) to zero).
+    let mut deriv = Array1::<f64>::zeros(max_lag + 1);
+    for k in 1..max_lag {
+        deriv[k] = (acf[k + 1] - acf[k - 1]) / (2.0 * dt);
+    }
+    if max_lag >= 1 {
+        deriv[max_lag] = (acf[max_lag] - acf[max_lag - 1]) / dt;
+    }
+
+    let n_pad = (2 * (max_lag + 1)).next_power_of_two();
+    Ok(acf_to_spectrum(&mut planner, &deriv, dt, n_pad))
+}
+
 /// Dipole-ACF route to the frequency-dependent permittivity (Caillol-Levesque-
 /// Weis Eq. (30); a.k.a. the Kubo / fluctuation-dissipation route).
 ///
-/// Implements
+/// Implements the integration-by-parts form of Eq. (30):
 ///
 /// ```text
-///     χ(ω) = (β / (3V)) · [ ⟨M·M⟩ − iω · X(ω) ]
-///     ε*(ω) − ε_∞ = χ(ω) / ε₀
+///     ε*(ω) − ε_∞ = −A · Ĉ′(ω),     A = 4π·KAPPA / (3·V·k_B·T)
+///     Ĉ′(ω) = ∫₀^∞ C′(t) e^{−iωt} dt
 /// ```
 ///
-/// where `X(ω) = ∫₀^∞ ⟨M(0)·M(t)⟩ e^{−iωt} dt` is the one-sided FT of the
-/// dipole-moment autocorrelation. With `X = X_re + i·X_im` and prefactor
-/// `A = (4π·KAPPA)/(3·V·k_B·T) = β/(3V·ε₀)`, separating real/imaginary parts
-/// under the positive-loss convention `ε* = ε′ − i·ε″`:
+/// where `C(t) = ⟨δM(0)·δM(t)⟩` is the one-sided **fluctuation** dipole
+/// autocorrelation and `C′(t)` its time derivative. Under the positive-loss
+/// convention `ε* = ε′ − i·ε″`, with `Ĉ′ = Ĉ′_re + i·Ĉ′_im`:
 ///
 /// ```text
-///     ε′(ω) − ε_∞ = A · ( ⟨M·M⟩ + ω · X_im )
-///     ε″(ω)       = A · ω · X_re
+///     ε′(ω) − ε_∞ = −A · Ĉ′_re(ω)
+///     ε″(ω)       =  A · Ĉ′_im(ω)
 /// ```
 ///
-/// At `ω = 0` this contracts to the Neumann static formula
-/// `ε(0) − ε_∞ = A · ⟨|δM|²⟩`, exactly matching
-/// [`static_dielectric_constant`]; at large `ω` the spectrum tends to `ε_∞`.
+/// This is equivalent to the textbook `χ(ω) = (β/3V)·[⟨δM²⟩ − iω·X(ω)]`:
+/// substituting `iω·X(ω) = C(0) + Ĉ′(ω)` cancels the explicit `ω` factor.
+/// That cancellation is what makes the route numerically stable — the
+/// discrete transform `X(ω)` of the ACF has a constant floor `≈ dt·C(0)`
+/// from the `t = 0` sample, so `ω·X(ω)` diverges toward the Nyquist
+/// frequency, whereas `Ĉ′(ω)` decays correctly (see
+/// [`windowed_acf_derivative_spectrum`]).
+///
+/// At `ω = 0` the result contracts to the Neumann static formula
+/// `ε(0) − ε_∞ = A·⟨|δM|²⟩`; the DC bin is set to that exact value, matching
+/// [`static_dielectric_constant`]. At large `ω` the spectrum tends to `ε_∞`.
 ///
 /// # Algorithm
-/// 1. Compute `⟨|δM|²⟩` via centered variance (numerically stable when
-///    `|⟨M⟩| ≫ |δM|`; same form as [`static_dielectric_constant`]).
-/// 2. Compute the un-normalized linear ACF of each component via
-///    [`molrs_signal::acf_fft`], sum to a scalar `r[k]`, then divide by
-///    `(N − k)` to obtain the unbiased estimator `C(k)`.
-/// 3. Apply the requested window. For one-sided ACFs `"cosine_sq"` is
-///    preferred — `"hann"` and `"blackman"` zero out `C(0)`, biasing the
-///    spectrum at high ω; the static `⟨M·M⟩` term still recovers correctly.
-/// 4. Zero-pad to `n_pad = (2·(max_lag+1)).next_power_of_two()` and take a
-///    forward FFT scaled by `dt` (rectangle-rule discrete-to-continuous FT).
-/// 5. Combine `⟨M·M⟩` and `X(ω)` per the formulas above.
+/// 1. Compute `⟨|δM|²⟩` via centered variance (same form as
+///    [`static_dielectric_constant`]) for the exact DC bin.
+/// 2. Compute the unbiased linear ACF `C(k)` of the **mean-subtracted**
+///    dipole, summed over the 3 Cartesian components.
+/// 3. Apply the one-sided `cos²(π k / 2 L)` taper (1 at `C(0)`, 0 at `C(L)`).
+/// 4. Form the central finite-difference derivative `C′(t)`, zero-pad to
+///    `n_pad = (2·(max_lag+1)).next_power_of_two()`, and take a forward FFT
+///    scaled by `dt` (rectangle-rule discrete-to-continuous FT).
+/// 5. Combine into `ε′` and `ε″` per the formulas above.
 ///
 /// # Arguments
 /// * `dipole_moments` — `(n_frames, 3)`, **e · Å**, unwrapped across PBC.
@@ -581,7 +669,9 @@ fn acf_to_spectrum(
 ///   clamped to `n_frames − 1`. Practical choice: ≤ 1/10 of `n_frames`
 ///   to keep statistical noise low. Sets the frequency resolution
 ///   `Δω = 2π / (n_pad · dt)`.
-/// * `window_type` — `"cosine_sq"` (recommended), `"hann"`, or `"blackman"`.
+/// * `window_type` — `"cosine_sq"`, `"hann"`, or `"blackman"`; validated for
+///   a stable contract. The dipole ACF is strictly one-sided, so the EH
+///   route always applies the one-sided cos² taper regardless of this value.
 ///
 /// # References
 /// - Caillol, Levesque & Weis, *J. Chem. Phys.* **85**, 6645 (1986),
@@ -598,11 +688,16 @@ pub fn einstein_helfand_spectrum(
     window_type: &str,
 ) -> Result<DielectricSpectrum, ComputeError> {
     validate_thermo_series_3d(dipole_moments, dt, volume, temperature, "dipole_moments")?;
+    // The dipole ACF is strictly one-sided; the EH route always applies the
+    // one-sided cos² taper. `window_type` is still validated so an invalid
+    // value keeps erroring as before, but Hann/Blackman are not applied here.
+    parse_window_type(window_type)?;
 
     let n_frames = dipole_moments.shape()[0];
     let max_lag = max_correlation_time.min(n_frames - 1);
 
-    // ⟨|δM|²⟩ — the static term in Eq. (30). Centered form for FP stability.
+    // ⟨|δM|²⟩ — the exact static (ω = 0) term. Centered form for FP stability;
+    // identical arithmetic to `static_dielectric_constant`.
     let n = n_frames as f64;
     let mut mean_m = [0.0_f64; 3];
     for t in 0..n_frames {
@@ -622,18 +717,21 @@ pub fn einstein_helfand_spectrum(
     }
     m_sq /= n;
 
-    let (frequencies, spec_re, spec_im) =
-        windowed_acf_spectrum(dipole_moments, 0, max_lag, dt, window_type)?;
+    let (frequencies, dre, dim) = windowed_acf_derivative_spectrum(dipole_moments, max_lag, dt)?;
 
+    // ε*(ω) − ε_∞ = −A·Ĉ′(ω), with ε* = ε′ − i·ε″ (positive-loss convention).
     let prefactor = FOUR_PI_OVER_3 * KAPPA / (volume * K_B * temperature);
     let n_freq = frequencies.len();
     let mut eps_real = Array1::zeros(n_freq);
     let mut eps_imag = Array1::zeros(n_freq);
     for j in 0..n_freq {
-        let omega = frequencies[j];
-        eps_real[j] = epsilon_inf + prefactor * (m_sq + omega * spec_im[j]);
-        eps_imag[j] = prefactor * omega * spec_re[j];
+        eps_real[j] = epsilon_inf - prefactor * dre[j];
+        eps_imag[j] = prefactor * dim[j];
     }
+    // DC bin: contract to the exact Neumann static limit. The discrete
+    // derivative transform reproduces it only up to O(dt) truncation error.
+    eps_real[0] = epsilon_inf + prefactor * m_sq;
+    eps_imag[0] = 0.0;
 
     Ok(DielectricSpectrum {
         frequencies,
@@ -1049,6 +1147,82 @@ mod tests {
         assert!(
             mean_loss > 0.0,
             "mean ε″ over ω > 0 should be positive, got {mean_loss}",
+        );
+    }
+
+    #[test]
+    fn test_einstein_helfand_recovers_debye() {
+        // An AR(1) dipole process has an exponential ACF C(t) = σ²·e^{−t/τ},
+        // i.e. an exact Debye relaxation. The recovered spectrum must be a
+        // physical Debye curve: ε′(ω) bounded inside [ε_∞, ε(0)], ε″(ω) ≥ 0
+        // and — crucially — *decaying* toward the Nyquist frequency. Forming
+        // the loss as ω·X(ω) instead of the derivative transform makes ε″
+        // diverge at high ω and dip strongly negative; this test guards that.
+        use rand::Rng;
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        let mut rng = StdRng::seed_from_u64(7);
+        let n = 8192;
+        let dt: f64 = 1.0;
+        let tau: f64 = 20.0; // relaxation time, same units as dt
+        let a: f64 = (-dt / tau).exp();
+        let mut dm = Array2::<f64>::zeros((n, 3));
+        for d in 0..3 {
+            let mut prev = 0.0;
+            for t in 0..n {
+                // Sum of 12 uniforms ≈ N(0, 1); scaled to the AR(1) stationary
+                // variance σ² = 1.
+                let noise: f64 =
+                    (0..12).map(|_| rng.random::<f64>() - 0.5).sum::<f64>() * (1.0 - a * a).sqrt();
+                prev = a * prev + noise;
+                dm[[t, d]] = prev;
+            }
+        }
+        let spectrum =
+            einstein_helfand_spectrum(&dm, dt, 1000.0, 300.0, 1.0, 512, "cosine_sq").unwrap();
+        let eps0 = spectrum.epsilon_real[0];
+        assert!(eps0 > 1.0, "static ε must exceed ε_∞, got {eps0}");
+
+        let n_freq = spectrum.frequencies.len();
+        // ε′ stays inside [ε_∞, ε(0)]; the slack absorbs single-realization
+        // noise and the O(dt) mismatch between the DC bin and bin 1.
+        let slack = 0.15 * (eps0 - 1.0);
+        for j in 0..n_freq {
+            let er = spectrum.epsilon_real[j];
+            assert!(
+                er > 1.0 - slack && er < eps0 + slack,
+                "ε′ left the [ε_∞, ε(0)] band at bin {j}: {er}",
+            );
+        }
+
+        // ε″ ≥ 0 within noise, and the loss peak sits near ω ≈ 1/τ.
+        let peak = spectrum
+            .epsilon_imag
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(peak > 0.0, "loss peak must be positive, got {peak}");
+        for (j, &ei) in spectrum.epsilon_imag.iter().enumerate() {
+            assert!(ei > -0.05 * peak, "ε″ strongly negative at bin {j}: {ei}");
+        }
+        // The decisive check: ε″ decays toward Nyquist instead of diverging.
+        let nyquist_loss = spectrum.epsilon_imag[n_freq - 1].abs();
+        assert!(
+            nyquist_loss < 0.1 * peak,
+            "ε″ must decay at high ω: Nyquist {nyquist_loss} vs peak {peak}",
+        );
+        let peak_bin = spectrum
+            .epsilon_imag
+            .iter()
+            .enumerate()
+            .max_by(|x, y| x.1.partial_cmp(y.1).unwrap())
+            .unwrap()
+            .0;
+        let peak_omega = spectrum.frequencies[peak_bin];
+        assert!(
+            peak_omega > 0.2 / tau && peak_omega < 5.0 / tau,
+            "Debye loss peak ω={peak_omega} should bracket 1/τ={}",
+            1.0 / tau,
         );
     }
 
