@@ -914,6 +914,7 @@ dependencies = [
  "cxx",
  "cxx-build",
  "molcrafts-molrs-core",
+ "molcrafts-molrs-ffi",
  "molcrafts-molrs-io",
  "ndarray",
 ]
@@ -938,6 +939,14 @@ dependencies = [
  "roxmltree",
  "rustfft",
  "serde_json",
+]
+
+[[package]]
+name = "molcrafts-molrs-ffi"
+version = "0.0.16"
+dependencies = [
+ "molcrafts-molrs-core",
+ "slotmap",
 ]
 
 [[package]]

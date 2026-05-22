@@ -11,7 +11,7 @@ homepage.workspace = true
 
 [lib]
 name = "molrs_cxxapi"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [features]
 default = ["zarr"]
@@ -20,6 +20,7 @@ zarr = ["molrs_io/filesystem"]
 [dependencies]
 molrs = { workspace = true }
 molrs_io = { workspace = true }
+molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.0.16" }
 cxx = "1"
 ndarray = "0.17"
 

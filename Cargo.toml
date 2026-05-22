@@ -9,6 +9,11 @@ members = [
     "molrs-cxxapi",
     "molrs-signal",
 ]
+# molrs-ffi declares its own `[workspace]` (it is a standalone crate shared by
+# molrs-python and molrs-cxxapi). It is a path dependency of molrs-cxxapi but
+# must not be folded into this workspace — exclude it so cargo treats it as a
+# separate workspace root.
+exclude = ["molrs-ffi"]
 resolver = "3"
 
 [workspace.package]

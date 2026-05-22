@@ -383,3 +383,340 @@ fn molrec_print_summary(rec: &AtvMolRec) {
 
 // Mulliken and RDF stay in C++ — they depend on electronic structure / simulation
 // context that is not available from raw per-frame data alone.
+
+// ── Frame bridge ─────────────────────────────────────────────────────────────
+//
+// `molrs_ffi::FrameRef` is the handle type used by every molrs language
+// binding (python, wasm). It pairs a `FrameId` with a shared `Store`
+// (`Rc<RefCell<Store>>`) — cloning is two `Rc` bumps and keeps the `Store`
+// alive. Atomiverse C++ reads/writes a `molrs.Frame` entirely through this
+// handle, so the SCF / MD pipeline never copies a whole frame.
+//
+// cxx `extern "Rust"` opaque types are crate-local by convention, so the
+// bridged type is a thin newtype around `molrs_ffi::FrameRef` rather than a
+// re-export. All `frame_*` functions deref through `.0`.
+
+/// CXX-bridged opaque handle to a `molrs.Frame`.
+///
+/// Newtype around [`molrs_ffi::FrameRef`]; the inner handle carries the
+/// shared `Store`, so cloning this and round-tripping it through a
+/// `Box`/raw-pointer (e.g. a Python `PyCapsule`) keeps the same underlying
+/// frame data — mutations through one handle are visible through all clones.
+pub struct FrameRef(pub molrs_ffi::FrameRef);
+
+/// Create a fresh standalone frame (new `Store` + empty `Frame`).
+///
+/// @return boxed opaque handle owning a fresh shared store
+fn frame_new() -> Box<FrameRef> {
+    Box::new(FrameRef(molrs_ffi::FrameRef::new_standalone()))
+}
+
+/// List the block keys present in the frame.
+///
+/// @param fref frame handle
+/// @return block names; empty if the frame has no blocks
+fn frame_block_names(fref: &FrameRef) -> Vec<String> {
+    fref.0
+        .with(|f| f.keys().map(|s| s.to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// Test whether the frame contains a block.
+///
+/// @param fref  frame handle
+/// @param block block key
+/// @return true if the block exists
+fn frame_has_block(fref: &FrameRef, block: &str) -> bool {
+    fref.0.has_block(block)
+}
+
+/// List the column keys of a block.
+///
+/// @param fref  frame handle
+/// @param block block key
+/// @return column names; empty if the block is absent
+fn frame_block_columns(fref: &FrameRef, block: &str) -> Vec<String> {
+    match fref.0.block(block) {
+        Ok(blk) => blk.keys().unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Row count of a block.
+///
+/// @param fref  frame handle
+/// @param block block key
+/// @return number of rows; 0 if the block is absent or empty
+fn frame_block_nrows(fref: &FrameRef, block: &str) -> i64 {
+    match fref.0.block(block) {
+        Ok(blk) => blk.nrows().unwrap_or(0) as i64,
+        Err(_) => 0,
+    }
+}
+
+/// Copy an `f64` column out of a block.
+///
+/// @param fref  frame handle
+/// @param block block key
+/// @param col   column key
+/// @return owned column data; empty if the block or column is absent
+fn frame_column_f64(fref: &FrameRef, block: &str, col: &str) -> Vec<f64> {
+    match fref.0.block(block) {
+        Ok(blk) => match blk.copy_f(col) {
+            Ok(Some((data, _shape))) => data,
+            _ => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Copy an `i32` column out of a block.
+///
+/// @param fref  frame handle
+/// @param block block key
+/// @param col   column key
+/// @return owned column data; empty if the block or column is absent
+fn frame_column_i32(fref: &FrameRef, block: &str, col: &str) -> Vec<i32> {
+    match fref.0.block(block) {
+        Ok(blk) => match blk.copy_i(col) {
+            Ok(Some((data, _shape))) => data,
+            _ => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Copy a `u32` column out of a block.
+///
+/// @param fref  frame handle
+/// @param block block key
+/// @param col   column key
+/// @return owned column data; empty if the block or column is absent
+fn frame_column_u32(fref: &FrameRef, block: &str, col: &str) -> Vec<u32> {
+    match fref.0.block(block) {
+        Ok(blk) => match blk.copy_u(col) {
+            Ok(Some((data, _shape))) => data,
+            _ => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Copy a string column out of a block.
+///
+/// @param fref  frame handle
+/// @param block block key
+/// @param col   column key
+/// @return owned column data; empty if the block or column is absent
+fn frame_column_str(fref: &FrameRef, block: &str, col: &str) -> Vec<String> {
+    match fref.0.block(block) {
+        Ok(blk) => match blk.col_str(col) {
+            Ok(Some(data)) => data,
+            _ => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Read the simulation-cell matrix as 9 row-major `f64` (3x3 H).
+///
+/// @param fref frame handle
+/// @return 9-element row-major H; empty if no simbox is set
+fn frame_simbox(fref: &FrameRef) -> Vec<f64> {
+    match fref.0.simbox_clone() {
+        Ok(Some(sb)) => sb.h_view().iter().copied().collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Get-or-create a block by key, then run `f` to populate it.
+fn with_block_inserted(frame: &mut Frame, block: &str, f: impl FnOnce(&mut Block)) {
+    if let Some(blk) = frame.get_mut(block) {
+        f(blk);
+    } else {
+        let mut blk = Block::new();
+        f(&mut blk);
+        frame.insert(block, blk);
+    }
+}
+
+/// Create or overwrite an `f64` column on a block.
+///
+/// @param fref  frame handle
+/// @param block block key (created if absent)
+/// @param col   column key (overwritten if present)
+/// @param data  column values
+fn frame_set_column_f64(fref: &mut FrameRef, block: &str, col: &str, data: &[f64]) {
+    fref.0
+        .with_mut(|frame| {
+            with_block_inserted(frame, block, |blk| {
+                blk.insert(col, Array1::from_vec(data.to_vec()).into_dyn())
+                    .expect("frame_set_column_f64: insert");
+            });
+        })
+        .expect("frame_set_column_f64: with_mut");
+}
+
+/// Create or overwrite an `i32` column on a block.
+///
+/// @param fref  frame handle
+/// @param block block key (created if absent)
+/// @param col   column key (overwritten if present)
+/// @param data  column values
+fn frame_set_column_i32(fref: &mut FrameRef, block: &str, col: &str, data: &[i32]) {
+    fref.0
+        .with_mut(|frame| {
+            with_block_inserted(frame, block, |blk| {
+                blk.insert(col, Array1::from_vec(data.to_vec()).into_dyn())
+                    .expect("frame_set_column_i32: insert");
+            });
+        })
+        .expect("frame_set_column_i32: with_mut");
+}
+
+/// Create or overwrite a `u32` column on a block.
+///
+/// @param fref  frame handle
+/// @param block block key (created if absent)
+/// @param col   column key (overwritten if present)
+/// @param data  column values
+fn frame_set_column_u32(fref: &mut FrameRef, block: &str, col: &str, data: &[u32]) {
+    fref.0
+        .with_mut(|frame| {
+            with_block_inserted(frame, block, |blk| {
+                blk.insert(col, Array1::from_vec(data.to_vec()).into_dyn())
+                    .expect("frame_set_column_u32: insert");
+            });
+        })
+        .expect("frame_set_column_u32: with_mut");
+}
+
+/// Create or overwrite a string column on a block.
+///
+/// @param fref  frame handle
+/// @param block block key (created if absent)
+/// @param col   column key (overwritten if present)
+/// @param data  column values
+fn frame_set_column_str(fref: &mut FrameRef, block: &str, col: &str, data: &[String]) {
+    fref.0
+        .with_mut(|frame| {
+            with_block_inserted(frame, block, |blk| {
+                blk.insert(
+                    col,
+                    Array1::from_vec(data.to_vec()).into_dyn() as ArrayD<String>,
+                )
+                .expect("frame_set_column_str: insert");
+            });
+        })
+        .expect("frame_set_column_str: with_mut");
+}
+
+/// Set the simulation-cell matrix from 9 row-major `f64` (3x3 H).
+///
+/// The box origin is set to zero and PBC is enabled on all three axes,
+/// matching how `take_frame`/`write_view` construct a [`SimBox`].
+///
+/// @param fref frame handle
+/// @param h    9-element row-major 3x3 cell matrix
+fn frame_set_simbox(fref: &mut FrameRef, h: &[f64]) {
+    let mat = Array2::from_shape_vec((3, 3), h[..9].to_vec())
+        .expect("frame_set_simbox: H must have 9 elements");
+    let simbox = SimBox::new(mat, Array1::zeros(3), [true, true, true])
+        .expect("frame_set_simbox: singular cell matrix");
+    fref.0
+        .set_simbox(Some(simbox))
+        .expect("frame_set_simbox: set_simbox");
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::rc::Rc;
+
+    /// Round-trip: write every column dtype + simbox through the bridge,
+    /// then read them back and assert element-wise equality. Also exercises
+    /// the introspection surface (`names`, `has`, `columns`, `nrows`).
+    #[test]
+    fn frame_roundtrip_all_dtypes() {
+        let mut fref = frame_new();
+
+        let xs: Vec<f64> = vec![0.0, 1.5, -2.25];
+        let ids: Vec<i32> = vec![10, 20, 30];
+        let types: Vec<u32> = vec![1, 1, 8];
+        let elems: Vec<String> = vec!["H".into(), "H".into(), "O".into()];
+
+        frame_set_column_f64(&mut fref, "atoms", "x", &xs);
+        frame_set_column_i32(&mut fref, "atoms", "id", &ids);
+        frame_set_column_u32(&mut fref, "atoms", "type", &types);
+        frame_set_column_str(&mut fref, "atoms", "element", &elems);
+
+        // 9-elem row-major 3x3 H matrix.
+        let h: Vec<f64> = vec![12.0, 0.0, 0.0, 0.0, 13.0, 0.0, 0.0, 0.0, 14.0];
+        frame_set_simbox(&mut fref, &h);
+
+        // ── Introspection ──
+        let names = frame_block_names(&fref);
+        assert_eq!(names, vec!["atoms".to_string()]);
+        assert!(frame_has_block(&fref, "atoms"));
+        assert!(!frame_has_block(&fref, "bonds"));
+
+        let mut cols = frame_block_columns(&fref, "atoms");
+        cols.sort();
+        assert_eq!(cols, vec!["element", "id", "type", "x"]);
+        assert_eq!(frame_block_nrows(&fref, "atoms"), 3);
+        assert_eq!(frame_block_nrows(&fref, "missing"), 0);
+
+        // ── Readers ──
+        assert_eq!(frame_column_f64(&fref, "atoms", "x"), xs);
+        assert_eq!(frame_column_i32(&fref, "atoms", "id"), ids);
+        assert_eq!(frame_column_u32(&fref, "atoms", "type"), types);
+        assert_eq!(frame_column_str(&fref, "atoms", "element"), elems);
+        assert_eq!(frame_simbox(&fref), h);
+
+        // ── Absent block / column → empty Vec, never a panic ──
+        assert!(frame_column_f64(&fref, "atoms", "nope").is_empty());
+        assert!(frame_column_f64(&fref, "missing", "x").is_empty());
+        assert!(frame_column_i32(&fref, "missing", "id").is_empty());
+        assert!(frame_column_u32(&fref, "missing", "type").is_empty());
+        assert!(frame_column_str(&fref, "missing", "element").is_empty());
+        assert!(frame_block_columns(&fref, "missing").is_empty());
+
+        // ── Update path: overwrite an existing column ──
+        let xs2: Vec<f64> = vec![9.0, 8.0, 7.0];
+        frame_set_column_f64(&mut fref, "atoms", "x", &xs2);
+        assert_eq!(frame_column_f64(&fref, "atoms", "x"), xs2);
+        // other columns survive the update
+        assert_eq!(frame_column_i32(&fref, "atoms", "id"), ids);
+    }
+
+    /// Capsule / shared-Store semantics: a cloned `FrameRef` shares the
+    /// same `Store`. Round-tripping through `Box::into_raw`/`from_raw`
+    /// (the PyCapsule pattern) must preserve `Rc::ptr_eq`, and a mutation
+    /// through one handle must be visible through the other.
+    #[test]
+    fn cloned_frameref_shares_store() {
+        let mut original = frame_new();
+        frame_set_column_f64(&mut original, "atoms", "x", &[1.0, 2.0, 3.0]);
+
+        // Clone + simulate the PyCapsule carry: Box::into_raw → Box::from_raw.
+        let cloned: FrameRef = FrameRef(original.0.clone());
+        let raw: *mut FrameRef = Box::into_raw(Box::new(cloned));
+        let mut recovered: Box<FrameRef> = unsafe { Box::from_raw(raw) };
+
+        // Same Store behind both handles.
+        assert!(Rc::ptr_eq(&original.0.store, &recovered.0.store));
+
+        // Mutate through the recovered handle, observe through the original.
+        frame_set_column_f64(&mut recovered, "atoms", "x", &[7.0, 8.0, 9.0]);
+        assert_eq!(
+            frame_column_f64(&original, "atoms", "x"),
+            vec![7.0, 8.0, 9.0]
+        );
+
+        // ...and vice versa.
+        frame_set_column_i32(&mut original, "atoms", "id", &[1, 2, 3]);
+        assert_eq!(frame_column_i32(&recovered, "atoms", "id"), vec![1, 2, 3]);
+    }
+}

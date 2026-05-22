@@ -17,6 +17,7 @@
 //! the caller's responsibility (use [`PyFrame::validate`] to check).
 
 use std::collections::HashMap;
+use std::ffi::CString;
 
 use crate::block::PyBlock;
 use crate::helpers::molrs_error_to_pyerr;
@@ -26,7 +27,7 @@ use molrs::frame::Frame as CoreFrame;
 use molrs_ffi::FrameRef;
 use pyo3::exceptions::{PyKeyError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyCapsule, PyDict};
 
 /// Hierarchical data container exposed to Python as `molrs.Frame`.
 ///
@@ -302,7 +303,52 @@ impl PyFrame {
             )
         })
     }
+
+    /// Export this frame's FFI handle as a ``PyCapsule``.
+    ///
+    /// The capsule carries a ``*mut molrs_ffi::FrameRef`` — a *clone* of this
+    /// frame's handle. The clone shares the same underlying ``Store``
+    /// (``Rc<RefCell<Store>>``), so a consumer (e.g. Atomiverse C++ via the
+    /// molrs-cxxapi bridge) that resolves the capsule reads and writes the
+    /// *same* frame data: no deep copy is made. The capsule's destructor
+    /// reclaims the boxed ``FrameRef`` on capsule destruction, dropping its
+    /// two ``Rc`` references.
+    ///
+    /// The capsule name is the C string ``"molrs.FrameRef"``.
+    ///
+    /// Returns
+    /// -------
+    /// capsule
+    ///     A ``PyCapsule`` named ``"molrs.FrameRef"`` wrapping a pointer to a
+    ///     cloned :class:`molrs_ffi.FrameRef`.
+    fn _ffi_frameref_capsule<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyCapsule>> {
+        // Box a clone of the handle and hand the raw pointer to the capsule.
+        // `FrameRef` holds an `Rc` and is therefore not `Send`; a bare
+        // `*mut FrameRef` is not `Send` either, so wrap it in `FrameRefPtr`
+        // which asserts `Send`. This is sound because the capsule is only
+        // ever touched under the GIL (molrs FFI is single-threaded — see the
+        // threading note in `molrs_ffi::shared`).
+        let raw = FrameRefPtr(Box::into_raw(Box::new(self.inner.clone())));
+        let name = CString::new("molrs.FrameRef").expect("static capsule name");
+        PyCapsule::new_with_destructor(py, raw, Some(name), |ptr: FrameRefPtr, _ctx| {
+            // SAFETY: `ptr.0` is the pointer produced by `Box::into_raw`
+            // above and is reclaimed exactly once when the capsule dies.
+            drop(unsafe { Box::from_raw(ptr.0) });
+        })
+    }
 }
+
+/// `Send` wrapper around a `*mut FrameRef` so it can ride inside a
+/// `PyCapsule` (whose payload must be `Send`).
+///
+/// `FrameRef` is `!Send` (it holds an `Rc`), and raw pointers are `!Send` by
+/// default. The capsule is only ever created, read, and destroyed while the
+/// Python GIL is held, so no cross-thread access of the `Rc` ever occurs —
+/// the `unsafe impl Send` is upheld by that single-threaded discipline.
+struct FrameRefPtr(*mut FrameRef);
+
+// SAFETY: see the type-level doc — single-threaded, GIL-guarded use only.
+unsafe impl Send for FrameRefPtr {}
 
 impl PyFrame {
     /// Create a `PyFrame` from a Rust `CoreFrame`, allocating a new FFI store.
