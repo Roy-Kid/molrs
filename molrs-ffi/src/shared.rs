@@ -154,9 +154,7 @@ impl BlockRef {
 
     /// Run a closure with mutable access; bumps the handle version.
     pub fn with_mut<R>(&mut self, f: impl FnOnce(&mut Block) -> R) -> Result<R, FfiError> {
-        self.store
-            .borrow_mut()
-            .with_block_mut(&mut self.handle, f)
+        self.store.borrow_mut().with_block_mut(&mut self.handle, f)
     }
 
     // ---- Metadata ----
@@ -221,11 +219,11 @@ impl BlockRef {
                 None => Ok(None),
                 Some(DType::Float) => {
                     let arr = b.get_float(key).ok_or(FfiError::InvalidBlockHandle)?;
-                    let slice = arr.as_slice_memory_order().ok_or_else(|| {
-                        FfiError::NonContiguous {
-                            key: key.to_string(),
-                        }
-                    })?;
+                    let slice =
+                        arr.as_slice_memory_order()
+                            .ok_or_else(|| FfiError::NonContiguous {
+                                key: key.to_string(),
+                            })?;
                     Ok(Some(f(slice, arr.shape())))
                 }
                 Some(actual) => Err(FfiError::DTypeMismatch {
@@ -248,11 +246,11 @@ impl BlockRef {
                 None => Ok(None),
                 Some(DType::Int) => {
                     let arr = b.get_int(key).ok_or(FfiError::InvalidBlockHandle)?;
-                    let slice = arr.as_slice_memory_order().ok_or_else(|| {
-                        FfiError::NonContiguous {
-                            key: key.to_string(),
-                        }
-                    })?;
+                    let slice =
+                        arr.as_slice_memory_order()
+                            .ok_or_else(|| FfiError::NonContiguous {
+                                key: key.to_string(),
+                            })?;
                     Ok(Some(f(slice, arr.shape())))
                 }
                 Some(actual) => Err(FfiError::DTypeMismatch {
@@ -275,11 +273,11 @@ impl BlockRef {
                 None => Ok(None),
                 Some(DType::UInt) => {
                     let arr = b.get_uint(key).ok_or(FfiError::InvalidBlockHandle)?;
-                    let slice = arr.as_slice_memory_order().ok_or_else(|| {
-                        FfiError::NonContiguous {
-                            key: key.to_string(),
-                        }
-                    })?;
+                    let slice =
+                        arr.as_slice_memory_order()
+                            .ok_or_else(|| FfiError::NonContiguous {
+                                key: key.to_string(),
+                            })?;
                     Ok(Some(f(slice, arr.shape())))
                 }
                 Some(actual) => Err(FfiError::DTypeMismatch {
