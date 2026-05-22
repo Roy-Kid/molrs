@@ -402,6 +402,14 @@ fn molrec_print_summary(rec: &AtvMolRec) {
 /// shared `Store`, so cloning this and round-tripping it through a
 /// `Box`/raw-pointer (e.g. a Python `PyCapsule`) keeps the same underlying
 /// frame data — mutations through one handle are visible through all clones.
+///
+/// `#[repr(transparent)]` guarantees this newtype has exactly the layout of
+/// the wrapped `molrs_ffi::FrameRef`, so a `*const molrs_ffi::FrameRef` (e.g.
+/// the pointer carried by molrs-python's `_ffi_frameref_capsule`) and a
+/// `*const FrameRef` are layout-compatible. `frame_clone_from_addr` relies on
+/// this only as a defensive guarantee — it still dereferences the pointer as
+/// the *real* `molrs_ffi::FrameRef` type, never as a layout cast.
+#[repr(transparent)]
 pub struct FrameRef(pub molrs_ffi::FrameRef);
 
 /// Create a fresh standalone frame (new `Store` + empty `Frame`).
@@ -409,6 +417,40 @@ pub struct FrameRef(pub molrs_ffi::FrameRef);
 /// @return boxed opaque handle owning a fresh shared store
 fn frame_new() -> Box<FrameRef> {
     Box::new(FrameRef(molrs_ffi::FrameRef::new_standalone()))
+}
+
+/// Clone a `molrs_ffi::FrameRef` reachable through a `molrs.FrameRef`
+/// PyCapsule address into a bridge-side [`FrameRef`] handle.
+///
+/// This is the cross-extension ingress point. molrs-python's
+/// `Frame._ffi_frameref_capsule()` produces a `PyCapsule` named
+/// `"molrs.FrameRef"`. PyO3 heap-boxes the capsule payload, and that payload
+/// is a `#[repr(transparent)]` `FrameRefPtr` — itself a `*mut FrameRef`
+/// (a clone of the Python frame's handle). The capsule's `void*` is
+/// therefore `*mut *mut molrs_ffi::FrameRef`.
+///
+/// `addr` is `PyCapsule_GetPointer` cast to `usize`. This function resolves
+/// it as `*const *const molrs_ffi::FrameRef`, dereferences once to reach the
+/// cloned `*const FrameRef`, then `.clone()`s it — two cheap `Rc` bumps —
+/// producing a handle onto the *same* shared `Store`. Reads and writes
+/// through the returned handle are visible in the originating Python
+/// `molrs.Frame`.
+///
+/// # Safety
+///
+/// `addr` must be the pointer returned by `PyCapsule_GetPointer` on a
+/// `"molrs.FrameRef"` capsule from `molrs.Frame._ffi_frameref_capsule()`,
+/// valid for the duration of this call. The molrs FFI store is
+/// single-threaded and GIL-guarded; the caller must hold the GIL (or
+/// otherwise guarantee exclusive access) while calling.
+///
+/// @param addr `molrs.FrameRef` capsule pointer (a `*mut *mut FrameRef`)
+/// @return boxed bridge handle sharing the same store as the source frame
+unsafe fn frame_clone_from_addr(addr: usize) -> Box<FrameRef> {
+    let pp = addr as *const *const molrs_ffi::FrameRef;
+    let p = unsafe { *pp };
+    let cloned = unsafe { (*p).clone() };
+    Box::new(FrameRef(cloned))
 }
 
 /// List the block keys present in the frame.

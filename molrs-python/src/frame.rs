@@ -306,21 +306,28 @@ impl PyFrame {
 
     /// Export this frame's FFI handle as a ``PyCapsule``.
     ///
-    /// The capsule carries a ``*mut molrs_ffi::FrameRef`` — a *clone* of this
-    /// frame's handle. The clone shares the same underlying ``Store``
-    /// (``Rc<RefCell<Store>>``), so a consumer (e.g. Atomiverse C++ via the
-    /// molrs-cxxapi bridge) that resolves the capsule reads and writes the
-    /// *same* frame data: no deep copy is made. The capsule's destructor
-    /// reclaims the boxed ``FrameRef`` on capsule destruction, dropping its
-    /// two ``Rc`` references.
+    /// The capsule wraps a *clone* of this frame's ``FrameRef`` handle. The
+    /// clone shares the same underlying ``Store`` (``Rc<RefCell<Store>>``),
+    /// so a consumer (e.g. Atomiverse C++ via the molrs-cxxapi bridge) that
+    /// resolves the capsule reads and writes the *same* frame data: no deep
+    /// copy is made. The capsule's destructor reclaims the boxed
+    /// ``FrameRef`` on capsule destruction, dropping its two ``Rc``
+    /// references.
+    ///
+    /// Pointer indirection: PyO3's ``PyCapsule::new`` heap-boxes its
+    /// payload, and the payload here is a ``#[repr(transparent)]``
+    /// ``FrameRefPtr`` (itself ``*mut FrameRef``). The capsule's ``void*``
+    /// is therefore ``*mut FrameRefPtr`` ≡ ``*mut *mut FrameRef``: one
+    /// dereference yields the ``*mut FrameRef`` clone. Atomiverse's
+    /// ``frame_clone_from_addr`` does exactly that double-resolve.
     ///
     /// The capsule name is the C string ``"molrs.FrameRef"``.
     ///
     /// Returns
     /// -------
     /// capsule
-    ///     A ``PyCapsule`` named ``"molrs.FrameRef"`` wrapping a pointer to a
-    ///     cloned :class:`molrs_ffi.FrameRef`.
+    ///     A ``PyCapsule`` named ``"molrs.FrameRef"`` whose pointer is
+    ///     ``*mut *mut`` :class:`molrs_ffi.FrameRef` (a cloned handle).
     fn _ffi_frameref_capsule<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyCapsule>> {
         // Box a clone of the handle and hand the raw pointer to the capsule.
         // `FrameRef` holds an `Rc` and is therefore not `Send`; a bare
@@ -345,6 +352,14 @@ impl PyFrame {
 /// default. The capsule is only ever created, read, and destroyed while the
 /// Python GIL is held, so no cross-thread access of the `Rc` ever occurs —
 /// the `unsafe impl Send` is upheld by that single-threaded discipline.
+///
+/// `#[repr(transparent)]` guarantees this newtype has exactly the layout of
+/// the wrapped `*mut FrameRef`. PyO3's `PyCapsule::new` heap-boxes the
+/// payload, so the capsule's `void*` is `*mut FrameRefPtr`; the transparent
+/// repr makes that pointer reinterpretable as `*mut *mut FrameRef`, which is
+/// how Atomiverse's molrs-cxxapi bridge resolves it
+/// (`frame_clone_from_addr`).
+#[repr(transparent)]
 struct FrameRefPtr(*mut FrameRef);
 
 // SAFETY: see the type-level doc — single-threaded, GIL-guarded use only.
