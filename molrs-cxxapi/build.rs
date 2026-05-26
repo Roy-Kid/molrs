@@ -75,6 +75,7 @@ pub mod ffi {
             step: i32,
         );
         fn molrec_write_zarr(path: &str, rec: &AtvMolRec);
+        fn molrec_read_zarr_first_frame(path: &str) -> Box<FrameRef>;
         fn molrec_print_summary(rec: &AtvMolRec);
 
         // Mulliken stays in C++ — depends on electronic structure context (basis
