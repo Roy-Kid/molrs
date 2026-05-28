@@ -53,7 +53,7 @@ use pyo3::types::{PyCapsule, PyDict};
 /// print(frame)          # Frame(blocks=['atoms'], simbox=yes)
 /// print(frame.keys())   # ['atoms']
 /// ```
-#[pyclass(name = "Frame", from_py_object, unsendable)]
+#[pyclass(name = "Frame", from_py_object, unsendable, subclass)]
 #[derive(Clone)]
 pub struct PyFrame {
     pub(crate) inner: FrameRef,

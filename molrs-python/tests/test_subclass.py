@@ -58,3 +58,108 @@ class TestBoxSubclass:
 
         instance = Sub(np.eye(3) * 2.0)
         assert repr(instance) == "<Sub>"
+
+
+class TestFrameSubclass:
+    """``class Sub(molrs.Frame)`` must instantiate and inherit base methods."""
+
+    def test_subclass_can_be_defined(self):
+        class Sub(molrs.Frame):
+            pass
+
+        assert issubclass(Sub, molrs.Frame)
+
+    def test_subclass_instance_is_a_frame(self):
+        class Sub(molrs.Frame):
+            pass
+
+        instance = Sub()
+        assert isinstance(instance, molrs.Frame)
+        assert isinstance(instance, Sub)
+
+    def test_subclass_inherits_methods(self):
+        class Sub(molrs.Frame):
+            pass
+
+        instance = Sub()
+        instance["atoms"] = molrs.Block()
+        assert "atoms" in instance
+        assert list(instance.keys()) == ["atoms"]
+
+    def test_subclass_can_add_python_attributes(self):
+        class Sub(molrs.Frame):
+            def __new__(cls, *, label):
+                instance = super().__new__(cls)
+                instance.label = label
+                return instance
+
+        instance = Sub(label="frame-A")
+        assert instance.label == "frame-A"
+        assert isinstance(instance, molrs.Frame)
+
+    def test_subclass_accepted_by_molrs_api(self, tmp_path):
+        """Subclass instance must extract through PyO3 FromPyObject without TypeError.
+
+        Exercised via ``molrs.write_xyz`` (signature takes ``Frame``); if the
+        downcast rejects the subclass we get ``TypeError`` at the call site.
+        """
+
+        class Sub(molrs.Frame):
+            pass
+
+        instance = Sub()
+        atoms = molrs.Block()
+        atoms.insert("symbol", ["H"])
+        atoms.insert("x", np.array([0.0], dtype=np.float32))
+        atoms.insert("y", np.array([0.0], dtype=np.float32))
+        atoms.insert("z", np.array([0.0], dtype=np.float32))
+        instance["atoms"] = atoms
+
+        out = tmp_path / "sub.xyz"
+        molrs.write_xyz(str(out), instance)
+        assert out.exists()
+
+
+class TestBlockSubclass:
+    """``class Sub(molrs.Block)`` must instantiate and inherit base methods."""
+
+    def test_subclass_can_be_defined(self):
+        class Sub(molrs.Block):
+            pass
+
+        assert issubclass(Sub, molrs.Block)
+
+    def test_subclass_instance_is_a_block(self):
+        class Sub(molrs.Block):
+            pass
+
+        instance = Sub()
+        assert isinstance(instance, molrs.Block)
+        assert isinstance(instance, Sub)
+
+    def test_subclass_inherits_methods(self):
+        class Sub(molrs.Block):
+            pass
+
+        instance = Sub()
+        instance.insert("x", np.array([1.0, 2.0, 3.0], dtype=np.float32))
+        assert instance.nrows == 3
+        assert "x" in instance
+
+    def test_subclass_accepted_by_molrs_api(self):
+        """Subclass instance must extract through PyO3 FromPyObject without TypeError.
+
+        Exercised via ``Frame.__setitem__`` (signature takes ``Block``); if the
+        downcast rejects the subclass we get ``TypeError`` at assignment.
+        """
+
+        class Sub(molrs.Block):
+            pass
+
+        sub = Sub()
+        sub.insert("x", np.array([1.0, 2.0], dtype=np.float32))
+
+        frame = molrs.Frame()
+        frame["atoms"] = sub  # would raise TypeError if Sub were rejected
+        assert "atoms" in frame
+        assert frame["atoms"].nrows == 2
