@@ -52,29 +52,65 @@
 pub mod center_of_mass;
 pub mod cluster;
 pub mod cluster_centers;
+pub mod density;
+pub mod dielectric;
+pub mod diffraction;
+pub mod environment;
 pub mod error;
 pub mod gyration_tensor;
 pub mod inertia_tensor;
 pub mod kmeans;
 pub mod msd;
+pub mod order;
 pub mod pca;
+pub mod pmft;
 pub mod radius_of_gyration;
 pub mod rdf;
 pub mod result;
+pub mod spectra;
 pub mod traits;
 pub mod util;
 
 // Re-exports
 pub use center_of_mass::{COMResult, CenterOfMass};
-pub use cluster::{Cluster, ClusterResult};
+pub use cluster::{Cluster, ClusterProperties, ClusterPropertiesResult, ClusterResult};
 pub use cluster_centers::{ClusterCenters, ClusterCentersResult};
+pub use density::{
+    CorrelationFunction, CorrelationFunctionResult, GaussianDensity, GaussianDensityResult,
+    LocalDensity, LocalDensityResult, SphereVoxelization, SphereVoxelizationResult,
+};
+pub use dielectric::{
+    DielectricSpectrum, StaticDielectricResult, compute_current_density, compute_dipole_moment,
+    decompose_current, einstein_helfand_spectrum, green_kubo_spectrum, static_dielectric_constant,
+    static_dielectric_constant_components,
+};
+pub use diffraction::{
+    DiffractionPattern, DiffractionPatternResult, StaticStructureFactorDebye,
+    StaticStructureFactorDebyeResult, StaticStructureFactorDirect,
+    StaticStructureFactorDirectResult,
+};
+pub use environment::{
+    AngularSeparationGlobal, AngularSeparationGlobalResult, AngularSeparationNeighbor,
+    AngularSeparationNeighborResult, BondOrder, BondOrderResult, LocalBondProjection,
+    LocalBondProjectionResult, LocalDescriptors, LocalDescriptorsResult, MatchEnv, MatchEnvResult,
+};
 pub use error::ComputeError;
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
 pub use kmeans::{KMeans, KMeansResult};
-pub use msd::{MSD, MSDResult, MSDTimeSeries};
+pub use msd::{MSD, MSDResult, MSDTimeSeries, MsdMode};
+pub use order::{
+    ContinuousCoordination, ContinuousCoordinationResult, Cubatic, CubaticResult, Hexatic,
+    HexaticResult, Nematic, NematicResult, RotationalAutocorrelation,
+    RotationalAutocorrelationResult, SolidLiquid, SolidLiquidResult, Steinhardt, SteinhardtResult,
+};
 pub use pca::{Pca2, PcaResult};
+pub use pmft::{
+    PMFTR12, PMFTR12Args, PMFTR12Result, PMFTXY, PMFTXYArgs, PMFTXYResult, PMFTXYT, PMFTXYTArgs,
+    PMFTXYTResult, PMFTXYZ, PMFTXYZArgs, PMFTXYZResult,
+};
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
 pub use rdf::{RDF, RDFResult};
 pub use result::{ComputeResult, DescriptorRow};
+pub use spectra::{RamanSpectrum, Spectrum, ir_spectrum, power_spectrum, raman_spectrum};
 pub use traits::Compute;

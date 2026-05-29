@@ -149,7 +149,7 @@ repos:
 
       - id: python-pytest
         name: pytest (molrs-python, after wheel install)
-        entry: bash -c 'cd molrs-python && python -m pip install --quiet --force-reinstall target/wheels/*.whl && pytest -q'
+        entry: bash -c 'cd molrs-python && uv pip install --quiet --force-reinstall target/wheels/*.whl && pytest -q'
         language: system
         pass_filenames: false
         types: [rust]

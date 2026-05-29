@@ -64,7 +64,8 @@ frame["atoms"] = atoms
 nq = molrs.NeighborQuery(box, positions, cutoff=5.0)
 nlist = nq.query_self()
 
-rdf = molrs.RDF(100, 5.0)
+from molrs.compute.density import RDF
+rdf = RDF(100, 5.0)
 result = rdf.compute(frame, nlist)
 ```
 

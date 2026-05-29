@@ -35,6 +35,7 @@ pub struct RDF {
     bin_width: F,
     bin_edges: Array1<F>,
     bin_centers: Array1<F>,
+    dimensionality: u8,
 }
 
 impl RDF {
@@ -85,7 +86,24 @@ impl RDF {
             bin_width,
             bin_edges,
             bin_centers,
+            dimensionality: 3,
         })
+    }
+
+    /// Switch the shell-volume normalization to 2-D (`2π r dr`) instead of
+    /// the default 3-D (`(4/3) π (r_o³ − r_i³)`).
+    ///
+    /// For a 2-D system the `SimBox` should be set up so that `volume()`
+    /// returns the in-plane area (e.g. `Lz = 1`). Matches the convention
+    /// of `freud.density.RDF` when `freud.box.Box.is2D` is true.
+    pub fn with_dimensionality(mut self, dim: u8) -> Self {
+        assert!(dim == 2 || dim == 3, "RDF dimensionality must be 2 or 3");
+        self.dimensionality = dim;
+        self
+    }
+
+    pub fn dimensionality(&self) -> u8 {
+        self.dimensionality
     }
 
     pub fn bin_width(&self) -> F {
@@ -176,6 +194,7 @@ impl Compute for RDF {
             volume,
             r_min: self.r_min,
             n_frames: frames.len(),
+            dimensionality: self.dimensionality,
             finalized: false,
         };
         // Normalize eagerly so direct callers (outside Graph) can read `rdf`
@@ -421,5 +440,60 @@ mod tests {
         assert!(RDF::new(10, 1.0, 1.0).is_err());
         assert!(RDF::new(10, 0.5, 1.0).is_err());
         assert!(RDF::new(10, 1.0, 0.0).is_ok());
+    }
+
+    /// Sanity check that 2D normalization (`2 π r dr` shells) reproduces the
+    /// expected `g(r) → 1` plateau for a random 2-D ideal gas. Mirrors
+    /// freud's `freud.density.RDF` behaviour when `box.is2D == True`.
+    #[test]
+    fn rdf_2d_orthorhombic_box_plateaus_to_one() {
+        // Pack 600 points uniformly in a 10×10 plane (z fixed). Use Lz=1
+        // so simbox.volume() returns the 2-D area (Lx · Ly).
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+
+        let n = 600;
+        let lx: F = 10.0;
+        let ly: F = 10.0;
+        let lz: F = 1.0;
+        let r_max: F = 3.5;
+        let n_bins = 35;
+
+        let mut rng = StdRng::seed_from_u64(123);
+        let mut block = Block::new();
+        let xs = A1::from_iter((0..n).map(|_| rng.random::<F>() * lx));
+        let ys = A1::from_iter((0..n).map(|_| rng.random::<F>() * ly));
+        let zs = A1::from_iter((0..n).map(|_| 0.0_f64));
+        block.insert("x", xs.into_dyn()).unwrap();
+        block.insert("y", ys.into_dyn()).unwrap();
+        block.insert("z", zs.into_dyn()).unwrap();
+        let mut frame = Frame::new();
+        frame.insert("atoms", block);
+        let simbox = SimBox::ortho(
+            array![lx, ly, lz],
+            array![0.0 as F, 0.0, 0.0],
+            [true, true, false],
+        )
+        .unwrap();
+        frame.simbox = Some(simbox.clone());
+
+        // Build neighbor list (3-D LinkCell — z is identical so it's a
+        // single-cell column).
+        let pos = positions(&frame);
+        let mut lc = LinkCell::new().cutoff(r_max);
+        lc.build(pos.view(), &simbox);
+        let nlist = lc.query().clone();
+
+        let rdf = RDF::new(n_bins, r_max, 0.0).unwrap().with_dimensionality(2);
+        let result = rdf.compute(&[&frame], &vec![nlist]).unwrap();
+
+        // Plateau check: bins outside the first-shell artifact should average
+        // to ~1.0. Use a generous tolerance since this is a finite ideal gas.
+        let plateau: F = result.rdf.iter().skip(5).copied().sum::<F>() / (n_bins - 5) as F;
+        assert!(
+            (plateau - 1.0).abs() < 0.15,
+            "2-D ideal-gas RDF plateau = {plateau:.3}, expected ≈ 1.0"
+        );
+        assert_eq!(result.dimensionality, 2);
     }
 }

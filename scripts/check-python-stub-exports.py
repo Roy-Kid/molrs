@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "molrs-python" / "src"
 LIB_RS = SRC / "lib.rs"
 STUB = ROOT / "molrs-python" / "python" / "molrs" / "molrs.pyi"
-INIT = ROOT / "molrs-python" / "python" / "molrs" / "__init__.py"
+PACKAGE_DIR = ROOT / "molrs-python" / "python" / "molrs"
 
 
 def exported_classes(lib_text: str, class_names: dict[str, str]) -> set[str]:
@@ -84,15 +84,27 @@ def init_all_symbols(init_text: str) -> set[str]:
     return set()
 
 
+def package_exports(package_dir: Path) -> set[str]:
+    """Union the `__all__` lists of every `__init__.py` under the package.
+
+    Lets analyzers live in submodules (e.g. `molrs.compute.density.RDF`)
+    while still satisfying the check that every PyO3 export is reachable
+    from at least one public namespace.
+    """
+    exports: set[str] = set()
+    for init_path in package_dir.rglob("__init__.py"):
+        exports |= init_all_symbols(init_path.read_text(encoding="utf-8"))
+    return exports
+
+
 def main() -> int:
     lib_text = LIB_RS.read_text(encoding="utf-8")
     stub_text = STUB.read_text(encoding="utf-8")
-    init_text = INIT.read_text(encoding="utf-8")
 
     expected = exported_classes(lib_text, collect_class_names())
     expected |= exported_functions(lib_text, collect_function_names())
     declared = declared_stub_symbols(stub_text)
-    init_exports = init_all_symbols(init_text)
+    init_exports = package_exports(PACKAGE_DIR)
 
     missing = sorted(expected - declared)
     missing_init = sorted(expected - init_exports)
@@ -104,12 +116,12 @@ def main() -> int:
             print(f"  - {name}")
         return 1
     if missing_init:
-        print("molrs.__all__ is missing PyO3 exports:")
+        print("no molrs.* __all__ re-exports these PyO3 classes:")
         for name in missing_init:
             print(f"  - {name}")
         return 1
 
-    print(f"molrs.pyi and molrs.__all__ declare all {len(expected)} PyO3 exports from src/lib.rs.")
+    print(f"molrs.pyi and molrs.* __all__ declare all {len(expected)} PyO3 exports from src/lib.rs.")
     if extra_context:
         print(f"Additional stub-only helper symbols: {len(extra_context)}")
     return 0

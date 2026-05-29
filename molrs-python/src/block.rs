@@ -80,7 +80,7 @@ struct UIntArrayOwner {
 /// assert "x" in b
 /// arr = b.view("x")        # zero-copy numpy view
 /// ```
-#[pyclass(name = "Block", from_py_object, unsendable)]
+#[pyclass(name = "Block", from_py_object, unsendable, subclass)]
 #[derive(Clone)]
 pub struct PyBlock {
     pub(crate) inner: BlockRef,

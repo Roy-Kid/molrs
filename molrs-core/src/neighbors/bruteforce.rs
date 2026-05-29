@@ -45,14 +45,13 @@ impl BruteForce {
         self.result.clear();
 
         for i in 0..n {
-            let pi = points.row(i);
+            let pi = [points[[i, 0]], points[[i, 1]], points[[i, 2]]];
             for j in (i + 1)..n {
-                let pj = points.row(j);
-                let dr = bx.shortest_vector_fast(pi, pj);
+                let pj = [points[[j, 0]], points[[j, 1]], points[[j, 2]]];
+                let dr = bx.shortest_vector_impl(pi, pj);
                 let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                 if d2 <= cutoff2 {
-                    self.result
-                        .push(i as u32, j as u32, d2, [dr[0], dr[1], dr[2]]);
+                    self.result.push(i as u32, j as u32, d2, dr);
                 }
             }
         }
@@ -120,13 +119,21 @@ impl NbListAlgo for BruteForce {
 
         let cutoff2 = self.cutoff * self.cutoff;
         for i in 0..n {
-            let pi = self.stored_pos.row(i);
+            let pi = [
+                self.stored_pos[[i, 0]],
+                self.stored_pos[[i, 1]],
+                self.stored_pos[[i, 2]],
+            ];
             for j in (i + 1)..n {
-                let pj = self.stored_pos.row(j);
-                let dr = bx.shortest_vector_fast(pi, pj);
+                let pj = [
+                    self.stored_pos[[j, 0]],
+                    self.stored_pos[[j, 1]],
+                    self.stored_pos[[j, 2]],
+                ];
+                let dr = bx.shortest_vector_impl(pi, pj);
                 let d2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
                 if d2 <= cutoff2 {
-                    visitor.visit_pair(i as u32, j as u32, d2, [dr[0], dr[1], dr[2]]);
+                    visitor.visit_pair(i as u32, j as u32, d2, dr);
                 }
             }
         }

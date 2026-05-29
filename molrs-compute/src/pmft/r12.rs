@@ -1,0 +1,351 @@
+// Parallel iteration over (frames, nlists, orientations) by index reads
+// more clearly than nested zips.
+#![allow(clippy::needless_range_loop)]
+
+//! 2-D `(r, t1, t2)` Pair Mode Fourier Transform.
+//!
+//! Mirrors `freud.pmft.PMFTR12`
+//! ([source](https://github.com/glotzerlab/freud/blob/main/freud/pmft/PMFTR12.cc)).
+//!
+//! 2-D pair distribution function on polar bond coordinates plus the
+//! relative angle each particle makes with the bond. For a neighbor pair
+//! `(i, j)` with lab-frame bond vector `r_ij = r_j − r_i`:
+//!
+//! - `r       = |r_ij|`                              (radial distance)
+//! - `θ_lab   = atan2(r_ij.y, r_ij.x)`               (lab-frame bond angle)
+//! - `t1      = wrap(θ_lab − orient_i,  [0, 2π))`    (bond in i's frame)
+//! - `t2      = wrap(θ_lab + π − orient_j, [0, 2π))` (reverse bond in j's frame)
+//!
+//! The triplet `(r, t1, t2)` is binned into a 3-D histogram on
+//! `[0, r_max] × [0, 2π) × [0, 2π)`. PMF is `−ln(ρ / ρ_ref)` per cell.
+//!
+//! The system is 2-D in the sense that `r_ij.z` is ignored and the
+//! orientations are scalar angles (radians). Caller is responsible for
+//! the planar configuration.
+
+use molrs::frame_access::FrameAccess;
+use molrs::neighbors::NeighborList;
+use molrs::region::simbox::BoxKind;
+use molrs::types::F;
+use ndarray::Array3;
+
+use crate::error::ComputeError;
+use crate::result::ComputeResult;
+use crate::traits::Compute;
+
+const TWO_PI: F = 2.0 * std::f64::consts::PI;
+
+/// Per-frame PMFTR12 result.
+#[derive(Debug, Clone, Default)]
+pub struct PMFTR12Result {
+    pub density: Array3<F>,
+    pub raw_counts: Array3<u64>,
+    pub pmf: Array3<F>,
+    pub r_edges: Vec<F>,
+    pub t1_edges: Vec<F>,
+    pub t2_edges: Vec<F>,
+}
+
+impl ComputeResult for PMFTR12Result {}
+
+/// `PMFTR12` analyzer.
+#[derive(Debug, Clone, Copy)]
+pub struct PMFTR12 {
+    r_max: F,
+    n_r: usize,
+    n_t1: usize,
+    n_t2: usize,
+}
+
+impl PMFTR12 {
+    pub fn new(r_max: F, n_r: usize, n_t1: usize, n_t2: usize) -> Result<Self, ComputeError> {
+        if r_max.is_nan() || r_max <= 0.0 {
+            return Err(ComputeError::OutOfRange {
+                field: "PMFTR12::r_max",
+                value: r_max.to_string(),
+            });
+        }
+        if n_r == 0 || n_t1 == 0 || n_t2 == 0 {
+            return Err(ComputeError::OutOfRange {
+                field: "PMFTR12 bin counts",
+                value: format!("n_r={n_r}, n_t1={n_t1}, n_t2={n_t2}"),
+            });
+        }
+        Ok(Self {
+            r_max,
+            n_r,
+            n_t1,
+            n_t2,
+        })
+    }
+}
+
+/// Per-frame args for PMFTR12: parallel `&[NeighborList]` and
+/// per-particle 2-D orientations (radians).
+pub struct PMFTR12Args<'a> {
+    pub nlists: &'a [NeighborList],
+    pub orientations: &'a [Vec<F>],
+}
+
+#[inline]
+fn wrap_2pi(a: F) -> F {
+    let v = a.rem_euclid(TWO_PI);
+    if v < 0.0 { v + TWO_PI } else { v }
+}
+
+impl PMFTR12 {
+    fn one_frame<FA: FrameAccess>(
+        &self,
+        frame: &FA,
+        nlist: &NeighborList,
+        orientations: &[F],
+    ) -> Result<PMFTR12Result, ComputeError> {
+        let simbox = frame.simbox_ref().ok_or(ComputeError::MissingSimBox)?;
+        let (lx, ly) = match simbox.kind() {
+            BoxKind::Ortho { len, .. } => (len[0], len[1]),
+            BoxKind::Triclinic => {
+                return Err(ComputeError::OutOfRange {
+                    field: "PMFTR12::simbox",
+                    value: "triclinic boxes not supported".into(),
+                });
+            }
+        };
+
+        let dr = self.r_max / self.n_r as F;
+        let dt1 = TWO_PI / self.n_t1 as F;
+        let dt2 = TWO_PI / self.n_t2 as F;
+        let bin_vol = dr * dt1 * dt2;
+
+        let mut counts = Array3::<u64>::zeros((self.n_r, self.n_t1, self.n_t2));
+        let vectors = nlist.vectors();
+        let i_idx = nlist.query_point_indices();
+        let j_idx = nlist.point_indices();
+        let n_pairs = nlist.n_pairs();
+        let symmetric = matches!(nlist.mode(), molrs::neighbors::QueryMode::SelfQuery);
+
+        for k in 0..n_pairs {
+            let vx = vectors[[k, 0]];
+            let vy = vectors[[k, 1]];
+            let r = (vx * vx + vy * vy).sqrt();
+            if r >= self.r_max || r == 0.0 {
+                continue;
+            }
+            let i = i_idx[k] as usize;
+            let j = j_idx[k] as usize;
+            if i >= orientations.len() || j >= orientations.len() {
+                return Err(ComputeError::DimensionMismatch {
+                    expected: i.max(j) + 1,
+                    got: orientations.len(),
+                    what: "PMFTR12 orientations length",
+                });
+            }
+            let theta_lab = vy.atan2(vx);
+            let t1 = wrap_2pi(theta_lab - orientations[i]);
+            let t2 = wrap_2pi(theta_lab + std::f64::consts::PI - orientations[j]);
+            let br = ((r / dr) as usize).min(self.n_r - 1);
+            let b1 = ((t1 / dt1) as usize).min(self.n_t1 - 1);
+            let b2 = ((t2 / dt2) as usize).min(self.n_t2 - 1);
+            counts[[br, b1, b2]] += 1;
+            if symmetric {
+                // Reverse bond on the j-side: (−vx, −vy) → same r,
+                // angles swap (t1' = wrap(theta_lab+π − orient_j),
+                // t2' = wrap(theta_lab − orient_i)).
+                let t1p = wrap_2pi(theta_lab + std::f64::consts::PI - orientations[j]);
+                let t2p = wrap_2pi(theta_lab - orientations[i]);
+                let b1p = ((t1p / dt1) as usize).min(self.n_t1 - 1);
+                let b2p = ((t2p / dt2) as usize).min(self.n_t2 - 1);
+                counts[[br, b1p, b2p]] += 1;
+            }
+        }
+
+        let n_q = nlist.num_query_points() as F;
+        let n_p = nlist.num_points() as F;
+        let n_pairs_total = if symmetric {
+            n_p * (n_p - 1.0)
+        } else {
+            n_q * n_p
+        };
+        let area_box = lx * ly;
+        let rho_ref = if area_box > 0.0 {
+            // Per-pair density in 2-D, marginalised uniformly over the two
+            // orientation axes.
+            n_pairs_total / area_box / (TWO_PI * TWO_PI)
+        } else {
+            0.0
+        };
+
+        let mut density = Array3::<F>::zeros((self.n_r, self.n_t1, self.n_t2));
+        let mut pmf = Array3::<F>::from_elem((self.n_r, self.n_t1, self.n_t2), F::INFINITY);
+        for ir in 0..self.n_r {
+            // 2-D radial shell: divide by 2π · r_c · dr  (cylindrical for 2D).
+            let r_c = (ir as F + 0.5) * dr;
+            let shell = 2.0 * std::f64::consts::PI * r_c * bin_vol / dr; // shell · dt1 · dt2
+            for i1 in 0..self.n_t1 {
+                for i2 in 0..self.n_t2 {
+                    let rho = counts[[ir, i1, i2]] as F / shell.max(1e-12);
+                    density[[ir, i1, i2]] = rho;
+                    if rho > 0.0 && rho_ref > 0.0 {
+                        pmf[[ir, i1, i2]] = -(rho / rho_ref).ln();
+                    }
+                }
+            }
+        }
+
+        let r_edges: Vec<F> = (0..=self.n_r).map(|i| i as F * dr).collect();
+        let t1_edges: Vec<F> = (0..=self.n_t1).map(|i| i as F * dt1).collect();
+        let t2_edges: Vec<F> = (0..=self.n_t2).map(|i| i as F * dt2).collect();
+
+        Ok(PMFTR12Result {
+            density,
+            raw_counts: counts,
+            pmf,
+            r_edges,
+            t1_edges,
+            t2_edges,
+        })
+    }
+}
+
+impl Compute for PMFTR12 {
+    type Args<'a> = PMFTR12Args<'a>;
+    type Output = Vec<PMFTR12Result>;
+
+    fn compute<'a, FA: FrameAccess + Sync + 'a>(
+        &self,
+        frames: &[&'a FA],
+        args: PMFTR12Args<'a>,
+    ) -> Result<Vec<PMFTR12Result>, ComputeError> {
+        if frames.is_empty() {
+            return Err(ComputeError::EmptyInput);
+        }
+        let nf = frames.len();
+        if args.nlists.len() != nf || args.orientations.len() != nf {
+            return Err(ComputeError::DimensionMismatch {
+                expected: nf,
+                got: args.nlists.len().min(args.orientations.len()),
+                what: "PMFTR12 frame-aligned inputs",
+            });
+        }
+        let mut out = Vec::with_capacity(nf);
+        for k in 0..nf {
+            out.push(self.one_frame(frames[k], &args.nlists[k], &args.orientations[k])?);
+        }
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use molrs::Frame;
+    use molrs::block::Block;
+    use molrs::neighbors::{LinkCell, NbListAlgo};
+    use molrs::region::simbox::SimBox;
+    use ndarray::{Array1 as A1, array};
+
+    fn frame_with(positions: &[[F; 3]], box_len: F) -> Frame {
+        let x = A1::from_iter(positions.iter().map(|p| p[0]));
+        let y = A1::from_iter(positions.iter().map(|p| p[1]));
+        let z = A1::from_iter(positions.iter().map(|p| p[2]));
+        let mut block = Block::new();
+        block.insert("x", x.into_dyn()).unwrap();
+        block.insert("y", y.into_dyn()).unwrap();
+        block.insert("z", z.into_dyn()).unwrap();
+        let mut frame = Frame::new();
+        frame.insert("atoms", block);
+        frame.simbox = Some(
+            SimBox::ortho(
+                array![box_len, box_len, 1.0_f64],
+                array![0.0 as F, 0.0 as F, 0.0 as F],
+                [false, false, false],
+            )
+            .unwrap(),
+        );
+        frame
+    }
+
+    fn build_nlist(frame: &Frame, cutoff: F) -> NeighborList {
+        let xp = frame
+            .get("atoms")
+            .unwrap()
+            .get("x")
+            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .unwrap()
+            .as_slice()
+            .unwrap()
+            .to_vec();
+        let yp = frame
+            .get("atoms")
+            .unwrap()
+            .get("y")
+            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .unwrap()
+            .as_slice()
+            .unwrap()
+            .to_vec();
+        let zp = frame
+            .get("atoms")
+            .unwrap()
+            .get("z")
+            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .unwrap()
+            .as_slice()
+            .unwrap()
+            .to_vec();
+        let n = xp.len();
+        let mut pos = ndarray::Array2::<F>::zeros((n, 3));
+        for i in 0..n {
+            pos[[i, 0]] = xp[i];
+            pos[[i, 1]] = yp[i];
+            pos[[i, 2]] = zp[i];
+        }
+        let simbox = frame.simbox.as_ref().unwrap();
+        let mut lc = LinkCell::new().cutoff(cutoff);
+        lc.build(pos.view(), simbox);
+        lc.query().clone()
+    }
+
+    #[test]
+    fn two_particles_land_in_one_bin() {
+        // Two particles along +x; both orientations = 0. Bond from i to j
+        // has θ_lab = 0 → t1 = 0, t2 = π. The symmetric reverse contributes
+        // a second count at t1 = π, t2 = 0.
+        let frame = frame_with(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], 10.0);
+        let nl = build_nlist(&frame, 1.5);
+        let r = &PMFTR12::new(2.0, 4, 4, 4)
+            .unwrap()
+            .compute(
+                &[&frame],
+                PMFTR12Args {
+                    nlists: std::slice::from_ref(&nl),
+                    orientations: std::slice::from_ref(&vec![0.0_f64, 0.0]),
+                },
+            )
+            .unwrap()[0];
+        let total: u64 = r.raw_counts.iter().copied().sum();
+        assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn out_of_range_dropped() {
+        let frame = frame_with(&[[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]], 10.0);
+        let nl = build_nlist(&frame, 5.0);
+        let r = &PMFTR12::new(1.0, 4, 4, 4)
+            .unwrap()
+            .compute(
+                &[&frame],
+                PMFTR12Args {
+                    nlists: std::slice::from_ref(&nl),
+                    orientations: std::slice::from_ref(&vec![0.0_f64, 0.0]),
+                },
+            )
+            .unwrap()[0];
+        assert_eq!(r.raw_counts.iter().copied().sum::<u64>(), 0);
+    }
+
+    #[test]
+    fn invalid_args_error() {
+        assert!(PMFTR12::new(0.0, 4, 4, 4).is_err());
+        assert!(PMFTR12::new(1.0, 0, 4, 4).is_err());
+    }
+}

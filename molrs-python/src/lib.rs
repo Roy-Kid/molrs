@@ -66,6 +66,11 @@ use compute::{
     PyRadiusOfGyration,
 };
 
+mod compute_extra;
+mod dielectric;
+mod signal;
+mod validate;
+
 /// Root Python module for the molrs library.
 ///
 /// Registered classes and free functions are listed in the module-level
@@ -90,10 +95,12 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(io::read_lammps, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_lammps_traj, m)?)?;
     m.add_class::<io::PyLAMMPSTrajReader>()?;
+    m.add_function(wrap_pyfunction!(io::read_gro, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_chgcar_file, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_cube_file, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_cube_file, m)?)?;
     // Writers
+    m.add_function(wrap_pyfunction!(io::write_gro, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_pdb, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_xyz, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_lammps, m)?)?;
@@ -151,6 +158,20 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPcaResult>()?;
     m.add_class::<PyKMeans>()?;
     m.add_class::<PyKMeansResult>()?;
+
+    // Additional analyzers ported from freud (Steinhardt, Nematic, …).
+    compute_extra::register(m)?;
+
+    // Signal processing
+    m.add_function(wrap_pyfunction!(signal::signal_acf_fft, m)?)?;
+    m.add_function(wrap_pyfunction!(signal::signal_apply_window, m)?)?;
+    m.add_function(wrap_pyfunction!(signal::signal_frequency_grid, m)?)?;
+
+    // Dielectric
+    dielectric::register_dielectric(m)?;
+
+    // Validation
+    validate::register_validate(m)?;
 
     Ok(())
 }

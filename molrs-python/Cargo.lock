@@ -614,9 +614,10 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-compute"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "molcrafts-molrs-core",
+ "molcrafts-molrs-signal",
  "ndarray",
  "rand",
  "rustfft",
@@ -624,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-core"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "libm",
  "ndarray",
@@ -638,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-embed"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "molcrafts-molrs-core",
  "ndarray",
@@ -648,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-ff"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "libm",
  "molcrafts-molrs-core",
@@ -660,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-ffi"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "molcrafts-molrs-core",
  "slotmap",
@@ -668,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-io"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "flate2",
  "molcrafts-molrs-core",
@@ -680,8 +681,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "molcrafts-molrs-signal"
+version = "0.0.17"
+dependencies = [
+ "ndarray",
+ "rustfft",
+]
+
+[[package]]
 name = "molrs-python"
-version = "0.0.16"
+version = "0.0.17"
 dependencies = [
  "molcrafts-molrs-compute",
  "molcrafts-molrs-core",
@@ -689,6 +698,7 @@ dependencies = [
  "molcrafts-molrs-ff",
  "molcrafts-molrs-ffi",
  "molcrafts-molrs-io",
+ "molcrafts-molrs-signal",
  "ndarray",
  "numpy",
  "pyo3",

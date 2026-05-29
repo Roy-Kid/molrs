@@ -96,7 +96,8 @@ atoms.insert("element", ["C", "C", "C", "C"])
 frame["atoms"] = atoms
 frame.simbox = box
 
-rdf = molrs.RDF(n_bins=20, r_max=1.0)
+from molrs.compute.density import RDF
+rdf = RDF(n_bins=20, r_max=1.0)
 result = rdf.compute(frame, nlist)
 print(result.bin_centers[:3])
 print(result.rdf[:3])

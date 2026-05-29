@@ -38,12 +38,18 @@ use crate::region::simbox::SimBox;
 use crate::types::{F, FNx3View};
 use ndarray::ArrayView2;
 
+pub mod aabb;
 pub mod bruteforce;
+pub mod filter;
 mod linkcell;
+pub mod periodic_buffer;
 mod query;
 
+pub use aabb::AabbQuery;
 pub use bruteforce::BruteForce;
+pub use filter::{filter_rad, filter_sann};
 pub use linkcell::LinkCell;
+pub use periodic_buffer::{PeriodicBufferResult, periodic_buffer};
 pub use query::NeighborQuery;
 /// Backward-compatible alias.
 #[deprecated(note = "renamed to NeighborQuery")]

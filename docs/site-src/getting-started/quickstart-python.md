@@ -114,7 +114,8 @@ nlist = nq.query_self()
 print("pairs:", nlist.n_pairs)
 print("first pairs:", nlist.pairs()[:5])
 
-rdf = molrs.RDF(64, 6.0)
+from molrs.compute.density import RDF
+rdf = RDF(64, 6.0)
 rdf_result = rdf.compute(frame, nlist)
 print("rdf bins:", len(rdf_result.bin_centers))
 print("first g(r):", rdf_result.rdf[:5])
