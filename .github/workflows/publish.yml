@@ -119,8 +119,25 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
+  # molrs-signal is a leaf crate (only ndarray + rustfft), so it can publish in
+  # parallel with publish-core. publish-compute depends on it.
+  publish-signal:
+    needs: ci
+    if: github.repository == 'MolCrafts/molrs'
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish molcrafts-molrs-signal (skip if already on crates.io)
+        run: bash scripts/publish-if-new.sh molrs-signal/Cargo.toml molcrafts-molrs-signal
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
   publish-compute:
-    needs: publish-core
+    needs: [publish-core, publish-signal]
     if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: release
