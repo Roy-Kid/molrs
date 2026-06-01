@@ -45,6 +45,11 @@ fn min_distance(coords: &[[f64; 3]]) -> f64 {
     min_d
 }
 
+// IGNORED (mmff94-etkdg-04-embed): asserts the retired FragmentRules
+// behavior (`embed_algorithm_used == FragmentRules`). The active pipeline is
+// ETKDG, which reports `DistanceGeometry`. Kept (not deleted) per spec; the
+// ETKDG equivalent lives in etkdg.rs::ac001_ac002_rmsd_and_energy_vs_rdkit.
+#[ignore = "retired FragmentRules behavior; superseded by ETKDG pipeline (etkdg.rs)"]
 #[test]
 fn test_generate_3d_ethanol_assigns_coordinates() {
     // Heavy-atom ethanol skeleton: C-C-O
@@ -124,6 +129,10 @@ fn test_generate_3d_seed_reproducible() {
     }
 }
 
+// IGNORED (mmff94-etkdg-04-embed): asserts the retired MMFF94->UFF fallback
+// warning. The ETKDG pipeline performs a real MMFF94 cleanup, so no fallback
+// warning is emitted. Kept (not deleted) per spec.
+#[ignore = "retired MMFF94->UFF fallback; ETKDG uses real MMFF94 cleanup"]
 #[test]
 fn test_generate_3d_auto_forcefield_reports_fallback_warning() {
     let mut g = Atomistic::new();
@@ -159,6 +168,10 @@ fn test_generate_3d_empty_molecule_returns_error() {
     );
 }
 
+// IGNORED (mmff94-etkdg-04-embed): asserts the retired
+// `embed_algorithm == DistanceGeometry` selector path. ETKDG ignores the
+// selector field; coordinate-assignment coverage now lives in etkdg.rs.
+#[ignore = "retired EmbedAlgorithm selector; ETKDG is the only algorithm"]
 #[test]
 fn test_generate_3d_distance_geometry_assigns_coordinates() {
     let mut g = Atomistic::new();
@@ -184,6 +197,10 @@ fn test_generate_3d_distance_geometry_assigns_coordinates() {
     );
 }
 
+// IGNORED (mmff94-etkdg-04-embed): asserts the retired FragmentRules
+// "ring template" warning. ETKDG embeds rings via distance geometry and emits
+// no such warning. Kept (not deleted) per spec.
+#[ignore = "retired FragmentRules ring-template path; ETKDG uses distance geometry"]
 #[test]
 fn test_fragment_rules_uses_ring_template_on_benzene() {
     let mut g = Atomistic::new();

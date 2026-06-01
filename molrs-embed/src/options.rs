@@ -109,4 +109,30 @@ impl EmbedOptions {
             EmbedSpeed::Better => std::f64::consts::PI / 2.0,
         }
     }
+
+    // --- ETKDG-internal knobs ------------------------------------------------
+    //
+    // The public `EmbedOptions` shape is intentionally frozen (constructed by
+    // `molrs-python`); the ETKDG pipeline reinterprets the existing fields
+    // internally and supplies ETKDG defaults for the rest. `max_steps` doubles
+    // as the explicit `maxIterations` override (0 = RDKit's `10×n_atoms`
+    // heuristic).
+
+    /// ETKDG `maxIterations` override. `max_steps == 0` means "use the RDKit
+    /// `10 × n_atoms` heuristic" (resolved in `etkdg::retry`).
+    pub(crate) fn max_iterations_internal(&self) -> usize {
+        self.max_steps
+    }
+
+    /// Whether the `useRandomCoords` fallback embedding is allowed. Always on
+    /// internally (matches RDKit's default retry behavior on hard cases).
+    pub(crate) fn use_random_coords_fallback_internal(&self) -> bool {
+        true
+    }
+
+    /// Whether the second-stage MMFF94 cleanup minimization runs. Always on
+    /// internally (the spec's stage-3 contract).
+    pub(crate) fn mmff_cleanup_internal(&self) -> bool {
+        true
+    }
 }

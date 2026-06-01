@@ -11,3 +11,6 @@ mod pipeline;
 
 #[path = "embed/distgeom.rs"]
 mod distgeom;
+
+#[path = "embed/etkdg.rs"]
+mod etkdg;
