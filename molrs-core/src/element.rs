@@ -1141,6 +1141,71 @@ impl Element {
             .find(|e| e.symbol().eq_ignore_ascii_case(sym))
     }
 
+    /// Whether this element sits to the *left* of carbon in its periodic-table
+    /// row (group 1, 2 and the group-13 triad B/Al/Ga/…).
+    ///
+    /// RDKit calls these "early" (electron-poor) atoms. The distinction matters
+    /// for charged-atom valence: an early atom carrying a positive charge has
+    /// *fewer* electrons available for bonding, while a late atom (N, O, F …)
+    /// carrying a negative charge gains a lone pair it can protonate. Both are
+    /// captured exactly by the `effective_atomic_number` shift below, so this
+    /// predicate is exposed mainly for callers that want the sign explicitly.
+    ///
+    /// Mirrors `RDKit::isEarlyAtom` (`Code/GraphMol/Atom.cpp`).
+    pub const fn is_early_atom(self) -> bool {
+        matches!(
+            self,
+            Element::Li
+                | Element::Be
+                | Element::B
+                | Element::Na
+                | Element::Mg
+                | Element::Al
+                | Element::K
+                | Element::Ca
+                | Element::Sc
+                | Element::Ti
+                | Element::V
+                | Element::Cr
+                | Element::Mn
+                | Element::Rb
+                | Element::Sr
+                | Element::Y
+                | Element::Zr
+                | Element::Nb
+                | Element::Cs
+                | Element::Ba
+                | Element::Fr
+                | Element::Ra
+        )
+    }
+
+    /// Effective element after folding a formal charge into the proton count,
+    /// per RDKit's `getEffectiveAtomicNum`: `Z_eff = Z − formal_charge`.
+    ///
+    /// This is the heart of the charged-atom valence rule. A cation borrows the
+    /// valence list of the element one place *earlier* in the table; an anion
+    /// borrows the element one place *later*. Examples:
+    ///
+    /// - `[CH3+]`  → Z 6 − (+1) = 5 (B), valence 3 → 3 H
+    /// - `[CH3-]`  → Z 6 − (−1) = 7 (N), valence 3 → 3 H
+    /// - `[NH4+]`  → Z 7 − (+1) = 6 (C), valence 4 → 4 H
+    /// - `[BH4-]`  → Z 5 − (−1) = 6 (C), valence 4 → 4 H
+    /// - `[OH-]`   → Z 8 − (−1) = 9 (F), valence 1 → 1 H
+    /// - `[NH2-]`  → Z 7 − (−1) = 8 (O), valence 2 → 2 H
+    ///
+    /// Returns `None` when the shift lands outside the table (1..=118).
+    ///
+    /// Mirrors `RDKit::getEffectiveAtomicNum` (`Code/GraphMol/Atom.cpp`).
+    pub fn effective_atomic_number(self, formal_charge: i32) -> Option<Element> {
+        let z = self.z() as i32 - formal_charge;
+        if (1..=118).contains(&z) {
+            Element::by_number(z as u8)
+        } else {
+            None
+        }
+    }
+
     /// Default allowed valences for this element (ascending order).
     ///
     /// Returns the list of typical valences used for implicit hydrogen

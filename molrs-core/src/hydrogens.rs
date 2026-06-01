@@ -16,8 +16,13 @@
 //! Aromatic bonds should be stored as 1.5.
 //!
 //! # Formal-charge correction
-//! The effective valence target is shifted by the atom's `"formal_charge"`
-//! property (default 0): a +1 charge on N raises its valence target by 1.
+//! A formal charge is folded into the element identity, not into the bond
+//! demand: the valence list of `Z − formal_charge` is used. This is RDKit's
+//! `getEffectiveAtomicNum` rule and gets the group-13/14 cation case right
+//! (e.g. `[CH3+]` → C(Z=6) − (+1) = B(Z=5), valence 3 → 3 H, rather than the
+//! naive `bond_order_sum − formal_charge` which over-counts to 5 H). For the
+//! late atoms N/O/F the two formulations happen to agree, but for early atoms
+//! (B, C, Si, …) they diverge, which is exactly the bug this rule fixes.
 
 use super::element::Element;
 use super::molgraph::{Atom, AtomId, BondId, MolGraph};
@@ -107,39 +112,46 @@ pub fn implicit_h_count(mol: &MolGraph, atom_id: AtomId) -> Option<u32> {
     let sym = atom.get_str("element")?;
     let element = Element::by_symbol(sym)?;
 
-    let valences = element.default_valences();
+    // RDKit charged-atom valence rule (`getEffectiveAtomicNum` +
+    // `calculateImplicitValence` in `Code/GraphMol/Atom.cpp`):
+    //
+    //   1. Z_eff = Z − formal_charge  (cation → element one place earlier;
+    //      anion → one place later). The valence list is taken from Z_eff,
+    //      NOT from the bare element with a charge-adjusted demand.
+    //   2. demand = sum of incident bond orders (no charge term here).
+    //   3. target = smallest Z_eff valence ≥ demand.
+    //   4. implicit_h = target − demand.
+    //
+    // This is what makes early atoms (B, C, Si, …) and late atoms (N, O, F)
+    // behave asymmetrically under charge:
+    //   [CH3+]  Z 6−(+1)=5 (B), valences [3], demand 0 → 3 H
+    //   [CH3-]  Z 6−(−1)=7 (N), valences [3,5], demand 0 → 3 H
+    //   [NH4+]  Z 7−(+1)=6 (C), valences [4], demand 0 → 4 H
+    //   [BH4-]  Z 5−(−1)=6 (C), valences [4], demand 0 → 4 H
+    //   [OH-]   Z 8−(−1)=9 (F), valences [1], demand 0 → 1 H
+    //   [NH2-]  Z 7−(−1)=8 (O), valences [2], demand 0 → 2 H
+    let formal_charge = atom.get_f64("formal_charge").unwrap_or(0.0).round() as i32;
+
+    // Fold the charge into the element identity, then read that element's
+    // valence list. An out-of-range shift (or an element with no valence
+    // model) means we add no hydrogens.
+    let effective = element.effective_atomic_number(formal_charge)?;
+    let valences = effective.default_valences();
     if valences.is_empty() {
-        return None; // noble gas or element with no valence model
+        return None; // noble gas / effective element with no valence model
     }
 
-    // Sum of bond orders connected to this atom.
-    let bond_order_sum: f64 = bond_order_sum(mol, atom_id);
+    // Sum of bond orders connected to this atom (the explicit valence).
+    let demand: f64 = bond_order_sum(mol, atom_id);
 
-    // Formal charge: a positive charge raises the usable valence (N+ behaves
-    // like C, valence 4), a negative charge lowers it (N- → 2). The charge must
-    // be folded into the bond demand BEFORE selecting the target valence —
-    // otherwise a quaternary N+ (bond_order_sum = 4) would pick the hypervalent
-    // N(5) state and gain spurious hydrogens. This is the RDKit/Daylight
-    // charge-adjusted-valence convention.
-    //
-    // Algorithm:
-    //   1. adjusted_demand = bond_order_sum - formal_charge.
-    //   2. target = smallest standard valence ≥ adjusted_demand.
-    //   3. implicit_h = target - adjusted_demand.
-    // Examples: NH4+ (bos 0, fc +1) → adj -1 → target 3 → 4 H; quaternary N+
-    // (bos 4, fc +1) → adj 3 → target 3 → 0 H; sulfonimide N- (bos 2, fc -1) →
-    // adj 3 → target 3 → 0 H; primary amine N (bos 1, fc 0) → adj 1 → target 3 → 2 H.
-    let formal_charge = atom.get_f64("formal_charge").unwrap_or(0.0);
-    let adjusted_demand = bond_order_sum - formal_charge;
-
-    // Select the smallest allowed valence ≥ the charge-adjusted demand.
+    // Select the smallest allowed valence ≥ the (un-charge-adjusted) demand.
     let target = valences
         .iter()
         .copied()
-        .find(|&v| v as f64 >= adjusted_demand - 1e-6);
+        .find(|&v| v as f64 >= demand - 1e-6);
 
     let target = target?; // if demand exceeds all valences, add nothing
-    let n = target as f64 - adjusted_demand;
+    let n = target as f64 - demand;
     if n <= 0.5 {
         Some(0)
     } else {
@@ -338,6 +350,86 @@ mod tests {
         let n = g.add_atom(n_atom);
         let count = implicit_h_count(&g, n).unwrap();
         assert_eq!(count, 4);
+    }
+
+    /// Build a single charged heavy atom (no heavy neighbours) and check its
+    /// implicit-H count against RDKit's `GetTotalNumHs()`.
+    fn charged_atom_h(sym: &str, fc: f64) -> u32 {
+        let mut g = MolGraph::new();
+        let mut a = Atom::new();
+        a.set("element", sym);
+        a.set("formal_charge", fc);
+        let id = g.add_atom(a);
+        implicit_h_count(&g, id).unwrap_or(0)
+    }
+
+    #[test]
+    fn test_rdkit_charged_valence_parity() {
+        // Expected hydrogen counts baked in from RDKit 2026.03.2:
+        //   for smi in [...]: Chem.MolFromSmiles(smi); atom.GetTotalNumHs()
+        //
+        // Charged single-heavy-atom species (the cases the old
+        // bond_order_sum - formal_charge rule got wrong for group-13/14):
+        assert_eq!(charged_atom_h("C", 1.0), 3, "[CH3+] -> 3 H");
+        assert_eq!(charged_atom_h("C", -1.0), 3, "[CH3-] -> 3 H");
+        assert_eq!(charged_atom_h("B", -1.0), 4, "[BH4-] -> 4 H");
+        assert_eq!(charged_atom_h("N", 1.0), 4, "[NH4+] -> 4 H");
+        assert_eq!(charged_atom_h("O", -1.0), 1, "[OH-] -> 1 H");
+        assert_eq!(charged_atom_h("N", -1.0), 2, "[NH2-] -> 2 H");
+
+        // Neutral references (unchanged by the fix):
+        assert_eq!(charged_atom_h("C", 0.0), 4, "methane C -> 4 H");
+        assert_eq!(charged_atom_h("O", 0.0), 2, "water O -> 2 H");
+        assert_eq!(charged_atom_h("N", 0.0), 3, "ammonia N -> 3 H");
+    }
+
+    /// Helper: implicit-H on `atom_id` of a built graph.
+    fn h_at(g: &MolGraph, id: AtomId) -> u32 {
+        implicit_h_count(g, id).unwrap_or(0)
+    }
+
+    #[test]
+    fn test_rdkit_multi_atom_parity() {
+        // ethane CC: each C has bos 1 -> 3 H
+        let mut g = MolGraph::new();
+        let c1 = g.add_atom(atom("C"));
+        let c2 = g.add_atom(atom("C"));
+        bond_with_order(&mut g, c1, c2, 1.0);
+        assert_eq!(h_at(&g, c1), 3, "ethane C -> 3 H");
+        assert_eq!(h_at(&g, c2), 3, "ethane C -> 3 H");
+
+        // ethylene C=C: each C has bos 2 -> 2 H
+        let mut g = MolGraph::new();
+        let c1 = g.add_atom(atom("C"));
+        let c2 = g.add_atom(atom("C"));
+        bond_with_order(&mut g, c1, c2, 2.0);
+        assert_eq!(h_at(&g, c1), 2, "ethylene C -> 2 H");
+
+        // benzene (aromatic, bos 1.5+1.5=3): each C -> 1 H
+        let mut g = MolGraph::new();
+        let ids: Vec<AtomId> = (0..6).map(|_| g.add_atom(atom("C"))).collect();
+        for i in 0..6 {
+            bond_with_order(&mut g, ids[i], ids[(i + 1) % 6], 1.5);
+        }
+        assert_eq!(h_at(&g, ids[0]), 1, "benzene C -> 1 H");
+
+        // acetate CC(=O)[O-]: methyl C -> 3, carbonyl C -> 0,
+        // carbonyl O (=O) -> 0, [O-] (single bond, fc -1) -> 0
+        let mut g = MolGraph::new();
+        let c_me = g.add_atom(atom("C"));
+        let c_carb = g.add_atom(atom("C"));
+        let o_dbl = g.add_atom(atom("O"));
+        let mut o_minus = Atom::new();
+        o_minus.set("element", "O");
+        o_minus.set("formal_charge", -1.0_f64);
+        let o_minus = g.add_atom(o_minus);
+        bond_with_order(&mut g, c_me, c_carb, 1.0);
+        bond_with_order(&mut g, c_carb, o_dbl, 2.0);
+        bond_with_order(&mut g, c_carb, o_minus, 1.0);
+        assert_eq!(h_at(&g, c_me), 3, "acetate methyl C -> 3 H");
+        assert_eq!(h_at(&g, c_carb), 0, "acetate carbonyl C -> 0 H");
+        assert_eq!(h_at(&g, o_dbl), 0, "acetate =O -> 0 H");
+        assert_eq!(h_at(&g, o_minus), 0, "acetate [O-] -> 0 H");
     }
 
     #[test]
