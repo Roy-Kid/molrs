@@ -15,8 +15,8 @@ criteria:
     evaluator_hint: "Compare MmffForceField energy of molrs conformer to RDKit ETKDG+MMFF-optimized energy."
     pass_when: |
       For the ac-001 molecules, the MMFF94 energy (from mmff94-etkdg-02 MmffForceField) of the molrs-generated conformer is within 10% relative of the MMFF94 energy of the RDKit-generated-and-MMFF-optimized conformer for the same molecule.
-    status: pending
-    last_checked: ""
+    status: verified
+    last_checked: "2026-06-01"
   - id: ac-003
     summary: Success rate on rdkit_problems.smi >= RDKit and >= old impl
     type: runtime
