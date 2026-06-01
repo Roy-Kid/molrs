@@ -71,11 +71,40 @@ as `Frame`, `Block`, `Box`, and analysis helpers directly.
 
 ## Source Builds
 
-For local Python development, install the extension module in editable form:
+### Prerequisites
+
+Source builds need the Rust toolchain, installed via
+[`rustup`](https://rustup.rs/). The repository pins the toolchain channel, the
+`rustfmt` / `clippy` components, and the `wasm32-unknown-unknown` target in
+`rust-toolchain.toml`, so `rustup` provisions them automatically on the first
+build inside the checkout — no manual `rustup component add` needed.
+
+### Native crates
+
+Clone the workspace and build every crate. Tests need fixtures fetched by the
+helper script on the first run:
 
 ```bash
-maturin develop -m molrs-python/Cargo.toml
+git clone https://github.com/MolCrafts/molrs.git
+cd molrs
+cargo build --workspace            # compile all native crates
+bash scripts/fetch-test-data.sh    # fetch test fixtures (first run only)
+cargo test --all-features          # run the test suite
 ```
+
+### Python extension
+
+For local Python development, install the extension module in editable form
+with [maturin](https://www.maturin.rs/). This compiles the `molrs-python` PyO3
+crate and installs it into the active virtualenv as `molrs`:
+
+```bash
+pip install maturin
+maturin develop -m molrs-python/Cargo.toml --release
+python -c "import molrs; print(molrs.parse_smiles('O').n_components)"
+```
+
+### WASM / npm
 
 For the npm package, build the same bundler target used by release publishing:
 
@@ -83,6 +112,8 @@ For the npm package, build the same bundler target used by release publishing:
 cd molrs-wasm
 wasm-pack build --release --target bundler --scope molcrafts --out-name molrs
 ```
+
+### Documentation
 
 For documentation work, build the local site after the Python extension is
 installed:

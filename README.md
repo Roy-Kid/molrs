@@ -63,6 +63,45 @@ molcrafts-molrs = { version = "0.0.16", features = ["io", "smiles", "embed"] }
 
 Python: `pip install molcrafts-molrs` (import as `molrs`). Browser: `npm install @molcrafts/molrs`.
 
+## Build from source
+
+Building from source needs the Rust toolchain. The pinned channel, the
+`rustfmt` / `clippy` components, and the `wasm32-unknown-unknown` target are all
+declared in `rust-toolchain.toml`, so [`rustup`](https://rustup.rs/) selects
+them automatically on the first build.
+
+```bash
+git clone https://github.com/MolCrafts/molrs.git
+cd molrs
+cargo build --workspace            # compile every native crate
+bash scripts/fetch-test-data.sh    # fetch test fixtures (first run only)
+cargo test --all-features          # run the test suite
+```
+
+**Python bindings** are built from the `molrs-python` crate with
+[maturin](https://www.maturin.rs/). `maturin develop` compiles the PyO3
+extension and installs it editable into the active virtualenv under the import
+name `molrs`:
+
+```bash
+pip install maturin
+maturin develop -m molrs-python/Cargo.toml --release
+python -c "import molrs; print(molrs.parse_smiles('O').n_components)"
+```
+
+**WASM / npm** is built with [wasm-pack](https://rustwasm.github.io/wasm-pack/),
+using the same flags as release publishing:
+
+```bash
+cd molrs-wasm
+wasm-pack build --release --target bundler --scope molcrafts --out-name molrs
+```
+
+See the [installation guide](https://molcrafts.github.io/molrs/getting-started/installation/)
+for environment-verification snippets and the
+[contributing guide](https://molcrafts.github.io/molrs/contributing/) for the
+documentation loop.
+
 ## Quick start
 
 ```rust
