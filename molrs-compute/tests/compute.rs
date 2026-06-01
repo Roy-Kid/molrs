@@ -1,0 +1,15 @@
+//! Integration tests for `molrs-compute`.
+//!
+//! The module tree below mirrors the crate's `src/` layout: one test module per
+//! source area. Unlike `molrs-io`, compute does no file I/O — every test builds
+//! its frames / point sets in code and asserts against the PUBLIC API. Inline
+//! `#[cfg(test)]` unit tests inside `src/**` stay there; these integration tests
+//! exercise cross-module guarantees (the `Graph` DAG) and end-to-end analyses
+//! against known analytical results (RDF of a lattice, MSD of linear motion).
+
+#[path = "compute/center_of_mass.rs"]
+mod center_of_mass;
+#[path = "compute/msd.rs"]
+mod msd;
+#[path = "compute/rdf.rs"]
+mod rdf;

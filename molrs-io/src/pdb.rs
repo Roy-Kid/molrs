@@ -1113,52 +1113,9 @@ END
         );
     }
 
-    #[test]
-    fn test_read_real_pdb_water() {
-        let test_data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../molrs-core/target/tests-data");
-        if !test_data_dir.exists() {
-            panic!("Test data not found. Run: scripts/fetch-test-data.sh");
-        }
-        let test_data_dir = test_data_dir.to_str().unwrap();
-        let path = format!("{}/pdb/water.pdb", test_data_dir);
-        let frame = read_pdb_frame(&path).expect("Failed to open water.pdb");
-
-        let atoms = frame.get("atoms").expect("No atoms block");
-        assert!(atoms.nrows().unwrap() > 0, "Should have atoms");
-
-        // Water should have O and H elements
-        let elements = atoms.get_string("element").expect("No element column");
-        let has_oxygen = elements.iter().any(|e| e == "O");
-        let has_hydrogen = elements.iter().any(|e| e == "H");
-        assert!(has_oxygen, "Water should have oxygen");
-        assert!(has_hydrogen, "Water should have hydrogen");
-    }
-
-    #[test]
-    fn test_read_real_pdb_with_bonds() {
-        let test_data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../molrs-core/target/tests-data");
-        if !test_data_dir.exists() {
-            panic!("Test data not found. Run: scripts/fetch-test-data.sh");
-        }
-        let test_data_dir = test_data_dir.to_str().unwrap();
-        let path = format!("{}/pdb/1avg.pdb", test_data_dir);
-        let frame = read_pdb_frame(&path).expect("Failed to open 1avg.pdb");
-
-        let atoms = frame.get("atoms").expect("No atoms block");
-        assert!(atoms.nrows().unwrap() > 0, "Should have atoms");
-
-        // Check if bonds exist (CONECT records)
-        if let Some(bonds) = frame.get("bonds") {
-            assert!(bonds.nrows().unwrap() > 0, "Should have bonds");
-
-            // Bonds should have i and j columns
-            let i_atoms = bonds.get_uint("atomi").expect("No atomi column");
-            let j_atoms = bonds.get_uint("atomj").expect("No atomj column");
-            assert_eq!(i_atoms.len(), j_atoms.len(), "Bond arrays should match");
-        }
-    }
+    // Real-file PDB reads (water elements, CONECT bonds) live in the
+    // integration suite at `tests/io/pdb.rs`, which iterates every file in
+    // `tests-data/pdb/`. Inline unit tests stay pure (no `tests-data/` reads).
 
     // -----------------------------------------------------------------
     // Streaming index tests

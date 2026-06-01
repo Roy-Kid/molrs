@@ -1,27 +1,23 @@
 import os
-import pytest
-import numpy as np
-import molrs
+import tempfile
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-GRO_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "molrs-core", "target", "tests-data", "gro")
+import pytest
+
+import molrs
 
 
 class TestReadPdb:
-    def test_basic(self):
-        frame = molrs.read_pdb(os.path.join(DATA_DIR, "water.pdb"))
+    def test_basic(self, pdb_dir):
+        frame = molrs.read_pdb(str(pdb_dir / "water.pdb"))
         assert "atoms" in frame
-        assert frame["atoms"].nrows == 3
+        assert frame["atoms"].nrows > 0
 
-    def test_has_coordinates(self):
-        frame = molrs.read_pdb(os.path.join(DATA_DIR, "water.pdb"))
+    def test_has_coordinates(self, pdb_dir):
+        frame = molrs.read_pdb(str(pdb_dir / "water.pdb"))
         atoms = frame["atoms"]
-        x = atoms.view("x")
-        y = atoms.view("y")
-        z = atoms.view("z")
-        assert x is not None
-        assert y is not None
-        assert z is not None
+        assert atoms.view("x") is not None
+        assert atoms.view("y") is not None
+        assert atoms.view("z") is not None
 
     def test_missing_file_raises_os_error(self):
         with pytest.raises(OSError):
@@ -29,36 +25,35 @@ class TestReadPdb:
 
 
 class TestReadGro:
-    def test_native_basic(self):
-        frames = molrs.read_gro(os.path.join(GRO_DATA_DIR, "ubiquitin.gro"))
+    def test_native_basic(self, gro_dir):
+        frames = molrs.read_gro(str(gro_dir / "ubiquitin.gro"))
         assert len(frames) == 1
         f0 = frames[0]
         assert "atoms" in f0
         assert f0["atoms"].nrows > 0
         assert f0.simbox is not None
 
-    def test_native_columns(self):
-        frames = molrs.read_gro(os.path.join(GRO_DATA_DIR, "ubiquitin.gro"))
+    def test_native_columns(self, gro_dir):
+        frames = molrs.read_gro(str(gro_dir / "ubiquitin.gro"))
         atoms = frames[0]["atoms"]
         for col in ["resid", "resname", "atom_name", "atom_id", "x", "y", "z"]:
             assert col in atoms, f"missing column: {col}"
 
-    def test_facade_canonical_columns(self):
-        frames = molrs.io.read_gro(os.path.join(GRO_DATA_DIR, "ubiquitin.gro"))
+    def test_facade_canonical_columns(self, gro_dir):
+        frames = molrs.io.read_gro(str(gro_dir / "ubiquitin.gro"))
         atoms = frames[0]["atoms"]
         for col in ["res_id", "res_name", "name", "id", "x", "y", "z"]:
             assert col in atoms, f"missing canonical column: {col}"
 
-    def test_facade_no_format_native_columns(self):
-        frames = molrs.io.read_gro(os.path.join(GRO_DATA_DIR, "ubiquitin.gro"))
+    def test_facade_no_format_native_columns(self, gro_dir):
+        frames = molrs.io.read_gro(str(gro_dir / "ubiquitin.gro"))
         atoms = frames[0]["atoms"]
         for col in ["resid", "atom_name", "atom_id"]:
             assert col not in atoms, f"format-native column leaked: {col}"
 
-    def test_round_trip(self):
-        frames = molrs.io.read_gro(os.path.join(GRO_DATA_DIR, "ubiquitin.gro"))
+    def test_round_trip(self, gro_dir):
+        frames = molrs.io.read_gro(str(gro_dir / "ubiquitin.gro"))
         f0 = frames[0]
-        import tempfile
         with tempfile.NamedTemporaryFile(suffix=".gro", delete=False) as tmp:
             tmpname = tmp.name
         try:
@@ -73,22 +68,21 @@ class TestReadGro:
         with pytest.raises(OSError):
             molrs.read_gro("/nonexistent/path.gro")
 
-    def test_triclinic_box(self):
-        frames = molrs.io.read_gro(os.path.join(GRO_DATA_DIR, "1vln-triclinic.gro"))
+    def test_triclinic_box(self, gro_dir):
+        frames = molrs.io.read_gro(str(gro_dir / "1vln-triclinic.gro"))
         assert frames[0].simbox is not None
 
 
 class TestReadXyz:
-    def test_basic(self):
-        frame = molrs.read_xyz(os.path.join(DATA_DIR, "water.xyz"))
+    def test_basic(self, xyz_dir):
+        frame = molrs.read_xyz(str(xyz_dir / "methane.xyz"))
         assert "atoms" in frame
-        assert frame["atoms"].nrows == 3
+        assert frame["atoms"].nrows == 5
 
-    def test_has_coordinates(self):
-        frame = molrs.read_xyz(os.path.join(DATA_DIR, "water.xyz"))
+    def test_has_coordinates(self, xyz_dir):
+        frame = molrs.read_xyz(str(xyz_dir / "methane.xyz"))
         atoms = frame["atoms"]
-        x = atoms.view("x")
-        assert x is not None
+        assert atoms.view("x") is not None
 
     def test_missing_file_raises_os_error(self):
         with pytest.raises(OSError):

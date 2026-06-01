@@ -9,23 +9,27 @@
 //! | XYZ | [`read_xyz`], [`read_xyz_traj`] | [`write_xyz`] |
 //! | LAMMPS data | [`read_lammps`] | [`write_lammps`] |
 //! | LAMMPS dump | [`read_lammps_traj`] | [`write_lammps_traj`] |
+//! | DCD | [`read_dcd`], [`PyDcdTrajReader`] | [`write_dcd`] |
 //! | GRO | [`read_gro`] | [`write_gro`] |
 
 use crate::frame::PyFrame;
 use crate::helpers::{io_error_to_pyerr, molrs_error_to_pyerr, smiles_error_to_pyerr};
 use crate::molgraph::PyAtomistic;
+use molrs::frame::Frame as CoreFrame;
 use molrs_io::chgcar::read_chgcar;
 use molrs_io::cube::{read_cube, write_cube};
+use molrs_io::dcd::{DcdReader, open_dcd, read_dcd as read_dcd_rs, write_dcd as write_dcd_rs};
 use molrs_io::gro::{read_gro as read_gro_rs, write_gro as write_gro_rs};
 use molrs_io::lammps_data::{read_lammps_data, write_lammps_data};
 use molrs_io::lammps_dump::{
     LAMMPSTrajReader, open_lammps_dump, read_lammps_dump, write_lammps_dump,
 };
 use molrs_io::pdb::{read_pdb_frame, write_pdb_frame};
-use molrs_io::reader::{ReadSeek, TrajReader};
-use molrs_io::xyz::{read_xyz_frame, read_xyz_traj, write_xyz_frame};
-use pyo3::exceptions::PyIndexError;
+use molrs_io::reader::{ReadSeek, TrajReader, open_seekable};
+use molrs_io::xyz::{XYZReader, read_xyz_frame, read_xyz_traj, write_xyz_frame};
+use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::{PyList, PySlice};
 use std::fs::File;
 use std::io::BufWriter;
 
@@ -148,6 +152,143 @@ pub fn read_lammps_traj(path: &str) -> PyResult<Vec<PyFrame>> {
     frames.into_iter().map(PyFrame::from_core_frame).collect()
 }
 
+// ============================================================================
+// Shared trajectory-reader helpers
+//
+// `LAMMPSTrajReader` and `DCDTrajReader` wrap different concrete readers that
+// both implement [`TrajReader`]. These generics give both classes one
+// consistent, molpy-aligned behaviour set (negative indexing, slicing, batch
+// reads) without duplicating the logic per class.
+// ============================================================================
+
+/// Number of frames in the trajectory.
+fn traj_len<R: TrajReader<Frame = CoreFrame>>(inner: &mut R) -> PyResult<usize> {
+    inner.len().map_err(io_error_to_pyerr)
+}
+
+/// Read a known in-bounds, non-negative index. Used by slice iteration where
+/// the bounds are already resolved.
+fn traj_read_idx<R: TrajReader<Frame = CoreFrame>>(inner: &mut R, idx: isize) -> PyResult<PyFrame> {
+    let frame = inner
+        .read_step(idx as usize)
+        .map_err(io_error_to_pyerr)?
+        .ok_or_else(|| PyIndexError::new_err("trajectory index out of range"))?;
+    PyFrame::from_core_frame(frame)
+}
+
+/// Read a single frame, resolving Python-style negative indices and raising
+/// `IndexError` if out of range.
+fn traj_read_frame<R: TrajReader<Frame = CoreFrame>>(
+    inner: &mut R,
+    index: isize,
+) -> PyResult<PyFrame> {
+    let n = traj_len(inner)? as isize;
+    let idx = if index < 0 { index + n } else { index };
+    if idx < 0 || idx >= n {
+        return Err(PyIndexError::new_err("trajectory index out of range"));
+    }
+    traj_read_idx(inner, idx)
+}
+
+/// Read a frame by step index, returning ``None`` when out of bounds (lenient
+/// variant retained for backward compatibility).
+fn traj_read_step<R: TrajReader<Frame = CoreFrame>>(
+    inner: &mut R,
+    step: usize,
+) -> PyResult<Option<PyFrame>> {
+    match inner.read_step(step).map_err(io_error_to_pyerr)? {
+        Some(f) => Ok(Some(PyFrame::from_core_frame(f)?)),
+        None => Ok(None),
+    }
+}
+
+/// Read an explicit list of (possibly negative) indices.
+fn traj_read_frames<R: TrajReader<Frame = CoreFrame>>(
+    inner: &mut R,
+    indices: Vec<isize>,
+) -> PyResult<Vec<PyFrame>> {
+    indices
+        .into_iter()
+        .map(|i| traj_read_frame(inner, i))
+        .collect()
+}
+
+/// Iterate already-resolved `[start, stop)` bounds with `step` (the semantics
+/// produced by Python's ``slice.indices``).
+fn traj_slice<R: TrajReader<Frame = CoreFrame>>(
+    inner: &mut R,
+    start: isize,
+    stop: isize,
+    step: isize,
+) -> PyResult<Vec<PyFrame>> {
+    let mut frames = Vec::new();
+    let mut i = start;
+    if step > 0 {
+        while i < stop {
+            frames.push(traj_read_idx(inner, i)?);
+            i += step;
+        }
+    } else {
+        while i > stop {
+            frames.push(traj_read_idx(inner, i)?);
+            i += step;
+        }
+    }
+    Ok(frames)
+}
+
+/// `read_range(start, stop, step)` with Python-like normalization. A `None`
+/// stop means "to the end" (or "to the start" for a negative step).
+fn traj_read_range<R: TrajReader<Frame = CoreFrame>>(
+    inner: &mut R,
+    start: isize,
+    stop: Option<isize>,
+    step: isize,
+) -> PyResult<Vec<PyFrame>> {
+    if step == 0 {
+        return Err(PyValueError::new_err("read_range step must not be zero"));
+    }
+    let n = traj_len(inner)? as isize;
+    let norm = |v: isize| -> isize { if v < 0 { (v + n).max(0) } else { v.min(n) } };
+    let start = norm(start);
+    let stop = match stop {
+        Some(s) => norm(s),
+        None => {
+            if step > 0 {
+                n
+            } else {
+                -1
+            }
+        }
+    };
+    traj_slice(inner, start, stop, step)
+}
+
+/// Read every frame.
+fn traj_read_all<R: TrajReader<Frame = CoreFrame>>(inner: &mut R) -> PyResult<Vec<PyFrame>> {
+    let n = traj_len(inner)? as isize;
+    traj_slice(inner, 0, n, 1)
+}
+
+/// `__getitem__` supporting both integer indices and slices. Returns a single
+/// `Frame` for an integer key, or a `list[Frame]` for a slice key.
+fn traj_getitem<R: TrajReader<Frame = CoreFrame>>(
+    inner: &mut R,
+    key: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let py = key.py();
+    if let Ok(slice) = key.cast::<PySlice>() {
+        let n = traj_len(inner)?;
+        let indices = slice.indices(n as isize)?;
+        let frames = traj_slice(inner, indices.start, indices.stop, indices.step)?;
+        Ok(PyList::new(py, frames)?.into_any().unbind())
+    } else {
+        let index: isize = key.extract()?;
+        let frame = traj_read_frame(inner, index)?;
+        Ok(Py::new(py, frame)?.into_any())
+    }
+}
+
 /// Lazy, indexed reader for LAMMPS dump trajectory files.
 ///
 /// Unlike :func:`read_lammps_traj`, this does **not** parse every frame
@@ -175,8 +316,16 @@ pub fn read_lammps_traj(path: &str) -> PyResult<Vec<PyFrame>> {
 /// ...     pass
 #[pyclass(name = "LAMMPSTrajReader", unsendable)]
 pub struct PyLAMMPSTrajReader {
-    inner: LAMMPSTrajReader<Box<dyn ReadSeek>>,
+    inner: Option<LAMMPSTrajReader<Box<dyn ReadSeek>>>,
     cursor: usize,
+}
+
+impl PyLAMMPSTrajReader {
+    fn reader(&mut self) -> PyResult<&mut LAMMPSTrajReader<Box<dyn ReadSeek>>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("operation on a closed LAMMPSTrajReader"))
+    }
 }
 
 #[pymethods]
@@ -184,7 +333,16 @@ impl PyLAMMPSTrajReader {
     #[new]
     fn py_new(path: &str) -> PyResult<Self> {
         let inner = open_lammps_dump(path).map_err(io_error_to_pyerr)?;
-        Ok(Self { inner, cursor: 0 })
+        Ok(Self {
+            inner: Some(inner),
+            cursor: 0,
+        })
+    }
+
+    /// Number of frames in the trajectory (triggers index construction).
+    #[getter]
+    fn n_frames(&mut self) -> PyResult<usize> {
+        traj_len(self.reader()?)
     }
 
     /// Force the byte-offset index to be built now.
@@ -193,41 +351,48 @@ impl PyLAMMPSTrajReader {
     /// ``__getitem__``, or ``read_step``. Call this explicitly to amortize
     /// the cost upfront — useful when timing only the random-access path.
     fn build_index(&mut self) -> PyResult<()> {
-        self.inner.build_index().map_err(io_error_to_pyerr)
+        self.reader()?.build_index().map_err(io_error_to_pyerr)
     }
 
-    /// Read the frame at the given step index, or ``None`` if out of bounds.
+    /// Read a single frame by index (supports negative indexing).
     ///
-    /// Triggers index construction on first call.
-    fn read_step(&mut self, step: usize) -> PyResult<Option<PyFrame>> {
-        let frame = self.inner.read_step(step).map_err(io_error_to_pyerr)?;
-        match frame {
-            Some(f) => Ok(Some(PyFrame::from_core_frame(f)?)),
-            None => Ok(None),
-        }
+    /// Raises ``IndexError`` if out of range. molpy-aligned.
+    fn read_frame(&mut self, index: isize) -> PyResult<PyFrame> {
+        traj_read_frame(self.reader()?, index)
+    }
+
+    /// Read an explicit list of frame indices (each may be negative).
+    fn read_frames(&mut self, indices: Vec<isize>) -> PyResult<Vec<PyFrame>> {
+        traj_read_frames(self.reader()?, indices)
+    }
+
+    /// Read a contiguous range of frames, Python-slice style.
+    #[pyo3(signature = (start=0, stop=None, step=1))]
+    fn read_range(
+        &mut self,
+        start: isize,
+        stop: Option<isize>,
+        step: isize,
+    ) -> PyResult<Vec<PyFrame>> {
+        traj_read_range(self.reader()?, start, stop, step)
+    }
+
+    /// Eagerly read every frame into a list.
+    fn read_all(&mut self) -> PyResult<Vec<PyFrame>> {
+        traj_read_all(self.reader()?)
+    }
+
+    /// Release the underlying file handle. Further reads raise ``ValueError``.
+    fn close(&mut self) {
+        self.inner = None;
     }
 
     fn __len__(&mut self) -> PyResult<usize> {
-        self.inner.len().map_err(io_error_to_pyerr)
+        traj_len(self.reader()?)
     }
 
-    fn __getitem__(&mut self, step: isize) -> PyResult<PyFrame> {
-        let n = self.inner.len().map_err(io_error_to_pyerr)?;
-        let idx = if step < 0 {
-            let abs = step.unsigned_abs();
-            if abs > n {
-                return Err(PyIndexError::new_err("trajectory index out of range"));
-            }
-            n - abs
-        } else {
-            step as usize
-        };
-        let frame = self
-            .inner
-            .read_step(idx)
-            .map_err(io_error_to_pyerr)?
-            .ok_or_else(|| PyIndexError::new_err("trajectory index out of range"))?;
-        PyFrame::from_core_frame(frame)
+    fn __getitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        traj_getitem(self.reader()?, key)
     }
 
     fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
@@ -238,23 +403,364 @@ impl PyLAMMPSTrajReader {
     }
 
     fn __next__(&mut self) -> PyResult<Option<PyFrame>> {
-        let frame = self
-            .inner
-            .read_step(self.cursor)
-            .map_err(io_error_to_pyerr)?;
-        match frame {
-            Some(f) => {
-                self.cursor += 1;
-                Ok(Some(PyFrame::from_core_frame(f)?))
-            }
-            None => Ok(None),
+        let cursor = self.cursor;
+        let frame = traj_read_step(self.reader()?, cursor)?;
+        if frame.is_some() {
+            self.cursor += 1;
         }
+        Ok(frame)
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    #[pyo3(signature = (_exc_type=None, _exc_value=None, _traceback=None))]
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<Py<PyAny>>,
+        _exc_value: Option<Py<PyAny>>,
+        _traceback: Option<Py<PyAny>>,
+    ) -> bool {
+        self.inner = None;
+        false
     }
 
     fn __repr__(&mut self) -> String {
-        match self.inner.len() {
-            Ok(n) => format!("LAMMPSTrajReader(n_frames={})", n),
-            Err(_) => "LAMMPSTrajReader(<unread>)".to_string(),
+        match self.inner.as_mut() {
+            Some(r) => match r.len() {
+                Ok(n) => format!("LAMMPSTrajReader(n_frames={})", n),
+                Err(_) => "LAMMPSTrajReader(<unread>)".to_string(),
+            },
+            None => "LAMMPSTrajReader(<closed>)".to_string(),
+        }
+    }
+}
+
+/// Read every frame of a DCD trajectory file and return a list of Frames.
+///
+/// DCD is the binary trajectory format used by CHARMM, NAMD, and LAMMPS.
+/// Each frame contains an ``"atoms"`` block with ``x``/``y``/``z`` columns
+/// (Å). Unit-cell information, when present, is stored in ``frame.simbox``;
+/// per-frame ``timestep``/``delta`` (and the file ``title``) are recorded in
+/// ``frame.meta``.
+///
+/// For long trajectories where only a subset of frames is needed, prefer the
+/// lazy :class:`DCDTrajReader`, which seeks frame-by-frame instead of loading
+/// everything into memory.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a ``.dcd`` file on disk.
+///
+/// Returns
+/// -------
+/// list[Frame]
+///     All frames in the trajectory.
+///
+/// Raises
+/// ------
+/// IOError
+///     If the file cannot be opened or parsed.
+///
+/// Examples
+/// --------
+/// >>> frames = molrs.read_dcd("trajectory.dcd")
+/// >>> len(frames)
+/// 100
+/// >>> frames[0]["atoms"].view("x")
+#[pyfunction]
+pub fn read_dcd(path: &str) -> PyResult<Vec<PyFrame>> {
+    let frames = read_dcd_rs(path).map_err(io_error_to_pyerr)?;
+    frames.into_iter().map(PyFrame::from_core_frame).collect()
+}
+
+/// Lazy, indexed reader for DCD trajectory files.
+///
+/// Unlike :func:`read_dcd`, this does **not** load every frame upfront. The
+/// underlying file stays open and frames are parsed on demand via byte-offset
+/// seeks computed from the DCD header. The header is parsed lazily on the
+/// first call to ``__len__``, ``__getitem__``, or ``read_step`` (or eagerly
+/// via ``build_index()``); subsequent random access (``reader[i]``,
+/// ``read_step(i)``) is an O(1) seek plus one frame parse.
+///
+/// Use this for long trajectories where you only need a subset of frames or
+/// want to walk lazily without holding all frames in memory.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a ``.dcd`` file.
+///
+/// Examples
+/// --------
+/// >>> reader = molrs.DCDTrajReader("trajectory.dcd")
+/// >>> len(reader)
+/// 1000
+/// >>> frame = reader[42]
+/// >>> for frame in reader:
+/// ...     pass
+#[pyclass(name = "DCDTrajReader", unsendable)]
+pub struct PyDcdTrajReader {
+    inner: Option<DcdReader<Box<dyn ReadSeek>>>,
+    cursor: usize,
+}
+
+impl PyDcdTrajReader {
+    fn reader(&mut self) -> PyResult<&mut DcdReader<Box<dyn ReadSeek>>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("operation on a closed DCDTrajReader"))
+    }
+}
+
+#[pymethods]
+impl PyDcdTrajReader {
+    #[new]
+    fn py_new(path: &str) -> PyResult<Self> {
+        let inner = open_dcd(path).map_err(io_error_to_pyerr)?;
+        Ok(Self {
+            inner: Some(inner),
+            cursor: 0,
+        })
+    }
+
+    /// Number of frames in the trajectory (triggers header parsing).
+    #[getter]
+    fn n_frames(&mut self) -> PyResult<usize> {
+        traj_len(self.reader()?)
+    }
+
+    /// Force the DCD header to be parsed now.
+    ///
+    /// The header is parsed lazily on the first call to ``__len__``,
+    /// ``__getitem__``, or ``read_step``. Call this explicitly to amortize
+    /// the cost upfront — useful when timing only the random-access path.
+    fn build_index(&mut self) -> PyResult<()> {
+        self.reader()?.build_index().map_err(io_error_to_pyerr)
+    }
+
+    /// Read a single frame by index (supports negative indexing).
+    ///
+    /// Raises ``IndexError`` if out of range. molpy-aligned.
+    fn read_frame(&mut self, index: isize) -> PyResult<PyFrame> {
+        traj_read_frame(self.reader()?, index)
+    }
+
+    /// Read an explicit list of frame indices (each may be negative).
+    fn read_frames(&mut self, indices: Vec<isize>) -> PyResult<Vec<PyFrame>> {
+        traj_read_frames(self.reader()?, indices)
+    }
+
+    /// Read a contiguous range of frames, Python-slice style.
+    #[pyo3(signature = (start=0, stop=None, step=1))]
+    fn read_range(
+        &mut self,
+        start: isize,
+        stop: Option<isize>,
+        step: isize,
+    ) -> PyResult<Vec<PyFrame>> {
+        traj_read_range(self.reader()?, start, stop, step)
+    }
+
+    /// Eagerly read every frame into a list.
+    fn read_all(&mut self) -> PyResult<Vec<PyFrame>> {
+        traj_read_all(self.reader()?)
+    }
+
+    /// Release the underlying file handle. Further reads raise ``ValueError``.
+    fn close(&mut self) {
+        self.inner = None;
+    }
+
+    fn __len__(&mut self) -> PyResult<usize> {
+        traj_len(self.reader()?)
+    }
+
+    fn __getitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        traj_getitem(self.reader()?, key)
+    }
+
+    fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        // Reset cursor each time iter() is requested so re-iteration works.
+        let mut slf = slf;
+        slf.cursor = 0;
+        slf
+    }
+
+    fn __next__(&mut self) -> PyResult<Option<PyFrame>> {
+        let cursor = self.cursor;
+        let frame = traj_read_step(self.reader()?, cursor)?;
+        if frame.is_some() {
+            self.cursor += 1;
+        }
+        Ok(frame)
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    #[pyo3(signature = (_exc_type=None, _exc_value=None, _traceback=None))]
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<Py<PyAny>>,
+        _exc_value: Option<Py<PyAny>>,
+        _traceback: Option<Py<PyAny>>,
+    ) -> bool {
+        self.inner = None;
+        false
+    }
+
+    fn __repr__(&mut self) -> String {
+        match self.inner.as_mut() {
+            Some(r) => match r.len() {
+                Ok(n) => format!("DCDTrajReader(n_frames={})", n),
+                Err(_) => "DCDTrajReader(<unread>)".to_string(),
+            },
+            None => "DCDTrajReader(<closed>)".to_string(),
+        }
+    }
+}
+
+/// Lazy, indexed reader for multi-frame XYZ trajectory files.
+///
+/// The molrs-native counterpart to :func:`read_xyz_trajectory` (which eagerly
+/// returns ``list[Frame]``). Frames are parsed on demand; the frame-offset
+/// index is built lazily on first random access or eagerly via
+/// ``build_index()``.
+///
+/// Exposes the same molpy ``BaseTrajectoryReader`` surface as
+/// :class:`DCDTrajReader` and :class:`LAMMPSTrajReader`: ``read_frame``,
+/// ``read_frames``, ``read_range``, ``read_all``, ``n_frames``, slicing,
+/// ``close()``, and context-manager use.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a multi-frame ``.xyz`` file.
+///
+/// Examples
+/// --------
+/// >>> reader = molrs.XYZTrajReader("traj.xyz")
+/// >>> reader.n_frames
+/// 50
+/// >>> reader[-1]["atoms"].view("x")
+#[pyclass(name = "XYZTrajReader", unsendable)]
+pub struct PyXYZTrajReader {
+    inner: Option<XYZReader<Box<dyn ReadSeek>>>,
+    cursor: usize,
+}
+
+impl PyXYZTrajReader {
+    fn reader(&mut self) -> PyResult<&mut XYZReader<Box<dyn ReadSeek>>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("operation on a closed XYZTrajReader"))
+    }
+}
+
+#[pymethods]
+impl PyXYZTrajReader {
+    #[new]
+    fn py_new(path: &str) -> PyResult<Self> {
+        let reader = open_seekable(path).map_err(io_error_to_pyerr)?;
+        Ok(Self {
+            inner: Some(XYZReader::new(reader)),
+            cursor: 0,
+        })
+    }
+
+    /// Number of frames in the trajectory (triggers index construction).
+    #[getter]
+    fn n_frames(&mut self) -> PyResult<usize> {
+        traj_len(self.reader()?)
+    }
+
+    /// Force the frame-offset index to be built now.
+    fn build_index(&mut self) -> PyResult<()> {
+        self.reader()?.build_index().map_err(io_error_to_pyerr)
+    }
+
+    /// Read a single frame by index (supports negative indexing).
+    ///
+    /// Raises ``IndexError`` if out of range. molpy-aligned.
+    fn read_frame(&mut self, index: isize) -> PyResult<PyFrame> {
+        traj_read_frame(self.reader()?, index)
+    }
+
+    /// Read an explicit list of frame indices (each may be negative).
+    fn read_frames(&mut self, indices: Vec<isize>) -> PyResult<Vec<PyFrame>> {
+        traj_read_frames(self.reader()?, indices)
+    }
+
+    /// Read a contiguous range of frames, Python-slice style.
+    #[pyo3(signature = (start=0, stop=None, step=1))]
+    fn read_range(
+        &mut self,
+        start: isize,
+        stop: Option<isize>,
+        step: isize,
+    ) -> PyResult<Vec<PyFrame>> {
+        traj_read_range(self.reader()?, start, stop, step)
+    }
+
+    /// Eagerly read every frame into a list.
+    fn read_all(&mut self) -> PyResult<Vec<PyFrame>> {
+        traj_read_all(self.reader()?)
+    }
+
+    /// Release the underlying file handle. Further reads raise ``ValueError``.
+    fn close(&mut self) {
+        self.inner = None;
+    }
+
+    fn __len__(&mut self) -> PyResult<usize> {
+        traj_len(self.reader()?)
+    }
+
+    fn __getitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        traj_getitem(self.reader()?, key)
+    }
+
+    fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        let mut slf = slf;
+        slf.cursor = 0;
+        slf
+    }
+
+    fn __next__(&mut self) -> PyResult<Option<PyFrame>> {
+        let cursor = self.cursor;
+        let frame = traj_read_step(self.reader()?, cursor)?;
+        if frame.is_some() {
+            self.cursor += 1;
+        }
+        Ok(frame)
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    #[pyo3(signature = (_exc_type=None, _exc_value=None, _traceback=None))]
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<Py<PyAny>>,
+        _exc_value: Option<Py<PyAny>>,
+        _traceback: Option<Py<PyAny>>,
+    ) -> bool {
+        self.inner = None;
+        false
+    }
+
+    fn __repr__(&mut self) -> String {
+        match self.inner.as_mut() {
+            Some(r) => match r.len() {
+                Ok(n) => format!("XYZTrajReader(n_frames={})", n),
+                Err(_) => "XYZTrajReader(<unread>)".to_string(),
+            },
+            None => "XYZTrajReader(<closed>)".to_string(),
         }
     }
 }
@@ -481,6 +987,33 @@ pub fn write_lammps_traj(path: &str, frames: Vec<PyRef<'_, PyFrame>>) -> PyResul
         .map(|f| f.clone_core_frame())
         .collect::<PyResult<_>>()?;
     write_lammps_dump(path, &core_frames).map_err(io_error_to_pyerr)
+}
+
+/// Write Frames to a DCD trajectory file.
+///
+/// Produces a NAMD-compatible little-endian DCD. Every frame must have the
+/// same atom count and the same box presence as the first frame. The box, if
+/// any, is taken from each ``frame.simbox``.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frames : list[Frame]
+///     Frames to write. Must be non-empty and homogeneous in atom count.
+///
+/// Raises
+/// ------
+/// IOError
+///     If the file cannot be written, or a frame uses an unsupported feature
+///     (e.g. 4D dynamics / fixed atoms).
+#[pyfunction]
+pub fn write_dcd(path: &str, frames: Vec<PyRef<'_, PyFrame>>) -> PyResult<()> {
+    let core_frames: Vec<_> = frames
+        .iter()
+        .map(|f| f.clone_core_frame())
+        .collect::<PyResult<_>>()?;
+    write_dcd_rs(path, &core_frames).map_err(io_error_to_pyerr)
 }
 
 /// Intermediate representation of a parsed SMILES or SMARTS string.

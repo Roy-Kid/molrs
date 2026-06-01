@@ -11,20 +11,26 @@ molrs is a Rust workspace for molecular simulation: core data structures, file I
 **NEVER write synthetic/hand-crafted test data for IO tests.**
 
 Every file-format reader/writer MUST be tested against **all** real files in
-`molrs-core/target/tests-data/<format>/` (the test-data submodule is shared across
-crates from this location). Rules:
+`tests-data/<format>/` — a binding-neutral directory at the **workspace root**
+(gitignored; cloned by `scripts/fetch-test-data.sh`), shared by every Rust crate
+and by the Python / C / WASM bindings. Rules:
 
 1. When adding a new format reader (e.g. CHGCAR), add matching real files to
    the `tests-data` repo (`https://github.com/MolCrafts/tests-data`) under a
    new `<format>/` subdirectory before writing tests.
 2. Tests iterate over **every** file in that directory — not a hardcoded subset.
-   Use a helper that globs `tests-data/<format>/*` and runs assertions on each.
-3. Unit tests inside `src/` may use `include_str!` with a **minimal** but
-   structurally valid fixture only to cover parser edge-cases that are hard to
-   produce from real data (e.g. malformed input → expected error). Keep these
-   fixtures as small as possible and document where the snippet comes from.
-4. Integration tests live in `molrs-io/tests/test_io/test_<format>.rs` and
-   use `crate::test_data::get_test_data_path("<format>/<file>")`.
+   Use the small local `common` helper in the io test target
+   (`common::format_files("<format>")`) and run assertions on each.
+3. **Inline `#[cfg(test)]` tests in `src/` are pure function unit tests only** —
+   logic, edge cases, error paths. They must NOT read real files from
+   `tests-data/`. A minimal `include_str!` fixture is permitted ONLY to cover a
+   parser edge-case hard to produce from real data (e.g. malformed input →
+   expected error); keep it tiny and document its origin.
+4. Data-driven integration tests live in each crate's `tests/` tree, mirroring
+   that crate's `src/` module layout (e.g. `molrs-io/tests/io/<format>.rs`), and
+   resolve files via the io test target's local `common` module
+   (`common::{tests_data_dir, data_path, format_files}`), which simply reads
+   `../tests-data` (or `$MOLRS_TESTS_DATA`). No helper crate.
 
 Violation: writing `let content = "..."; read_from_str(content)` for happy-path
 format tests instead of reading a real file is **forbidden**.
@@ -35,12 +41,12 @@ format tests instead of reading a real file is **forbidden**.
 # Build
 cargo build
 # Test (requires test data on first run)
-bash scripts/fetch-test-data.sh      # clones to molrs-core/target/tests-data/
+bash scripts/fetch-test-data.sh      # clones to <root>/tests-data/ (binding-neutral)
 cargo test --all-features
 cargo test -p molcrafts-molrs-core              # single crate (-p takes the package name)
 cargo test -p molcrafts-molrs-core test_name    # single test
 cargo test --features slow-tests                # expensive integration tests
-cargo test -p molcrafts-molrs-io                # IO format tests (uses tests-data submodule)
+cargo test -p molcrafts-molrs-io                # IO format tests (iterate every file in tests-data/)
 
 # Lint & Format
 cargo fmt --all

@@ -73,7 +73,7 @@ repos:
       # does `git clone --depth=1` which is small and fast. Without this
       # the pdb / lammps / cif tests panic on "Test data not found".
       - id: fetch-test-data
-        name: fetch-test-data.sh (clones MolCrafts/tests-data into target/)
+        name: fetch-test-data.sh (clones MolCrafts/tests-data into <root>/tests-data/)
         entry: bash scripts/fetch-test-data.sh
         language: system
         pass_filenames: false

@@ -38,7 +38,7 @@
 #![warn(rustdoc::missing_crate_level_docs)]
 
 // Core types at the top level (Frame, Block, MolGraph, SimBox, Element, …).
-pub use molrs::*;
+pub use molrs_core::*;
 
 #[cfg(feature = "io")]
 pub use molrs_io as io;
