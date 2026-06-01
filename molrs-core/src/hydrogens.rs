@@ -115,23 +115,31 @@ pub fn implicit_h_count(mol: &MolGraph, atom_id: AtomId) -> Option<u32> {
     // Sum of bond orders connected to this atom.
     let bond_order_sum: f64 = bond_order_sum(mol, atom_id);
 
-    // Formal charge: positive charge lowers the electron count and raises
-    // the number of hydrogens needed (e.g. NH4+: charge=+1 → 4H instead of 3).
-    // Negative charge reduces the H count (e.g. OH-: charge=-1 → 1H instead of 2).
+    // Formal charge: a positive charge raises the usable valence (N+ behaves
+    // like C, valence 4), a negative charge lowers it (N- → 2). The charge must
+    // be folded into the bond demand BEFORE selecting the target valence —
+    // otherwise a quaternary N+ (bond_order_sum = 4) would pick the hypervalent
+    // N(5) state and gain spurious hydrogens. This is the RDKit/Daylight
+    // charge-adjusted-valence convention.
     //
-    // Algorithm (Daylight/RDKit convention):
-    //   1. Find the target valence: smallest standard valence ≥ bond_order_sum.
-    //   2. implicit_h = target_valence - bond_order_sum + formal_charge.
+    // Algorithm:
+    //   1. adjusted_demand = bond_order_sum - formal_charge.
+    //   2. target = smallest standard valence ≥ adjusted_demand.
+    //   3. implicit_h = target - adjusted_demand.
+    // Examples: NH4+ (bos 0, fc +1) → adj -1 → target 3 → 4 H; quaternary N+
+    // (bos 4, fc +1) → adj 3 → target 3 → 0 H; sulfonimide N- (bos 2, fc -1) →
+    // adj 3 → target 3 → 0 H; primary amine N (bos 1, fc 0) → adj 1 → target 3 → 2 H.
     let formal_charge = atom.get_f64("formal_charge").unwrap_or(0.0);
+    let adjusted_demand = bond_order_sum - formal_charge;
 
-    // Select the smallest allowed valence ≥ bond_order_sum.
+    // Select the smallest allowed valence ≥ the charge-adjusted demand.
     let target = valences
         .iter()
         .copied()
-        .find(|&v| v as f64 >= bond_order_sum - 1e-6);
+        .find(|&v| v as f64 >= adjusted_demand - 1e-6);
 
-    let target = target?; // if bond_order_sum exceeds all valences, add nothing
-    let n = target as f64 - bond_order_sum + formal_charge;
+    let target = target?; // if demand exceeds all valences, add nothing
+    let n = target as f64 - adjusted_demand;
     if n <= 0.5 {
         Some(0)
     } else {
