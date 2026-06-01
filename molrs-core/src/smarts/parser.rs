@@ -451,8 +451,25 @@ impl<'s> Parser<'s> {
             }
             'r' => {
                 self.bump();
-                let n = self.read_u32();
-                Ok(AtomQuery::Prim(AtomPrimitive::RingSize(n)))
+                // `r{lo-hi}` / `r{lo-}` / `r{-hi}` ring-size *range* form, vs.
+                // the existing `r<n>` (exact smallest-ring) / bare `r` (in any
+                // ring). RDKit compares the atom's *smallest* ring size against
+                // the range; an acyclic atom has smallest-ring 0, so only the
+                // open-low `r{-hi}` form (`0 <= hi`) matches acyclic atoms.
+                if self.peek() == Some('{') {
+                    let (lo, hi) = self.parse_ring_size_range()?;
+                    Ok(AtomQuery::Prim(AtomPrimitive::RingSizeRange { lo, hi }))
+                } else {
+                    let n = self.read_u32();
+                    Ok(AtomQuery::Prim(AtomPrimitive::RingSize(n)))
+                }
+            }
+            'x' => {
+                self.bump();
+                let n = self
+                    .read_u32()
+                    .ok_or_else(|| self.err("'x' needs a number"))?;
+                Ok(AtomQuery::Prim(AtomPrimitive::RingBondCount(n)))
             }
             '+' | '-' => self.parse_charge(),
             ':' => {
@@ -567,6 +584,33 @@ impl<'s> Parser<'s> {
             }
         }
         Ok((sym, aromatic))
+    }
+
+    /// Parse a `{lo-hi}` ring-size range body (cursor is on the opening `{`).
+    ///
+    /// Accepts `{lo-hi}`, `{lo-}` (open high), and `{-hi}` (open low). Returns
+    /// `(lo, hi)` where `lo` defaults to 0 (no lower bound) for the `{-hi}`
+    /// form and `hi` is `None` for the `{lo-}` form. Mirrors RDKit's
+    /// `RANGE` / `GREATEREQUAL` / `LESSEQUAL` range queries over the smallest
+    /// ring size.
+    fn parse_ring_size_range(&mut self) -> Result<(u32, Option<u32>), MolRsError> {
+        debug_assert_eq!(self.peek(), Some('{'));
+        self.bump(); // consume '{'
+        let lo = self.read_u32();
+        if self.peek() != Some('-') {
+            return Err(self.err("ring-size range needs a '-' separator"));
+        }
+        self.bump(); // consume '-'
+        let hi = self.read_u32();
+        if self.peek() != Some('}') {
+            return Err(self.err("unbalanced ring-size range — missing '}'"));
+        }
+        self.bump(); // consume '}'
+        if lo.is_none() && hi.is_none() {
+            return Err(self.err("empty ring-size range 'r{-}'"));
+        }
+        // Open-low `{-hi}` => lower bound 0; open-high `{lo-}` => hi = None.
+        Ok((lo.unwrap_or(0), hi))
     }
 
     /// Read a (possibly multi-digit) unsigned integer, if present.

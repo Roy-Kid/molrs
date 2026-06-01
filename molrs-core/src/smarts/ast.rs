@@ -30,6 +30,8 @@ pub struct MolContext<'m> {
     h_count: HashMap<AtomId, u32>,
     /// atom → explicit degree (number of bonded neighbours).
     degree: HashMap<AtomId, u32>,
+    /// atom → number of incident ring bonds (RDKit `x<n>`).
+    ring_bond_count: HashMap<AtomId, u32>,
 }
 
 impl<'m> MolContext<'m> {
@@ -70,12 +72,26 @@ impl<'m> MolContext<'m> {
             degree.insert(id, mol.neighbors(id).count() as u32);
         }
 
+        // Ring-bond connectivity (`x<n>`): for each ring bond, both endpoints
+        // gain one incident ring bond. Counted from the bond side so it uses
+        // the same `RingInfo::is_bond_in_ring` truth as the `@` bond primitive.
+        let mut ring_bond_count: HashMap<AtomId, u32> =
+            mol.atoms().map(|(id, _)| (id, 0)).collect();
+        for (bid, bond) in mol.bonds() {
+            if rings.is_bond_in_ring(bid) {
+                for &end in &bond.atoms {
+                    *ring_bond_count.entry(end).or_insert(0) += 1;
+                }
+            }
+        }
+
         Self {
             mol,
             rings,
             aromatic_atom,
             h_count,
             degree,
+            ring_bond_count,
         }
     }
 
@@ -89,6 +105,10 @@ impl<'m> MolContext<'m> {
 
     fn degree(&self, id: AtomId) -> u32 {
         self.degree.get(&id).copied().unwrap_or(0)
+    }
+
+    fn ring_bond_count(&self, id: AtomId) -> u32 {
+        self.ring_bond_count.get(&id).copied().unwrap_or(0)
     }
 }
 
@@ -142,6 +162,14 @@ pub enum AtomPrimitive {
     RingMembership(Option<u32>),
     /// `r<n>` — in a ring of size exactly `n` (`r` alone = in any ring).
     RingSize(Option<u32>),
+    /// `r{lo-hi}` / `r{lo-}` / `r{-hi}` — the atom's *smallest* ring size lies
+    /// in `[lo, hi]`. `lo == 0` means no lower bound (RDKit `r{-hi}`, which
+    /// also matches acyclic atoms since their smallest ring size is 0);
+    /// `hi == None` means no upper bound (RDKit `r{lo-}`).
+    RingSizeRange { lo: u32, hi: Option<u32> },
+    /// `x<n>` — ring-bond connectivity: the atom is incident to exactly `n`
+    /// ring bonds.
+    RingBondCount(u32),
     /// `+`/`-`/`+n`/`-n` — formal charge.
     Charge(i32),
 }
@@ -184,6 +212,18 @@ impl AtomPrimitive {
             AtomPrimitive::RingSize(Some(n)) => {
                 ctx.rings.smallest_ring_containing_atom(id) == Some(*n as usize)
             }
+            // RDKit's `r{lo-hi}` range compares the atom's *smallest* ring size
+            // against the range (same data func as `r<n>`). An acyclic atom has
+            // smallest ring size 0, so it satisfies only an open-low `r{-hi}`
+            // bound (`lo == 0`), matching RDKit (`r{-8}` selects acyclic atoms).
+            AtomPrimitive::RingSizeRange { lo, hi } => {
+                let size = ctx
+                    .rings
+                    .smallest_ring_containing_atom(id)
+                    .map_or(0, |s| s as u32);
+                size >= *lo && hi.is_none_or(|h| size <= h)
+            }
+            AtomPrimitive::RingBondCount(n) => ctx.ring_bond_count(id) == *n,
             AtomPrimitive::Charge(c) => atom_charge(mol, id) == *c,
         }
     }
