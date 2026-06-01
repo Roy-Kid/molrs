@@ -23,16 +23,16 @@ criteria:
     evaluator_hint: "Compare experimental torsion terms (atoms + preferred angles/V) to RDKit getExperimentalTorsions for the same bond."
     pass_when: |
       For butane "CCCC" and biphenyl, build_constraints(mol, Etkdgv3) returns experimental_torsions covering the central rotatable bond(s); the matched atom quartets and their preferred-angle parameters agree with RDKit's ETKDGv3 experimental-torsion assignment (same multiplicity and preferred minima within 5 degrees).
-    status: pending
-    last_checked: ""
+    status: verified
+    last_checked: "2026-06-01"
   - id: ac-004
     summary: Macrocycle gets ETKDGv3 ring-specific terms
     type: code
     evaluator_hint: ""
     pass_when: |
       For a 12-membered carbocycle "C1CCCCCCCCCCC1", build_constraints(mol, Etkdgv3) produces ring/torsion constraints flagged as macrocycle-specific (the ETKDGv3 large-ring path), distinct from the constraint set produced for a 6-membered ring of the same atom type.
-    status: pending
-    last_checked: ""
+    status: verified
+    last_checked: "2026-06-01"
   - id: ac-005
     summary: Chiral constraint sign matches CIP assignment
     type: scientific
