@@ -51,6 +51,7 @@ pub mod molrec;
 pub mod region;
 pub mod rings;
 pub mod rotatable;
+pub mod smarts;
 pub mod stereo;
 pub mod topology;
 pub mod types;
@@ -74,6 +75,7 @@ pub use hydrogens::{add_hydrogens, implicit_h_count, remove_hydrogens};
 pub use mapping::{CGMapping, WeightScheme};
 pub use molgraph::{Atom, AtomId, Bead, Bond, BondId, MolGraph, PropValue};
 pub use rings::{RingInfo, find_rings};
+pub use smarts::SmartsPattern;
 pub use stereo::{
     BondStereo, TetrahedralStereo, assign_bond_stereo_from_3d, assign_stereo_from_3d,
     chiral_volume, find_chiral_centers,

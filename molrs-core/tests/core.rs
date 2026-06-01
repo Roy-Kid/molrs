@@ -9,5 +9,7 @@
 mod hydrogens;
 #[path = "core/rings.rs"]
 mod rings;
+#[path = "core/smarts.rs"]
+mod smarts;
 #[path = "core/stereo.rs"]
 mod stereo;
