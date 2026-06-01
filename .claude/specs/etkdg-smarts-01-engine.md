@@ -1,6 +1,6 @@
 ---
 title: SMARTS 子结构匹配引擎 (SMARTS Engine)
-status: approved
+status: code-complete
 created: 2026-06-01
 chain: etkdg-smarts
 chain_index: 1
