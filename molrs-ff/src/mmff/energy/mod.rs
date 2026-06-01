@@ -91,15 +91,16 @@ impl MmffForceField {
         let types: Vec<u8> = (0..n).map(|i| props.atom_type(i)).collect();
         let charges: Vec<f64> = (0..n).map(|i| props.partial_charge(i)).collect();
 
+        let variant = props.variant();
         let bonds = enumerate_bonds(&topo, &types);
         let angles = enumerate_angles(&topo, &types);
         let stretch_bends = enumerate_stretch_bends(&topo, &types);
-        let oops = enumerate_oops(&topo, &types);
-        let torsions = enumerate_torsions(&topo, &types);
+        let oops = enumerate_oops(variant, &topo, &types);
+        let torsions = enumerate_torsions(variant, &topo, &types);
         let nonbonded = enumerate_nonbonded(&topo, &types, &charges);
 
         Ok(Self {
-            variant: props.variant(),
+            variant,
             bonds,
             angles,
             stretch_bends,
@@ -297,7 +298,7 @@ fn enumerate_stretch_bends(topo: &Topo, types: &[u8]) -> Vec<StretchBendTerm> {
     out
 }
 
-fn enumerate_oops(topo: &Topo, types: &[u8]) -> Vec<OopTerm> {
+fn enumerate_oops(variant: MmffVariant, topo: &Topo, types: &[u8]) -> Vec<OopTerm> {
     let mut out = Vec::new();
     let n = topo.n_atoms();
     for j in 0..n {
@@ -306,7 +307,7 @@ fn enumerate_oops(topo: &Topo, types: &[u8]) -> Vec<OopTerm> {
         }
         let nbrs = &topo.nbrs[j];
         let (a, b, c) = (nbrs[0], nbrs[1], nbrs[2]);
-        let koop = match p::oop_koop(types, a, j, b, c) {
+        let koop = match p::oop_koop(variant, types, a, j, b, c) {
             Some(k) => k,
             None => continue,
         };
@@ -323,7 +324,7 @@ fn in_triple_bond(topo: &Topo, a: usize) -> bool {
     topo.nbr_kekule[a].contains(&BondOrder::Triple)
 }
 
-fn enumerate_torsions(topo: &Topo, types: &[u8]) -> Vec<TorsionTerm> {
+fn enumerate_torsions(variant: MmffVariant, topo: &Topo, types: &[u8]) -> Vec<TorsionTerm> {
     let mut out = Vec::new();
     let n = topo.n_atoms();
     let sp2_or_sp3 = |x: usize| matches!(hybridization(topo, x), Hyb::Sp2 | Hyb::Sp3);
@@ -350,7 +351,7 @@ fn enumerate_torsions(topo: &Topo, types: &[u8]) -> Vec<TorsionTerm> {
                     if l == j || l == i {
                         continue;
                     }
-                    if let Some(tp) = p::torsion_params(topo, types, i, j, k, l) {
+                    if let Some(tp) = p::torsion_params(variant, topo, types, i, j, k, l) {
                         out.push(TorsionTerm {
                             i,
                             j,

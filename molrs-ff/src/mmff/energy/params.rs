@@ -10,10 +10,12 @@
 //!
 //! Reference: Halgren, T. A. *J. Comput. Chem.* 1996, 17, 490-641 (MMFF.I-V).
 
+use crate::mmff::MmffVariant;
 use crate::mmff::charges::mmff_bond_type;
 use crate::mmff::tables::{
     MmffProp, mmff_angle, mmff_bndk, mmff_bond, mmff_cov_rad_pau_ele, mmff_def, mmff_dfsb,
-    mmff_herschbach_laurie, mmff_oop, mmff_prop, mmff_stbn, mmff_tor, mmff_vdw,
+    mmff_herschbach_laurie, mmff_oop, mmff_oop_s, mmff_prop, mmff_stbn, mmff_tor, mmff_tor_s,
+    mmff_vdw,
 };
 use crate::mmff::topo::{BondOrder, Topo};
 
@@ -237,56 +239,17 @@ pub(super) fn torsion_type(
 
 // --- equivalence-level lookups (Params.h operator()) ---------------------
 
-/// Equivalence levels for MMFF atom types 56-99, which are absent from the
-/// foundation's `MMFF_DEF` table (it covers only 1-55). Transcribed from the
-/// MMFFDEF.PAR equivalence table embedded in RDKit
-/// `Code/ForceField/MMFF/Params.cpp` (BSD-3, RDKit contributors); each row is
-/// `eqLevel[0..4]` with `eqLevel[0] == type`. Without these the 5-stage
-/// equivalence search for aromatic / charged-N types never reaches its
-/// wild-card defaults and tabulated angle/torsion/oop params are missed.
-fn eq_level_ext(atom_type: u8) -> Option<[u8; 4]> {
-    let levels: [u8; 4] = match atom_type {
-        56 => [56, 10, 8, 0],
-        57 => [57, 2, 1, 0],
-        58 => [58, 10, 8, 0],
-        59 => [59, 6, 6, 0],
-        60 => [60, 4, 1, 0],
-        61 => [61, 42, 8, 0],
-        62 => [62, 10, 8, 0],
-        63 => [63, 2, 1, 0],
-        64 => [64, 2, 1, 0],
-        65 => [65, 9, 8, 0],
-        66 => [66, 9, 8, 0],
-        67 => [67, 9, 8, 0],
-        68 => [68, 8, 8, 0],
-        69 => [69, 9, 8, 0],
-        70 => [70, 70, 70, 70],
-        71 => [71, 5, 5, 0],
-        72 => [72, 16, 15, 0],
-        73 => [73, 18, 15, 0],
-        74 => [74, 17, 15, 0],
-        75 => [75, 26, 25, 0],
-        76 => [76, 9, 8, 0],
-        77 => [77, 12, 12, 0],
-        78 => [78, 2, 1, 0],
-        79 => [79, 9, 8, 0],
-        80 => [80, 2, 1, 0],
-        81 => [81, 10, 8, 0],
-        82 => [82, 9, 8, 0],
-        87..=99 => [atom_type, atom_type, atom_type, atom_type],
-        _ => return None,
-    };
-    Some(levels)
-}
-
+/// RDKit `MMFFDefCollection::operator()` equivalence-level lookup.
+///
+/// `MMFF_DEF` (regenerated from RDKit `defaultMMFFDef`) now covers every MMFF
+/// atom type 1-82 / 87-99, so the 5-stage equivalence search for aromatic /
+/// charged-N / metal types reaches its wild-card defaults uniformly. Falls
+/// back to the type itself for any key absent from the table (RDKit returns a
+/// null params pointer there, which the callers below treat as "no match").
 fn eq_level(atom_type: u8, level: usize) -> u8 {
-    if let Some(d) = mmff_def(atom_type) {
-        return d.eq_level[level];
-    }
-    if let Some(ext) = eq_level_ext(atom_type) {
-        return ext[level];
-    }
-    atom_type
+    mmff_def(atom_type)
+        .map(|d| d.eq_level[level])
+        .unwrap_or(atom_type)
 }
 
 /// RDKit `MMFFAngleCollection::operator()` (5-stage equivalence search).
@@ -307,11 +270,21 @@ fn angle_lookup(angle_type: u8, i: u8, j: u8, k: u8) -> Option<AngleParams> {
 }
 
 /// RDKit `MMFFOopCollection::operator()` (5-stage equivalence search).
-fn oop_lookup(i: u8, j: u8, k: u8, l: u8) -> Option<f64> {
+///
+/// RDKit selects the whole table at construction
+/// (`defaultMMFFsOop` vs `defaultMMFFOop`) based on `isMMFFs`. The `_S` table
+/// shares every key with the base table, so we look up `_S` first under
+/// [`MmffVariant::Mmff94s`] and fall back to the base table for safety.
+fn oop_lookup(variant: MmffVariant, i: u8, j: u8, k: u8, l: u8) -> Option<f64> {
     for iter in 0..4 {
         let mut ikl = [eq_level(i, iter), eq_level(k, iter), eq_level(l, iter)];
         ikl.sort_unstable();
-        if let Some(o) = mmff_oop(ikl[0], j, ikl[1], ikl[2]) {
+        let hit = match variant {
+            MmffVariant::Mmff94s => mmff_oop_s(ikl[0], j, ikl[1], ikl[2])
+                .or_else(|| mmff_oop(ikl[0], j, ikl[1], ikl[2])),
+            MmffVariant::Mmff94 => mmff_oop(ikl[0], j, ikl[1], ikl[2]),
+        };
+        if let Some(o) = hit {
             return Some(o.koop);
         }
     }
@@ -319,7 +292,19 @@ fn oop_lookup(i: u8, j: u8, k: u8, l: u8) -> Option<f64> {
 }
 
 /// RDKit `MMFFTorCollection::getMMFFTorParams`. Returns `(matched_type, params)`.
-fn torsion_lookup(tor_type: (u8, u8), i: u8, j: u8, k: u8, l: u8) -> Option<(u8, TorParams)> {
+///
+/// Like the Oop collection, RDKit picks `defaultMMFFsTor` vs `defaultMMFFTor`
+/// wholesale on `isMMFFs`; the `_S` table shares every key with the base
+/// table, so under [`MmffVariant::Mmff94s`] we query `_S` first and fall back
+/// to the base table.
+fn torsion_lookup(
+    variant: MmffVariant,
+    tor_type: (u8, u8),
+    i: u8,
+    j: u8,
+    k: u8,
+    l: u8,
+) -> Option<(u8, TorParams)> {
     let mut iter: i32 = 0;
     let mut max_iter = 5i32;
     let mut can_tor = tor_type.0;
@@ -354,7 +339,13 @@ fn torsion_lookup(tor_type: (u8, u8), i: u8, j: u8, k: u8, l: u8) -> Option<(u8,
         } else if cj == ck && ci > cl {
             std::mem::swap(&mut ci, &mut cl);
         }
-        if let Some(t) = mmff_tor(can_tor, ci, cj, ck, cl) {
+        let hit = match variant {
+            MmffVariant::Mmff94s => {
+                mmff_tor_s(can_tor, ci, cj, ck, cl).or_else(|| mmff_tor(can_tor, ci, cj, ck, cl))
+            }
+            MmffVariant::Mmff94 => mmff_tor(can_tor, ci, cj, ck, cl),
+        };
+        if let Some(t) = hit {
             return Some((
                 can_tor,
                 TorParams {
@@ -593,14 +584,22 @@ fn dfsb_lookup(an_i: u8, an_j: u8, an_k: u8) -> (bool, Option<(f64, f64)>) {
 // --- out-of-plane --------------------------------------------------------
 
 /// RDKit `getMMFFOopBendParams` (no empirical fallback; term excluded if absent).
-pub(super) fn oop_koop(types: &[u8], i: usize, j: usize, k: usize, l: usize) -> Option<f64> {
-    oop_lookup(types[i], types[j], types[k], types[l])
+pub(super) fn oop_koop(
+    variant: MmffVariant,
+    types: &[u8],
+    i: usize,
+    j: usize,
+    k: usize,
+    l: usize,
+) -> Option<f64> {
+    oop_lookup(variant, types[i], types[j], types[k], types[l])
 }
 
 // --- torsion (explicit + empirical) --------------------------------------
 
 /// RDKit `getMMFFTorsionParams`. Returns `None` when all coefficients vanish.
 pub(super) fn torsion_params(
+    variant: MmffVariant,
     topo: &Topo,
     types: &[u8],
     i: usize,
@@ -609,7 +608,7 @@ pub(super) fn torsion_params(
     l: usize,
 ) -> Option<TorParams> {
     let tt = torsion_type(topo, types, i, j, k, l);
-    let p = match torsion_lookup(tt, types[i], types[j], types[k], types[l]) {
+    let p = match torsion_lookup(variant, tt, types[i], types[j], types[k], types[l]) {
         Some((_, p)) => p,
         None => torsion_empirical(topo, types, j, k)?,
     };

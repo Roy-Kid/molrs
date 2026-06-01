@@ -95,22 +95,32 @@ fn coords_of(path: &Path) -> Vec<f64> {
     c
 }
 
-fn ref_energy(name: &str) -> f64 {
+fn ref_energy_field(name: &str, field: &str) -> f64 {
     let path = fixtures_dir().join(format!("{name}.energy.json"));
     let text = std::fs::read_to_string(&path).expect("read energy json");
     let v: Value = serde_json::from_str(&text).expect("parse json");
-    v["mmff94_total_energy"].as_f64().expect("energy field")
+    v[field]
+        .as_f64()
+        .unwrap_or_else(|| panic!("{name}: missing energy field '{field}'"))
 }
 
-fn build_ff(name: &str) -> (MmffForceField, Vec<f64>) {
+fn ref_energy(name: &str) -> f64 {
+    ref_energy_field(name, "mmff94_total_energy")
+}
+
+fn build_ff_variant(name: &str, variant: MmffVariant) -> (MmffForceField, Vec<f64>) {
     let dir = fixtures_dir();
     let mol = load_sdf(&dir.join(format!("{name}.sdf")));
     let coords = coords_of(&dir.join(format!("{name}.sdf")));
-    let props = MmffMolProperties::compute(&mol, MmffVariant::Mmff94)
+    let props = MmffMolProperties::compute(&mol, variant)
         .unwrap_or_else(|e| panic!("{name}: typing failed: {e}"));
     let ff = MmffForceField::build(&mol, &props)
         .unwrap_or_else(|e| panic!("{name}: ff build failed: {e}"));
     (ff, coords)
+}
+
+fn build_ff(name: &str) -> (MmffForceField, Vec<f64>) {
+    build_ff_variant(name, MmffVariant::Mmff94)
 }
 
 #[test]
@@ -138,6 +148,72 @@ fn total_energy_matches_rdkit() {
     assert!(
         fails.is_empty(),
         "energy mismatches vs RDKit:\n  {}",
+        fails.join("\n  ")
+    );
+}
+
+/// Molecules whose MMFF94s energy differs from MMFF94 (delocalized-N / amide /
+/// aromatic-amine planarization). The fixtures store both reference energies.
+const S_NAMES: [&str; 4] = ["s_aniline", "s_acetamide", "s_nmethylacetamide", "s_urea"];
+
+/// MMFF94s total energy must match RDKit `mmffVariant='MMFF94s'` to 1e-3 for
+/// molecules where the `_S` oop/torsion tables actually change the result.
+#[test]
+fn mmff94s_total_energy_matches_rdkit() {
+    let mut fails = Vec::new();
+    for name in S_NAMES {
+        let (ff, coords) = build_ff_variant(name, MmffVariant::Mmff94s);
+        let got = ff.eval(&coords).0;
+        let want = ref_energy_field(name, "mmff94s_total_energy");
+        let delta = (got - want).abs();
+        println!("{name:20} 94s molrs={got:14.6}  rdkit={want:14.6}  d={delta:.3e}");
+        if delta > ENERGY_TOL {
+            fails.push(format!(
+                "{name}: molrs={got:.6} rdkit={want:.6} d={delta:.3e}"
+            ));
+        }
+    }
+    assert!(
+        fails.is_empty(),
+        "MMFF94s energy mismatches vs RDKit:\n  {}",
+        fails.join("\n  ")
+    );
+}
+
+/// The same molecules under MMFF94 must still match RDKit MMFF94, and the 94 vs
+/// 94s totals must genuinely differ (otherwise the `_S` wiring is a no-op and
+/// the test above proves nothing).
+#[test]
+fn mmff94_unchanged_and_differs_from_94s() {
+    let mut fails = Vec::new();
+    for name in S_NAMES {
+        let (ff94, coords) = build_ff_variant(name, MmffVariant::Mmff94);
+        let got94 = ff94.eval(&coords).0;
+        let want94 = ref_energy_field(name, "mmff94_total_energy");
+        let want94s = ref_energy_field(name, "mmff94s_total_energy");
+        let d94 = (got94 - want94).abs();
+        let (ff94s, _) = build_ff_variant(name, MmffVariant::Mmff94s);
+        let got94s = ff94s.eval(&coords).0;
+        println!(
+            "{name:20} 94 molrs={got94:14.6} rdkit={want94:14.6} | 94s molrs={got94s:14.6} | \
+             ref_diff={:.4}",
+            (want94 - want94s).abs()
+        );
+        if d94 > ENERGY_TOL {
+            fails.push(format!(
+                "{name}: MMFF94 molrs={got94:.6} rdkit={want94:.6} d={d94:.3e}"
+            ));
+        }
+        // RDKit's own 94 vs 94s totals differ -> our two builds must too.
+        if (got94 - got94s).abs() < ENERGY_TOL {
+            fails.push(format!(
+                "{name}: molrs 94 ({got94:.6}) == 94s ({got94s:.6}); _S tables not applied"
+            ));
+        }
+    }
+    assert!(
+        fails.is_empty(),
+        "MMFF94/94s consistency failures:\n  {}",
         fails.join("\n  ")
     );
 }
