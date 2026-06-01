@@ -113,6 +113,40 @@ pub(crate) fn dielectric_green_kubo_spectrum<'py>(
 }
 
 #[pyfunction]
+#[pyo3(signature = (translational_dipole, dt, volume, temperature, max_correlation_time, fit_start_frac=0.1, fit_end_frac=0.5))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn dielectric_einstein_helfand_conductivity<'py>(
+    py: Python<'py>,
+    translational_dipole: PyReadonlyArray2<'py, f64>,
+    dt: f64,
+    volume: f64,
+    temperature: f64,
+    max_correlation_time: usize,
+    fit_start_frac: f64,
+    fit_end_frac: f64,
+) -> PyResult<Py<PyAny>> {
+    let td = translational_dipole.as_array().to_owned();
+    let result = diel::einstein_helfand_conductivity(
+        &td,
+        dt,
+        volume,
+        temperature,
+        max_correlation_time,
+        fit_start_frac,
+        fit_end_frac,
+    )
+    .map_err(py_value_err)?;
+    let dict = pyo3::types::PyDict::new(py);
+    dict.set_item("lag_times", result.lag_times.into_pyarray(py))?;
+    dict.set_item("msd", result.msd.into_pyarray(py))?;
+    dict.set_item("sigma", result.sigma)?;
+    dict.set_item("slope", result.slope)?;
+    dict.set_item("fit_start", result.fit_start)?;
+    dict.set_item("fit_end", result.fit_end)?;
+    Ok(dict.into())
+}
+
+#[pyfunction]
 #[allow(clippy::type_complexity)]
 pub(crate) fn dielectric_decompose_current<'py>(
     py: Python<'py>,
@@ -130,6 +164,7 @@ pub fn register_dielectric(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dielectric_compute_current_density, m)?)?;
     m.add_function(wrap_pyfunction!(dielectric_static_dielectric_constant, m)?)?;
     m.add_function(wrap_pyfunction!(dielectric_einstein_helfand_spectrum, m)?)?;
+    m.add_function(wrap_pyfunction!(dielectric_einstein_helfand_conductivity, m)?)?;
     m.add_function(wrap_pyfunction!(dielectric_green_kubo_spectrum, m)?)?;
     m.add_function(wrap_pyfunction!(dielectric_decompose_current, m)?)?;
     Ok(())
