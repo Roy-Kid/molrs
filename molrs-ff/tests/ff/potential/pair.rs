@@ -1,9 +1,6 @@
 //! Lennard-Jones 12-6 pair potential: E = 4*eps*((sigma/r)^12 - (sigma/r)^6).
 
-#[path = "../helpers.rs"]
-mod helpers;
-
-use helpers::{atoms_frame, numerical_forces, topo_block};
+use crate::helpers::{atoms_frame, numerical_forces, topo_block};
 use molrs::types::F;
 use molrs_ff::ForceField;
 use molrs_ff::potential::Potential;

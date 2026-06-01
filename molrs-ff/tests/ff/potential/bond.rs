@@ -1,9 +1,6 @@
 //! Harmonic bond potential: E = 0.5 * k0 * (r - r0)^2.
 
-#[path = "../helpers.rs"]
-mod helpers;
-
-use helpers::{atoms_frame, numerical_forces, topo_block};
+use crate::helpers::{atoms_frame, numerical_forces, topo_block};
 use molrs::types::F;
 use molrs_ff::ForceField;
 use molrs_ff::potential::Potential;

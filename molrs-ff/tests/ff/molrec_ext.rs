@@ -1,9 +1,6 @@
 //! End-to-end tests for `molrec_ext`: force-field metadata stamped onto MolRec.
 
-#[path = "helpers.rs"]
-mod helpers;
-
-use helpers::atoms_frame;
+use crate::helpers::atoms_frame;
 use molrs_ff::ForceField;
 use molrs_ff::{molrec_from_forcefield, set_forcefield_metadata};
 

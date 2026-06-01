@@ -10,6 +10,9 @@
 //! Inline `#[cfg(test)]` modules in `src/**` remain the pure-function unit layer;
 //! this target is the end-to-end integration layer the crate previously lacked.
 
+#[path = "ff/helpers.rs"]
+mod helpers;
+
 #[path = "ff/forcefield.rs"]
 mod forcefield;
 #[path = "ff/molrec_ext.rs"]

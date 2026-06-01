@@ -1,10 +1,7 @@
 //! End-to-end tests for `forcefield` (mod + xml): parse / build a `ForceField`,
 //! resolve kernels through the `KernelRegistry`, and `compile` against a Frame.
 
-#[path = "helpers.rs"]
-mod helpers;
-
-use helpers::{atoms_frame, flat_coords, topo_block};
+use crate::helpers::{atoms_frame, flat_coords, topo_block};
 use molrs::types::F;
 use molrs_ff::ForceField;
 use molrs_ff::potential::{KernelRegistry, extract_coords};
