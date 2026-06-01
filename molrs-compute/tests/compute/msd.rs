@@ -18,9 +18,15 @@ use molrs_compute::traits::Compute;
 
 fn make_frame(x: &[F], y: &[F], z: &[F]) -> Frame {
     let mut block = Block::new();
-    block.insert("x", Array1::from_vec(x.to_vec()).into_dyn()).unwrap();
-    block.insert("y", Array1::from_vec(y.to_vec()).into_dyn()).unwrap();
-    block.insert("z", Array1::from_vec(z.to_vec()).into_dyn()).unwrap();
+    block
+        .insert("x", Array1::from_vec(x.to_vec()).into_dyn())
+        .unwrap();
+    block
+        .insert("y", Array1::from_vec(y.to_vec()).into_dyn())
+        .unwrap();
+    block
+        .insert("z", Array1::from_vec(z.to_vec()).into_dyn())
+        .unwrap();
     let mut frame = Frame::new();
     frame.insert("atoms", block);
     frame
@@ -123,8 +129,12 @@ fn direct_and_window_agree_on_constant_velocity() {
     let frames_owned = ballistic_x(&vel, 7);
     let frames: Vec<&Frame> = frames_owned.iter().collect();
 
-    let direct = MSD::with_mode(MsdMode::Direct).compute(&frames, ()).unwrap();
-    let window = MSD::with_mode(MsdMode::Window).compute(&frames, ()).unwrap();
+    let direct = MSD::with_mode(MsdMode::Direct)
+        .compute(&frames, ())
+        .unwrap();
+    let window = MSD::with_mode(MsdMode::Window)
+        .compute(&frames, ())
+        .unwrap();
     assert_eq!(direct.len(), window.len());
     for t in 0..direct.len() {
         assert!(

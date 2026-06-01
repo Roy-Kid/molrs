@@ -7,13 +7,13 @@
 #[path = "geometry.rs"]
 mod geometry;
 
-#[path = "bond.rs"]
-mod bond;
 #[path = "angle.rs"]
 mod angle;
-#[path = "pair.rs"]
-mod pair;
+#[path = "bond.rs"]
+mod bond;
 #[path = "mmff.rs"]
 mod mmff;
+#[path = "pair.rs"]
+mod pair;
 #[path = "pme.rs"]
 mod pme;

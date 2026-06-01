@@ -5,6 +5,7 @@
 //!   sum Σ w = N/2 for the symmetric form's interior.
 //! * Blackman three-term (0.42, 0.5, 0.08): zero at both ends.
 //! * CosineSq: w[n] = cos²(π·n/(2(N−1))); w[0] = 1, w[N−1] = 0, midpoint 0.5.
+//!
 //! All windows are symmetric: w[n] = w[N−1−n].
 
 use molrs_signal::{WindowType, apply_window};

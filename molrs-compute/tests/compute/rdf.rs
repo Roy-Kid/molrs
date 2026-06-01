@@ -42,9 +42,8 @@ fn simple_cubic(reps: usize, a: F) -> Frame {
     let mut frame = Frame::new();
     frame.insert("atoms", block);
     let box_len = reps as F * a;
-    frame.simbox = Some(
-        SimBox::cube(box_len, array![0.0 as F, 0.0, 0.0], [true, true, true]).unwrap(),
-    );
+    frame.simbox =
+        Some(SimBox::cube(box_len, array![0.0 as F, 0.0, 0.0], [true, true, true]).unwrap());
     frame
 }
 

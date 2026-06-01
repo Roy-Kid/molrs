@@ -141,7 +141,11 @@ fn benzene_carbons_are_aromatic_type_37() {
     let ring_info = find_rings(&mol);
     let types = t.assign_atom_types(&mol, &ring_info);
     for &c in &cs {
-        assert_eq!(types[&c], 37, "benzene C should be type 37 (CB), got {}", types[&c]);
+        assert_eq!(
+            types[&c], 37,
+            "benzene C should be type 37 (CB), got {}",
+            types[&c]
+        );
     }
 }
 
@@ -153,7 +157,11 @@ fn benzene_carbons_are_aromatic_type_37() {
 fn bond_classification_normal_vs_aromatic() {
     let t = typifier();
     assert_eq!(t.classify_bond_type(1, 1, 1.0), 0, "sp3 single -> normal");
-    assert_eq!(t.classify_bond_type(37, 37, 1.5), 1, "aromatic -> delocalized");
+    assert_eq!(
+        t.classify_bond_type(37, 37, 1.5),
+        1,
+        "aromatic -> delocalized"
+    );
 }
 
 #[test]

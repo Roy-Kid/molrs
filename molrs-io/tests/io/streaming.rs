@@ -163,30 +163,22 @@ mod lammps_dump_streaming {
 
     #[test]
     fn nacl_round_trip() {
-        run_one(&crate::common::data_path(
-            "lammps/nacl.lammpstrj",
-        ));
+        run_one(&crate::common::data_path("lammps/nacl.lammpstrj"));
     }
 
     #[test]
     fn polymer_round_trip() {
-        run_one(&crate::common::data_path(
-            "lammps/polymer.lammpstrj",
-        ));
+        run_one(&crate::common::data_path("lammps/polymer.lammpstrj"));
     }
 
     #[test]
     fn properties_round_trip() {
-        run_one(&crate::common::data_path(
-            "lammps/properties.lammpstrj",
-        ));
+        run_one(&crate::common::data_path("lammps/properties.lammpstrj"));
     }
 
     #[test]
     fn wrapped_round_trip() {
-        run_one(&crate::common::data_path(
-            "lammps/wrapped.lammpstrj",
-        ));
+        run_one(&crate::common::data_path("lammps/wrapped.lammpstrj"));
     }
 }
 
@@ -386,16 +378,12 @@ mod lammps_data_streaming {
 
     #[test]
     fn solvated() {
-        run_one(&crate::common::data_path(
-            "lammps-data/solvated.lmp",
-        ));
+        run_one(&crate::common::data_path("lammps-data/solvated.lmp"));
     }
 
     #[test]
     fn data_body() {
-        run_one(&crate::common::data_path(
-            "lammps-data/data.body",
-        ));
+        run_one(&crate::common::data_path("lammps-data/data.body"));
     }
 }
 

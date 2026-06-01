@@ -31,9 +31,8 @@ fn make_frame(positions: &[[F; 3]], box_len: F) -> Frame {
     block.insert("z", z.into_dyn()).unwrap();
     let mut frame = Frame::new();
     frame.insert("atoms", block);
-    frame.simbox = Some(
-        SimBox::cube(box_len, array![0.0 as F, 0.0, 0.0], [true, true, true]).unwrap(),
-    );
+    frame.simbox =
+        Some(SimBox::cube(box_len, array![0.0 as F, 0.0, 0.0], [true, true, true]).unwrap());
     assert_eq!(n, frame.get("atoms").unwrap().nrows().unwrap());
     frame
 }
@@ -78,9 +77,7 @@ fn single_symmetric_cluster_com_is_geometric_center() {
     let clusters = Cluster::new(1).compute(&[&frame], &vec![nlist]).unwrap();
     assert_eq!(clusters[0].num_clusters, 1, "all points should merge");
 
-    let com = CenterOfMass::new()
-        .compute(&[&frame], &clusters)
-        .unwrap();
+    let com = CenterOfMass::new().compute(&[&frame], &clusters).unwrap();
     assert_eq!(com.len(), 1);
     assert_eq!(com[0].centers_of_mass.len(), 1);
 
@@ -136,9 +133,7 @@ fn two_separated_clusters_resolve_independently() {
     let clusters = Cluster::new(1).compute(&[&frame], &vec![nlist]).unwrap();
     assert_eq!(clusters[0].num_clusters, 2);
 
-    let com = CenterOfMass::new()
-        .compute(&[&frame], &clusters)
-        .unwrap();
+    let com = CenterOfMass::new().compute(&[&frame], &clusters).unwrap();
     assert_eq!(com[0].centers_of_mass.len(), 2);
 
     // Each cluster's COM z is the midpoint of its pair (1.2 or 9.2).

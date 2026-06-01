@@ -34,7 +34,10 @@ fn displaced_angle_matches_closed_form() {
     let (e, _) = pot.eval(&coords);
     let dtheta = std::f64::consts::FRAC_PI_2 - theta0; // pi/6
     let expected = 0.5 * K0 * dtheta * dtheta;
-    assert!((e - expected).abs() < 1e-9, "energy {e} expected {expected}");
+    assert!(
+        (e - expected).abs() < 1e-9,
+        "energy {e} expected {expected}"
+    );
 }
 
 #[test]

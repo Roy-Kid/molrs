@@ -26,7 +26,12 @@ fn params(alpha: F, cutoff: F, order: usize) -> PmeParams {
 fn two_ion_energy_approaches_vacuum_coulomb() {
     let box_l: F = 20.0;
     let r: F = 3.0;
-    let pme = PmePotential::new(params(0.3, 9.0, 5), vec![1.0, -1.0], cubic_box(box_l), vec![]);
+    let pme = PmePotential::new(
+        params(0.3, 9.0, 5),
+        vec![1.0, -1.0],
+        cubic_box(box_l),
+        vec![],
+    );
     let c = box_l / 2.0;
     let coords: Vec<F> = vec![c, c, c, c + r, c, c];
     let e = pme.energy(&coords);

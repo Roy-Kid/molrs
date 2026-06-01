@@ -26,6 +26,9 @@ pub fn data_path(relative: &str) -> PathBuf {
 
 /// Every file directly inside `tests-data/<format>/`, sorted. Backs the rule
 /// that format readers are tested against *all* real files, not a subset.
+// Shared test-common module: not every test binary that includes it uses
+// every helper, so the per-binary dead-code lint is a false positive here.
+#[allow(dead_code)]
 pub fn format_files(format: &str) -> Vec<PathBuf> {
     let dir = tests_data_dir().join(format);
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)

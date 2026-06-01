@@ -312,8 +312,7 @@ fn molrec_write_zarr(path: &str, rec: &AtvMolRec) {
 /// see exactly the columns and simbox that were stored.
 #[cfg(feature = "zarr")]
 fn molrec_read_zarr_first_frame(path: &str) -> Box<FrameRef> {
-    let molrec = read_molrec_file(path)
-        .expect("molrec_read_zarr_first_frame: read");
+    let molrec = read_molrec_file(path).expect("molrec_read_zarr_first_frame: read");
     let frame = molrec
         .frame_at(0)
         .expect("molrec_read_zarr_first_frame: empty trajectory");

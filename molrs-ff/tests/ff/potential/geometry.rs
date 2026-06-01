@@ -36,7 +36,10 @@ fn right_angle() {
     // i=(1,0,0), j=(0,0,0) vertex, k=(0,1,0) -> 90 deg.
     let coords: Vec<F> = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
     let theta = compute_angle(&coords, 0, 1, 2);
-    assert!((theta - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{theta}");
+    assert!(
+        (theta - std::f64::consts::FRAC_PI_2).abs() < 1e-9,
+        "{theta}"
+    );
 }
 
 #[test]
@@ -59,7 +62,10 @@ fn dihedral_cis_and_trans() {
         1.0, -1.0, 0.0, // l
     ];
     let phi_trans = compute_dihedral(&trans, 0, 1, 2, 3);
-    assert!((phi_trans.abs() - std::f64::consts::PI).abs() < 1e-9, "{phi_trans}");
+    assert!(
+        (phi_trans.abs() - std::f64::consts::PI).abs() < 1e-9,
+        "{phi_trans}"
+    );
 
     // cis: i and l on the same side.
     let cis: Vec<F> = vec![
@@ -82,5 +88,8 @@ fn dihedral_ninety_degrees() {
         1.0, 0.0, 1.0, // l (in xz)
     ];
     let phi = compute_dihedral(&coords, 0, 1, 2, 3);
-    assert!((phi.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{phi}");
+    assert!(
+        (phi.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-9,
+        "{phi}"
+    );
 }
