@@ -36,6 +36,7 @@
 pub mod data;
 
 // Modules formerly in core/
+pub mod aromaticity;
 pub mod atomistic;
 pub mod block;
 pub mod coarsegrain;
@@ -62,6 +63,7 @@ pub mod math;
 pub mod neighbors;
 
 // Public re-exports for common types
+pub use aromaticity::perceive_aromaticity;
 pub use atomistic::Atomistic;
 pub use block::Block;
 pub use coarsegrain::CoarseGrain;

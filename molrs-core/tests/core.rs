@@ -5,6 +5,8 @@
 //! exercise the public API with realistic molecular inputs built in code —
 //! core does no file I/O, so no `tests-data/` files are involved.
 
+#[path = "core/aromaticity.rs"]
+mod aromaticity;
 #[path = "core/hydrogens.rs"]
 mod hydrogens;
 #[path = "core/rings.rs"]

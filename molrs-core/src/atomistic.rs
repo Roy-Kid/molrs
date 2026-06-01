@@ -99,6 +99,21 @@ impl Atomistic {
     pub fn as_molgraph_mut(&mut self) -> &mut MolGraph {
         &mut self.0
     }
+
+    /// Perceive aromaticity (RDKit default `AROMATICITY_RDKIT` model) and
+    /// annotate the graph in place.
+    ///
+    /// Aromatic atoms receive an `is_aromatic = 1` property and aromatic bonds
+    /// get order `1.5`, which is exactly what
+    /// [`crate::SmartsPattern`]'s `a` / `c` / `:` primitives read. Perception
+    /// works from Kekulé input (bond orders + element + formal charge), so it is
+    /// idempotent. Returns the number of atoms flagged aromatic.
+    ///
+    /// See [`crate::aromaticity::perceive_aromaticity`] for the full algorithm
+    /// and RDKit reference.
+    pub fn perceive_aromaticity(&mut self) -> usize {
+        crate::aromaticity::perceive_aromaticity(&mut self.0)
+    }
 }
 
 #[cfg(test)]
