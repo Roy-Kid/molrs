@@ -7,8 +7,8 @@ criteria:
     evaluator_hint: "Generate with molrs (fixed seed) and RDKit EmbedMolecule(ETKDGv3, randomSeed matched); align and compute best-fit heavy-atom RMSD allowing symmetry/mirror. Needs RDKit (installed)."
     pass_when: |
       For each molecule in {ethanol "CCO", butane "CCCC", benzene "c1ccccc1", caffeine "Cn1cnc2c1c(=O)n(C)c(=O)n2C", (R)-alanine "C[C@@H](N)C(=O)O", 12-ring "C1CCCCCCCCCCC1"} with rng_seed fixed, the molrs ETKDGv3 conformer aligns to a RDKit ETKDGv3 conformer with symmetry-aware best-fit heavy-atom RMSD < 0.5 Å.
-    status: pending
-    last_checked: ""
+    status: verified
+    last_checked: "2026-06-01"
   - id: ac-002
     summary: Generated conformer MMFF energy is same order as RDKit
     type: scientific

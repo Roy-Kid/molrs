@@ -1,6 +1,6 @@
 ---
 title: ETKDGv3 完整实验扭转表 + 接入 (ETKDG Torsions)
-status: approved
+status: code-complete
 created: 2026-06-01
 chain: etkdg-smarts
 chain_index: 2
