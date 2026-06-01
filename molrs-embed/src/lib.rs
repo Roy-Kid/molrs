@@ -6,6 +6,7 @@
 
 mod builder;
 mod distance_geometry;
+pub mod distgeom;
 mod fragment_data;
 mod geom;
 mod optimizer;

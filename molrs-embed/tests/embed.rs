@@ -8,3 +8,6 @@
 
 #[path = "embed/pipeline.rs"]
 mod pipeline;
+
+#[path = "embed/distgeom.rs"]
+mod distgeom;
