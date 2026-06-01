@@ -14,3 +14,6 @@ mod distgeom;
 
 #[path = "embed/etkdg.rs"]
 mod etkdg;
+
+#[path = "embed/torsions.rs"]
+mod torsions;

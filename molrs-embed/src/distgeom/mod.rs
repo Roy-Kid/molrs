@@ -37,6 +37,7 @@ mod matrix;
 mod perceive;
 mod smooth;
 mod torsion_prefs;
+mod torsion_tables;
 mod uff;
 
 use molrs::error::MolRsError;
@@ -46,7 +47,7 @@ pub use chirality::{ChiralConstraint, ChiralSign, ImproperConstraint};
 pub use knowledge::KnowledgeTorsion;
 pub use matrix::BoundsMatrix;
 pub use smooth::{smooth_bounds, smooth_bounds_tol};
-pub use torsion_prefs::TorsionConstraint;
+pub use torsion_prefs::{AssignedTorsion, TorsionConstraint, TorsionTable, assign_with_provenance};
 
 /// ETKDG generation version. This spec targets `Etkdgv3` by default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +72,14 @@ pub struct DgConstraints {
     pub chiral: Vec<ChiralConstraint>,
     /// Improper / out-of-plane constraints.
     pub improper: Vec<ImproperConstraint>,
+}
+
+/// Assign ETKDGv3 experimental torsions to `mol` with table provenance, for
+/// validation against RDKit `getExperimentalTorsions`. Perceives aromaticity /
+/// rings internally, then drives the full SMARTS-table matcher.
+pub fn experimental_torsions_with_provenance(mol: &MolGraph) -> Vec<AssignedTorsion> {
+    let p = perceive::perceive(mol);
+    assign_with_provenance(mol, &p)
 }
 
 /// Build the unsmoothed topological bounds matrix for `mol`
@@ -108,7 +117,7 @@ pub fn build_constraints(
     let (experimental_torsions, flat_ring_torsions, chiral, improper) = match version {
         EtkdgVersion::Etdg => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
         EtkdgVersion::Etkdgv2 | EtkdgVersion::Etkdgv3 => (
-            torsion_prefs::assign_experimental_torsions(&p),
+            torsion_prefs::assign_experimental_torsions(mol, &p),
             knowledge::build_flat_ring_torsions(&p),
             chirality::build_chiral(mol, &p),
             chirality::build_improper(&p),

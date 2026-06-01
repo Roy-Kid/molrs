@@ -1,42 +1,51 @@
-//! ETKDGv3 experimental torsion-angle preferences (CrystalFF) + matcher.
+//! ETKDGv3 experimental torsion-angle preferences (CrystalFF) + SMARTS matcher.
 //!
-//! Data and semantics ported from RDKit (BSD-3, Copyright (C) 2017-2023
-//! Sereina Riniker and other RDKit contributors):
-//!   * `$RDBASE/Code/GraphMol/ForceFieldHelpers/CrystalFF/torsionPreferences_v2.in`
-//!     — the ETKDGv2/v3 SMARTS → `(signs, V)` parameter table,
-//!   * `$RDBASE/Code/GraphMol/ForceFieldHelpers/CrystalFF/TorsionPreferences.cpp`
-//!     — `getExperimentalTorsions` (pattern matching + dedup per rotatable
-//!     bond),
+//! Data and selection semantics ported from RDKit (BSD-3, Copyright (C)
+//! 2017-2023 Sereina Riniker and other RDKit contributors):
+//!   * `$RDBASE/Code/GraphMol/ForceFieldHelpers/CrystalFF/`
+//!     `torsionPreferences_{v2,smallrings,macrocycles}.in` — the full
+//!     ETKDGv2/v3 SMARTS → `(signs, V)` parameter tables (embedded verbatim in
+//!     [`super::torsion_tables`], extracted by `gen_torsion_tables.py`),
+//!   * `.../TorsionPreferences.cpp` (`getExperimentalTorsions`) — pattern
+//!     matching + first-match-wins dedup per rotatable bond,
 //!   * `$RDBASE/Code/ForceField/CrystalFF/TorsionAngleM6.h` — the M6 potential
-//!     form `V = Σ_m Vm·(1 + sm·cos(m·x))`.
+//!     `V = Σ_m V_m·(1 + s_m·cos(m·x))`.
 //!
-//! ## What is faithful vs. partial (read this)
+//! ## Faithful port (this replaces the former representative subset)
 //!
-//! The ETKDGv3 torsion table is **keyed by SMARTS** and RDKit dispatches it
-//! through its full substructure-matching engine. `molrs` has **no SMARTS
-//! engine**, and porting one is explicitly out of scope for this spec. We
-//! therefore implement:
+//! Every torsion assignment now flows through the **full** three-table data
+//! set and the project SMARTS engine ([`molrs::smarts::SmartsPattern`]). For
+//! each rotatable bond we reproduce RDKit's exact selection:
 //!
-//!   * a **faithful data model** — every entry carries the six `(sign, V)`
-//!     pairs exactly as in RDKit, and the M6 potential is reproduced;
-//!   * a **feasible matcher** — instead of arbitrary SMARTS we compile each
-//!     embedded pattern into a 4-atom query over the quantities `molrs` can
-//!     perceive (element, aromaticity, hybridization, degree, in-ring) and
-//!     match it against every rotatable (`!@`, acyclic) bond's `i-j-k-l`
-//!     neighbour quadruples;
-//!   * an **embedded representative subset** of the v2 table covering the
-//!     patterns exercised by the validated molecules — the general
-//!     sp3-sp3 single bond (butane), the biphenyl aryl-aryl bond, and the
-//!     ester/amide O/N single bonds (glycine-like). It is **not** the full
-//!     ~370-row table.
+//! 1. The three tables are matched in RDKit concatenation order — v2, then
+//!    small-rings, then macrocycles ([`super::torsion_tables`]). The first
+//!    pattern (in that global order) that matches a bond wins; a bond receives
+//!    at most one experimental torsion.
+//! 2. Ring-size gating is *intrinsic to the SMARTS* (macrocycle patterns carry
+//!    `r{9-}`, small-ring patterns `r{-8}` / `r{5-6}` / …), so there is no
+//!    separate ring-membership dispatch: the right table simply fails to match
+//!    bonds of the wrong ring class. This is exactly how RDKit layers them.
 //!
-//! Consequences: torsion preferences are assigned for bonds matching the
-//! embedded subset; bonds whose true ETKDGv3 pattern is not embedded receive
-//! **no** experimental torsion (RDKit would assign one). The topological
-//! bounds + smoothing in `super::bounds` / `super::smooth` are *complete* and
-//! match RDKit to < 1e-3 Å; only this torsion-preference layer is partial.
+//! ### SMARTS compatibility shim
+//!
+//! The core SMARTS engine covers the primitives in these tables *except* two
+//! that it has no AST node for: RDKit's **ring-size range** `r{lo-hi}` (and the
+//! open forms `r{-hi}` / `r{lo-}`) and **ring connectivity** `x<n>` (number of
+//! ring bonds on the atom). Rather than reimplement matching, we *normalise*
+//! each pattern before parsing: the `r{…}` / `x<n>` tokens are stripped out and
+//! recorded per atom-map label, then re-checked against the molecule's ring
+//! info **after** the engine returns its matches. The residual constraints are
+//! pure local ring facts, so this post-filter is equivalent to evaluating them
+//! inline (validated against RDKit `GetExperimentalTorsions` in
+//! `tests/embed/torsions.rs`).
 
-use super::perceive::{Hybridization, Perceived};
+use std::collections::HashMap;
+
+use molrs::molgraph::{AtomId, MolGraph, PropValue};
+use molrs::smarts::SmartsPattern;
+
+use super::perceive::Perceived;
+use super::torsion_tables::{self, TorsionRow};
 
 /// One assigned experimental torsion: four atoms + the M6 `(signs, V)` set.
 #[derive(Clone, Debug)]
@@ -47,230 +56,412 @@ pub struct TorsionConstraint {
     pub signs: [i8; 6],
     /// Per-order force constants `V1..V6`.
     pub force_constants: [f64; 6],
-    /// The originating pattern label (for diagnostics / spec traceability).
+    /// The originating pattern SMARTS (for diagnostics / spec traceability).
     pub pattern: &'static str,
 }
 
-/// Per-atom query: the perceivable quantities a SMARTS atom primitive maps to.
-#[derive(Clone, Copy)]
-struct AtomQuery {
-    /// Required element atomic number, or `None` for "any heavy" / aromatic.
-    element: Option<u8>,
-    /// Require aromatic (`c`, `a`).
-    aromatic: Option<bool>,
-    /// Require this hybridization.
-    hyb: Option<Hybridization>,
-    /// Exclude hydrogen (`[!#1]`).
-    not_hydrogen: bool,
+/// Which source table a pattern came from (for diagnostics + `tests`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TorsionTable {
+    /// `torsionPreferences_v2` — acyclic / general bonds.
+    V2,
+    /// `torsionPreferences_smallrings` — small-ring bonds.
+    SmallRings,
+    /// `torsionPreferences_macrocycles` — ring bonds of size ≥ 9.
+    Macrocycles,
 }
 
-impl AtomQuery {
-    const fn any() -> Self {
-        Self {
-            element: None,
-            aromatic: None,
-            hyb: None,
-            not_hydrogen: false,
-        }
-    }
-    const fn heavy() -> Self {
-        Self {
-            not_hydrogen: true,
-            ..Self::any()
-        }
-    }
-    const fn elem(z: u8) -> Self {
-        Self {
-            element: Some(z),
-            ..Self::any()
-        }
-    }
-    const fn aromatic_c() -> Self {
-        Self {
-            element: Some(6),
-            aromatic: Some(true),
-            ..Self::any()
-        }
-    }
-    const fn sp3_c() -> Self {
-        Self {
-            element: Some(6),
-            hyb: Some(Hybridization::Sp3),
-            ..Self::any()
-        }
-    }
-    fn matches(&self, p: &Perceived, i: usize) -> bool {
-        let a = &p.atoms[i];
-        if self.not_hydrogen && a.element.z() == 1 {
-            return false;
-        }
-        if let Some(z) = self.element {
-            if a.element.z() != z {
-                return false;
-            }
-        }
-        if let Some(ar) = self.aromatic {
-            if a.aromatic != ar {
-                return false;
-            }
-        }
-        if let Some(h) = self.hyb {
-            if a.hybridization != h {
-                return false;
-            }
-        }
-        true
-    }
+// ---------------------------------------------------------------------------
+// Pattern compilation (with the `r{…}` / `x<n>` shim)
+// ---------------------------------------------------------------------------
+
+/// A residual ring constraint that the core engine cannot express, recorded
+/// against an atom-map label and re-checked post-match.
+#[derive(Clone, Copy, Debug)]
+enum RingConstraint {
+    /// `r{lo-hi}` — atom's smallest ring size must lie in `[lo, hi]` inclusive
+    /// (`hi == None` means unbounded above).
+    RingSizeRange { lo: usize, hi: Option<usize> },
+    /// `x<n>` — atom must have exactly `n` ring bonds.
+    RingConnectivity(usize),
 }
 
-/// A compiled torsion pattern: a 4-atom query plus the M6 parameters.
-struct Pattern {
-    label: &'static str,
-    q: [AtomQuery; 4],
+/// A compiled table entry: the engine pattern, the residual ring constraints
+/// keyed by atom-map label (1..=4), the M6 parameters, and provenance.
+struct CompiledPattern {
+    smarts: &'static str,
+    pattern: SmartsPattern,
+    residual: Vec<(u32, RingConstraint)>,
     signs: [i8; 6],
     v: [f64; 6],
-    /// Require the central `j-k` bond to be acyclic (`!@`).
-    central_acyclic: bool,
+    table: TorsionTable,
 }
 
-/// Embedded representative subset of the ETKDGv3 (v2) torsion table.
+/// Strip the unsupported `r{…}` / `x<n>` primitives out of `smarts`, returning
+/// the engine-parseable SMARTS plus the residual constraints keyed by the
+/// atom-map label of the bracketed atom they belonged to.
 ///
-/// Each entry transcribes the `(signs, V)` of the corresponding row in
-/// `torsionPreferences_v2.in`; the SMARTS is approximated by an `AtomQuery`
-/// quadruple (see module docs for the faithfulness boundary).
-fn patterns() -> Vec<Pattern> {
-    vec![
-        // "[cH1:1][c:2]([cH1])!@;-[c:3]([cH1:4])[cH1] -1 -0.7 1 -8.0 1 0.0 1 4.4 1 0.0 1 -1.5"
-        // biphenyl aryl-aryl bond.
-        Pattern {
-            label: "aryl-aryl (biphenyl)",
-            q: [
-                AtomQuery::aromatic_c(),
-                AtomQuery::aromatic_c(),
-                AtomQuery::aromatic_c(),
-                AtomQuery::aromatic_c(),
-            ],
-            signs: [-1, 1, 1, 1, 1, 1],
-            v: [-0.7, -8.0, 0.0, 4.4, 0.0, -1.5],
-            central_acyclic: true,
-        },
-        // "[!#1:1][CX4:2]!@;-[CX4:3][!#1:4] 1 0.0 1 0.0 1 7.0 1 0.0 1 0.0 1 0.0"
-        // general sp3-sp3 single bond (butane C2-C3).
-        Pattern {
-            label: "sp3 C - sp3 C",
-            q: [
-                AtomQuery::heavy(),
-                AtomQuery::sp3_c(),
-                AtomQuery::sp3_c(),
-                AtomQuery::heavy(),
-            ],
-            signs: [1, 1, 1, 1, 1, 1],
-            v: [0.0, 0.0, 7.0, 0.0, 0.0, 0.0],
-            central_acyclic: true,
-        },
-        // "[!#1:1][CX4:2]!@;-[OX2:3][!#1:4] 1 0.0 1 8.0 1 0.0 1 0.0 1 0.0 1 0.0"
-        // sp3 C - O ether/ester oxygen single bond.
-        Pattern {
-            label: "sp3 C - O(2)",
-            q: [
-                AtomQuery::heavy(),
-                AtomQuery::sp3_c(),
-                AtomQuery::elem(8),
-                AtomQuery::heavy(),
-            ],
-            signs: [1, 1, 1, 1, 1, 1],
-            v: [0.0, 8.0, 0.0, 0.0, 0.0, 0.0],
-            central_acyclic: true,
-        },
-        // "[!#1:1][CX4H2:2]!@;-[NX3:3][!#1:4] 1 0.0 1 0.0 1 1.0 1 0.0 1 0.0 1 0.0"
-        // sp3 C - N single bond (e.g. glycine N-C).
-        Pattern {
-            label: "sp3 C - N(3)",
-            q: [
-                AtomQuery::heavy(),
-                AtomQuery::sp3_c(),
-                AtomQuery::elem(7),
-                AtomQuery::heavy(),
-            ],
-            signs: [1, 1, 1, 1, 1, 1],
-            v: [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-            central_acyclic: true,
-        },
-    ]
+/// The scan is bracket-atom aware: it walks each `[...]` group, finds the
+/// atom-map `:n`, and pulls out any `r{…}` / `x<digits>` token (cleaning up the
+/// adjacent `;`/`&` separator so the residue still parses).
+fn strip_ring_primitives(smarts: &str) -> (String, Vec<(u32, RingConstraint)>) {
+    let bytes: Vec<char> = smarts.chars().collect();
+    let mut out = String::with_capacity(smarts.len());
+    let mut residual: Vec<(u32, RingConstraint)> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == '[' {
+            // Find the matching ']'.
+            let start = i;
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != ']' {
+                j += 1;
+            }
+            let inner: String = bytes[start + 1..j].iter().collect();
+            let map = parse_map_label(&inner);
+            let (cleaned, cons) = strip_atom_inner(&inner);
+            for c in cons {
+                if let Some(m) = map {
+                    residual.push((m, c));
+                }
+            }
+            out.push('[');
+            out.push_str(&cleaned);
+            out.push(']');
+            i = j + 1;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    (out, residual)
 }
 
-/// Whether the bond `j-k` is acyclic (not in any ring).
-fn bond_acyclic(p: &Perceived, j: usize, k: usize) -> bool {
-    !p.ring_idx.iter().any(|ring| {
-        let rsize = ring.len();
-        (0..rsize).any(|w| {
-            let a = ring[w];
-            let b = ring[(w + 1) % rsize];
-            (a == j && b == k) || (a == k && b == j)
-        })
+/// The atom-map label `:n` inside a bracket-atom body, if any.
+fn parse_map_label(inner: &str) -> Option<u32> {
+    let pos = inner.rfind(':')?;
+    inner[pos + 1..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()
+}
+
+/// Remove `r{…}` / `x<digits>` tokens from a single bracket-atom body, cleaning
+/// up the separators they leave behind. Returns the cleaned body and the
+/// residual constraints (un-keyed; the caller attaches the map label).
+fn strip_atom_inner(inner: &str) -> (String, Vec<RingConstraint>) {
+    let chars: Vec<char> = inner.chars().collect();
+    let mut out = String::with_capacity(inner.len());
+    let mut cons: Vec<RingConstraint> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        // `r{...}` range (only when followed by '{'; a plain `r<digit>` /
+        // bare `r` stays for the engine).
+        if c == 'r' && i + 1 < chars.len() && chars[i + 1] == '{' {
+            let mut j = i + 2;
+            while j < chars.len() && chars[j] != '}' {
+                j += 1;
+            }
+            let body: String = chars[i + 2..j].iter().collect();
+            if let Some(rc) = parse_ring_range(&body) {
+                cons.push(rc);
+            }
+            i = j + 1;
+            i = skip_trailing_sep(&chars, i);
+            continue;
+        }
+        // `x<digits>` ring connectivity.
+        if c == 'x' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit() {
+            let mut j = i + 1;
+            let mut num = String::new();
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                num.push(chars[j]);
+                j += 1;
+            }
+            if let Ok(n) = num.parse::<usize>() {
+                cons.push(RingConstraint::RingConnectivity(n));
+            }
+            i = j;
+            i = skip_trailing_sep(&chars, i);
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    let cleaned = tidy_separators(&out);
+    (cleaned, cons)
+}
+
+/// After removing a token, drop one immediately following `;`/`&` separator so
+/// we do not leave a dangling logical operator. Returns the new cursor.
+fn skip_trailing_sep(chars: &[char], i: usize) -> usize {
+    if i < chars.len() && (chars[i] == ';' || chars[i] == '&') {
+        // Only skip if there is real content before, else leave for tidy pass.
+        return i + 1;
+    }
+    i
+}
+
+/// Collapse `;;`, `&&`, leading/trailing/`[`-adjacent separators left behind by
+/// token removal, so the residue parses cleanly.
+fn tidy_separators(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == ';' || c == '&' {
+            // Skip if at the very start, at the end, or duplicated / before ':'.
+            let at_start = out.is_empty();
+            let next = chars.get(i + 1).copied();
+            let dup_or_end = matches!(next, None | Some(';') | Some('&') | Some(':'));
+            if at_start || dup_or_end {
+                i += 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Parse the body of `r{...}` into a [`RingConstraint::RingSizeRange`].
+///
+/// Forms: `lo-hi`, `-hi` (lo defaults to the smallest chemical ring, 3),
+/// `lo-` (hi unbounded), or a bare `n` (treated as `n-n`).
+fn parse_ring_range(body: &str) -> Option<RingConstraint> {
+    if let Some((a, b)) = body.split_once('-') {
+        let lo = if a.is_empty() {
+            3
+        } else {
+            a.trim().parse().ok()?
+        };
+        let hi = if b.is_empty() {
+            None
+        } else {
+            Some(b.trim().parse().ok()?)
+        };
+        Some(RingConstraint::RingSizeRange { lo, hi })
+    } else {
+        let n: usize = body.trim().parse().ok()?;
+        Some(RingConstraint::RingSizeRange { lo: n, hi: Some(n) })
+    }
+}
+
+/// Compile one `(smarts, signs, V)` row into a [`CompiledPattern`].
+fn compile_row(row: &TorsionRow, table: TorsionTable) -> Option<CompiledPattern> {
+    let (smarts, signs, v) = (row.0, row.1, row.2);
+    let (cleaned, residual) = strip_ring_primitives(smarts);
+    let pattern = SmartsPattern::parse(&cleaned).ok()?;
+    Some(CompiledPattern {
+        smarts,
+        pattern,
+        residual,
+        signs,
+        v,
+        table,
     })
 }
 
-/// Assign experimental torsions to `p` by matching the embedded ETKDGv3
-/// subset over every rotatable bond. At most one torsion per central bond,
-/// first matching pattern wins (RDKit also keeps one entry per torsion bond).
-pub fn assign_experimental_torsions(p: &Perceived) -> Vec<TorsionConstraint> {
-    let pats = patterns();
+/// Compile the tables for ETKDGv3 in RDKit concatenation order.
+///
+/// RDKit's `ETKDGv3()` sets `useSmallRingTorsions = false` and
+/// `useMacrocycleTorsions = true`, so the concatenated parameter set is
+/// **v2 ++ macrocycles** (the small-ring table is *not* included). We mirror
+/// that exactly: matching v2 first, then macrocycles, first-match-wins. Rows
+/// whose residue fails to parse are skipped (none in the validated set).
+fn compile_all() -> Vec<CompiledPattern> {
     let mut out = Vec::new();
-    let mut done_bonds: std::collections::HashSet<(usize, usize)> =
-        std::collections::HashSet::new();
-    let n = p.atoms.len();
-
-    for j in 0..n {
-        for &k in &p.adj[j] {
-            if k <= j {
-                continue;
-            }
-            let key = (j, k);
-            if done_bonds.contains(&key) {
-                continue;
-            }
-            // candidate end atoms
-            for &i in &p.adj[j] {
-                if i == k {
-                    continue;
-                }
-                for &l in &p.adj[k] {
-                    if l == j {
-                        continue;
-                    }
-                    if let Some(pat) = pats.iter().find(|pat| {
-                        (!pat.central_acyclic || bond_acyclic(p, j, k))
-                            && match_quad(pat, p, i, j, k, l)
-                    }) {
-                        out.push(TorsionConstraint {
-                            atoms: [i, j, k, l],
-                            signs: pat.signs,
-                            force_constants: pat.v,
-                            pattern: pat.label,
-                        });
-                        done_bonds.insert(key);
-                        break;
-                    }
-                }
-                if done_bonds.contains(&key) {
-                    break;
-                }
-            }
+    for row in torsion_tables::V2 {
+        if let Some(p) = compile_row(row, TorsionTable::V2) {
+            out.push(p);
+        }
+    }
+    for row in torsion_tables::MACROCYCLES {
+        if let Some(p) = compile_row(row, TorsionTable::Macrocycles) {
+            out.push(p);
         }
     }
     out
 }
 
-/// Try a pattern in both atom orders (`i-j-k-l` and `l-k-j-i`).
-fn match_quad(pat: &Pattern, p: &Perceived, i: usize, j: usize, k: usize, l: usize) -> bool {
-    let fwd = pat.q[0].matches(p, i)
-        && pat.q[1].matches(p, j)
-        && pat.q[2].matches(p, k)
-        && pat.q[3].matches(p, l);
-    let rev = pat.q[0].matches(p, l)
-        && pat.q[1].matches(p, k)
-        && pat.q[2].matches(p, j)
-        && pat.q[3].matches(p, i);
-    fwd || rev
+// ---------------------------------------------------------------------------
+// Matching molecule (aromaticity transplanted from perception)
+// ---------------------------------------------------------------------------
+
+/// Build a working copy of `mol` whose atoms / bonds carry the `is_aromatic`
+/// flag from the project perception, so the SMARTS engine's `a` / `c` / `:`
+/// queries agree with RDKit (the engine reads `is_aromatic`, see
+/// `molrs::smarts` aromaticity convention).
+fn aromatic_working_copy(mol: &MolGraph, p: &Perceived) -> MolGraph {
+    let mut g = mol.clone();
+    for (i, &aid) in p.atom_ids.iter().enumerate() {
+        if p.atoms[i].aromatic {
+            if let Ok(a) = g.get_atom_mut(aid) {
+                a.set("is_aromatic", 1_i32);
+            }
+        }
+    }
+    // Flag aromatic bonds so `:` and `BondFacts.aromatic` agree.
+    let bond_ids: Vec<_> = g.bonds().map(|(bid, b)| (bid, b.atoms)).collect();
+    let idx_of: HashMap<AtomId, usize> = p
+        .atom_ids
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i))
+        .collect();
+    for (bid, [a, b]) in bond_ids {
+        let (Some(&ia), Some(&ib)) = (idx_of.get(&a), idx_of.get(&b)) else {
+            continue;
+        };
+        if p.is_aromatic_bond(ia, ib) {
+            if let Ok(bond) = g.get_bond_mut(bid) {
+                bond.props
+                    .insert("is_aromatic".to_string(), PropValue::Int(1));
+            }
+        }
+    }
+    g
+}
+
+/// Smallest ring size containing the perceived atom index `i`, or `None`.
+fn smallest_ring_size(p: &Perceived, i: usize) -> Option<usize> {
+    p.ring_idx
+        .iter()
+        .filter(|ring| ring.contains(&i))
+        .map(|ring| ring.len())
+        .min()
+}
+
+/// Number of ring bonds incident on perceived atom index `i` (RDKit `x`).
+fn ring_connectivity(p: &Perceived, i: usize) -> usize {
+    let mut count = 0;
+    for &j in &p.adj[i] {
+        let in_ring = p.ring_idx.iter().any(|ring| {
+            let rs = ring.len();
+            (0..rs).any(|w| {
+                let a = ring[w];
+                let b = ring[(w + 1) % rs];
+                (a == i && b == j) || (a == j && b == i)
+            })
+        });
+        if in_ring {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Check one residual ring constraint against perceived atom index `i`.
+fn residual_holds(p: &Perceived, i: usize, c: RingConstraint) -> bool {
+    match c {
+        RingConstraint::RingSizeRange { lo, hi } => match smallest_ring_size(p, i) {
+            Some(sz) => sz >= lo && hi.is_none_or(|h| sz <= h),
+            None => false,
+        },
+        RingConstraint::RingConnectivity(n) => ring_connectivity(p, i) == n,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Assignment
+// ---------------------------------------------------------------------------
+
+/// A single assigned torsion with its provenance, for diagnostics / tests.
+#[derive(Clone, Debug)]
+pub struct AssignedTorsion {
+    pub constraint: TorsionConstraint,
+    pub table: TorsionTable,
+}
+
+/// Assign experimental torsions to `mol` by matching the full ETKDGv3 tables
+/// (v2 ++ small-rings ++ macrocycles) through the SMARTS engine, reproducing
+/// RDKit `getExperimentalTorsions`: the first matching pattern (global table
+/// order) wins per rotatable bond; one torsion per bond.
+///
+/// `p` is the perception of `mol` (aromaticity / hybridization / rings); it is
+/// reused to transplant aromatic flags onto the matching copy and to evaluate
+/// the `r{…}` / `x<n>` residual constraints.
+pub fn assign_with_provenance(mol: &MolGraph, p: &Perceived) -> Vec<AssignedTorsion> {
+    let work = aromatic_working_copy(mol, p);
+    let patterns = compile_all();
+
+    let idx_of: HashMap<AtomId, usize> = p
+        .atom_ids
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i))
+        .collect();
+
+    // RDKit keys "done" by central-bond index; we key by the unordered central
+    // atom-index pair, which is equivalent for a simple molecular graph.
+    let mut done: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let mut out: Vec<AssignedTorsion> = Vec::new();
+
+    for cp in &patterns {
+        for m in cp.pattern.find_matches(&work) {
+            // Resolve atom-map labels :1..:4 to mol-atom indices.
+            let mut idx = [usize::MAX; 4];
+            let mut ok = true;
+            for (qi, &aid) in m.iter().enumerate() {
+                if let Some(lbl) = cp.pattern.map_label(qi) {
+                    if (1..=4).contains(&lbl) {
+                        match idx_of.get(&aid) {
+                            Some(&ix) => idx[(lbl - 1) as usize] = ix,
+                            None => {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if !ok || idx.contains(&usize::MAX) {
+                continue;
+            }
+
+            // Residual `r{…}` / `x<n>` constraints (keyed by atom-map label).
+            let residual_ok = cp.residual.iter().all(|&(lbl, c)| {
+                let ai = idx[(lbl - 1) as usize];
+                residual_holds(p, ai, c)
+            });
+            if !residual_ok {
+                continue;
+            }
+
+            let (j, k) = (idx[1], idx[2]);
+            let key = if j < k { (j, k) } else { (k, j) };
+            if done.contains(&key) {
+                continue;
+            }
+            // The central pair must be a real bond.
+            if !p.adj[j].contains(&k) {
+                continue;
+            }
+            done.insert(key);
+            out.push(AssignedTorsion {
+                constraint: TorsionConstraint {
+                    atoms: idx,
+                    signs: cp.signs,
+                    force_constants: cp.v,
+                    pattern: cp.smarts,
+                },
+                table: cp.table,
+            });
+        }
+    }
+    out
+}
+
+/// Public entry point used by [`super::build_constraints`]: the bare
+/// [`TorsionConstraint`] list (provenance dropped).
+pub fn assign_experimental_torsions(mol: &MolGraph, p: &Perceived) -> Vec<TorsionConstraint> {
+    assign_with_provenance(mol, p)
+        .into_iter()
+        .map(|a| a.constraint)
+        .collect()
 }

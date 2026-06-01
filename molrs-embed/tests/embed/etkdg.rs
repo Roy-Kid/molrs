@@ -274,15 +274,21 @@ fn ac001_ac002_rmsd_and_energy_vs_rdkit() {
             met
         );
 
-        // ac-002: MMFF energy must be finite (same-order check is reported,
-        // not asserted, because the molrs conformer is not MMFF-optimized to
-        // RDKit's minimum — see partial torsion layer).
+        // ac-004: with the full ETKDGv3 torsion tables (SMARTS-driven), the
+        // best-fit heavy-atom RMSD vs RDKit must be < 0.5 Å for every molecule,
+        // including alanine (was 0.755 Å under the representative subset).
+        assert!(
+            rmsd < target,
+            "{name}: heavy-atom RMSD {rmsd:.4} Å exceeds {target} Å"
+        );
+
+        // ac-002: MMFF energy must be finite.
         if let Some(e) = e_molrs {
             assert!(e.is_finite(), "{name}: MMFF energy not finite");
         }
     }
-    println!("(RMSD targets are reported honestly; partial experimental-torsion");
-    println!(" layer limits fidelity for flexible molecules — see distgeom docs)\n");
+    println!("(all four molecules now meet the < 0.5 Å gate with the full");
+    println!(" SMARTS-driven ETKDGv3 experimental-torsion tables)\n");
 }
 
 /// Pull a numeric field for a molecule out of the reference JSON without serde.
