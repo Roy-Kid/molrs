@@ -23,8 +23,8 @@ criteria:
     evaluator_hint: "Run generate_3d over every SMILES in tests-data/smi/rdkit_problems.smi; count successes. Compare to RDKit EmbedMolecule on the same set."
     pass_when: |
       Over all parseable SMILES in tests-data/smi/rdkit_problems.smi, the count of molecules for which molrs generate_3d returns Ok with a valid (non-degenerate, no severe clashes) conformer is >= the count for RDKit EmbedMolecule(ETKDGv3) on the same set, and strictly >= the recorded count for the retired FragmentRules implementation. All three counts are reported.
-    status: pending
-    last_checked: ""
+    status: verified
+    last_checked: "2026-06-01"
   - id: ac-004
     summary: Fixed seed is fully reproducible
     type: code

@@ -39,8 +39,8 @@ criteria:
     evaluator_hint: "Compare with RDKit mmffVariant='MMFF94s'."
     pass_when: |
       For aniline "Nc1ccccc1" at a fixed RDKit conformer, building MmffForceField with the MMFF94s variant gives total energy within 1e-3 kcal/mol of RDKit's MMFF94s force-field energy, and differs from the MMFF94 energy by the same sign/order as RDKit's two variants differ.
-    status: pending
-    last_checked: ""
+    status: verified
+    last_checked: "2026-06-01"
   - id: ac-006
     summary: Single eval performance baseline (no O(N^2) regression)
     type: performance
