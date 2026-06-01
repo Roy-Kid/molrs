@@ -119,40 +119,22 @@ pub fn perceive(mol: &MolGraph) -> Perceived {
         })
         .collect();
 
-    // Aromaticity: a ring is aromatic when it has 5 or 6 members, every atom
-    // is C/N/O/S, and the in-ring bond orders alternate single/double (a
-    // Kekulé sextet) or are already flagged ≥1.5. This covers benzene rings,
-    // biphenyl, pyridine-like rings — the validated organic subset.
+    // Aromaticity: delegate to the shared RDKit-aligned model in molrs-core
+    // (`molrs::perceive_aromaticity`, a port of
+    // `setAromaticity(AROMATICITY_RDKIT)`) instead of re-deriving it here. It
+    // annotates a *clone* of the graph with an `is_aromatic = 1` flag per
+    // aromatic atom; we read those flags back, index-aligned.
+    //
+    // Mutating a clone keeps `perceive` non-destructive on the caller's graph
+    // (the embed pipeline relies on its input being untouched), and the clone
+    // preserves atom-insertion order, so `probe.atoms()` enumerates in the same
+    // sequence as `atom_ids` — we can zip them index-by-index.
     let mut aromatic_atom = vec![false; n];
-    for ring in &ring_idx {
-        let rsize = ring.len();
-        if !(rsize == 5 || rsize == 6) {
-            continue;
-        }
-        let all_organic = ring
-            .iter()
-            .all(|&i| matches!(element_of(mol, atom_ids[i]).symbol(), "C" | "N" | "O" | "S"));
-        if !all_organic {
-            continue;
-        }
-        let mut n_double = 0usize;
-        for w in 0..rsize {
-            let a = ring[w];
-            let b = ring[(w + 1) % rsize];
-            let o = {
-                let key = if a < b { (a, b) } else { (b, a) };
-                order.get(&key).copied().unwrap_or(0.0)
-            };
-            if o >= 1.5 {
-                n_double += 1;
-            }
-        }
-        // A 6-ring needs three alternating double bonds; a 5-ring needs two
-        // (pyrrole-type). This matches RDKit's aromatic perception for the
-        // molecules under test.
-        let aromatic = (rsize == 6 && n_double == 3) || (rsize == 5 && n_double >= 2);
-        if aromatic {
-            for &i in ring {
+    {
+        let mut probe = mol.clone();
+        molrs::perceive_aromaticity(&mut probe);
+        for (i, (_, atom)) in probe.atoms().enumerate().take(n) {
+            if atom.get_int("is_aromatic") == Some(1) {
                 aromatic_atom[i] = true;
             }
         }
