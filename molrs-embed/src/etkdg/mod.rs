@@ -20,6 +20,7 @@
 
 mod embed4d;
 mod etmin;
+mod mmff_min;
 mod retry;
 
 use rand::{SeedableRng, random, rngs::StdRng};
@@ -351,64 +352,14 @@ fn mmff_cleanup(mol: &MolGraph, coords3d: &mut [f64]) -> Result<(f64, usize, boo
     let ff = MmffForceField::build(&staged, &props).map_err(|e| e.to_string())?;
 
     use molrs_ff::potential::Potential;
-    // RDKit runs the MMFF cleanup to convergence; a generous step budget keeps
-    // the steepest-descent path close to the MMFF minimum.
-    let (e, _, steps, conv) = minimize_flat(coords3d, 1000, 1e-4, |p| ff.eval(p));
+    // RDKit's MMFFOptimizeMolecule runs a full BFGS minimization to a
+    // gradient-norm tolerance. Mirror that with L-BFGS to an RMS-gradient
+    // convergence of 1e-3 kcal/mol/Å (matching RDKit's default
+    // `MMFFOptimizeMolecule` grad tol) under a generous iteration cap, so the
+    // freshly-embedded geometry is relaxed all the way to the MMFF minimum.
+    let (e, _grad_rms, steps, conv) =
+        mmff_min::minimize_lbfgs(coords3d, 1000, 1e-3, |p| ff.eval(p));
     Ok((e, steps, conv))
-}
-
-/// Steepest-descent minimizer for a `(energy, forces=-grad)` evaluator
-/// (MMFF `Potential::eval`). Returns `(energy, _gnorm, steps, converged)`.
-fn minimize_flat<F>(
-    coords: &mut [f64],
-    max_iters: usize,
-    force_tol: f64,
-    mut eval: F,
-) -> (f64, f64, usize, bool)
-where
-    F: FnMut(&[f64]) -> (f64, Vec<f64>),
-{
-    let n = coords.len();
-    let (mut energy, mut forces) = eval(coords);
-    let mut step = 0.001;
-    let mut converged = false;
-    let mut iters = 0;
-    for it in 0..max_iters {
-        iters = it + 1;
-        let gnorm = forces.iter().map(|f| f * f).sum::<f64>().sqrt();
-        if gnorm < force_tol {
-            converged = true;
-            break;
-        }
-        // Descend along the unit force direction so `step` is a true
-        // displacement in Å (decoupled from the gradient magnitude). This makes
-        // the backtracking line search effective on stiff MMFF terms.
-        let inv = 1.0 / gnorm;
-        let mut local_step = step;
-        let mut accepted = false;
-        for _ in 0..30 {
-            let mut trial = coords.to_vec();
-            for k in 0..n {
-                // forces = -grad → descend along +forces.
-                trial[k] = coords[k] + local_step * forces[k] * inv;
-            }
-            let (e_trial, f_trial) = eval(&trial);
-            if e_trial.is_finite() && e_trial < energy {
-                coords.copy_from_slice(&trial);
-                energy = e_trial;
-                forces = f_trial;
-                step = (local_step * 1.3).min(0.2);
-                accepted = true;
-                break;
-            }
-            local_step *= 0.5;
-        }
-        if !accepted {
-            converged = true;
-            break;
-        }
-    }
-    (energy, 0.0, iters, converged)
 }
 
 /// Count acyclic single-bonded heavy-atom pairs (rough rotatable-bond count for

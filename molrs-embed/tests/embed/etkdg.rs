@@ -14,7 +14,9 @@
 //!
 //! Acceptance criteria covered:
 //!   * ac-001 — heavy-atom best-fit (Kabsch) RMSD vs RDKit, reported per molecule.
-//!   * ac-002 — MMFF94 energy of the molrs conformer is finite and same order.
+//!   * ac-002 — MMFF94 energy of the molrs conformer reaches the MMFF minimum:
+//!     within 10 % (relative) of RDKit's `MMFFOptimizeMolecule` reference, or
+//!     lower (a deeper, RDKit-confirmed minimum is a strictly better result).
 //!   * ac-004 — fixed seed → identical coords across two calls.
 //!   * ac-005 — (R)/(S)-alanine yield mirror geometries; no inversion warning.
 //!   * ac-007 — empty → Err, single atom → Ok, "C.C" disconnected → Ok no NaN.
@@ -282,13 +284,27 @@ fn ac001_ac002_rmsd_and_energy_vs_rdkit() {
             "{name}: heavy-atom RMSD {rmsd:.4} Å exceeds {target} Å"
         );
 
-        // ac-002: MMFF energy must be finite.
-        if let Some(e) = e_molrs {
-            assert!(e.is_finite(), "{name}: MMFF energy not finite");
-        }
+        // ac-002: the second-stage MMFF94 cleanup must relax the conformer to
+        // its MMFF minimum — within 10 % (relative) of RDKit's
+        // MMFFOptimizeMolecule reference. Reaching a *lower* energy is accepted
+        // too: molrs's L-BFGS sometimes settles into a deeper, RDKit-confirmed
+        // minimum (e.g. ethanol −1.517 vs RDKit's seed-dependent −1.337; RDKit
+        // re-optimizing molrs's geometry stays at −1.517). A deeper genuine
+        // minimum is a better cleanup, not a regression.
+        let e = e_molrs.expect("MMFF energy must be available for these molecules");
+        assert!(e.is_finite(), "{name}: MMFF energy not finite");
+        let e_ref = e_rdkit_opt
+            .expect("reference json must carry mmff_energy_optimized for these molecules");
+        let rel_err = (e - e_ref).abs() / e_ref.abs();
+        assert!(
+            e <= e_ref + 1e-6 || rel_err < 0.10,
+            "{name}: MMFF energy {e:.4} not within 10 % of (or below) RDKit-optimized \
+             {e_ref:.4} (rel_err {:.1} %)",
+            rel_err * 100.0
+        );
     }
-    println!("(all four molecules now meet the < 0.5 Å gate with the full");
-    println!(" SMARTS-driven ETKDGv3 experimental-torsion tables)\n");
+    println!("(all four molecules meet the < 0.5 Å RMSD gate and the 10 %");
+    println!(" MMFF-energy-vs-RDKit gate after L-BFGS second-stage cleanup)\n");
 }
 
 /// Pull a numeric field for a molecule out of the reference JSON without serde.
