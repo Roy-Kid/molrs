@@ -23,3 +23,6 @@ mod potential;
 
 #[path = "ff/typifier/mod.rs"]
 mod typifier;
+
+#[path = "ff/mmff/mod.rs"]
+mod mmff;

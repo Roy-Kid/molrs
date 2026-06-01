@@ -24,9 +24,12 @@
 pub(crate) mod aromaticity;
 pub(crate) mod atomtype;
 pub(crate) mod charges;
+pub mod energy;
 mod hybrid;
 pub mod tables;
 mod topo;
+
+pub use energy::{MmffEnergyBreakdown, MmffForceField};
 
 use molrs::error::MolRsError;
 use molrs::molgraph::MolGraph;

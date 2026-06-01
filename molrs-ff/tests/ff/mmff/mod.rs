@@ -3,3 +3,6 @@
 
 #[path = "typing.rs"]
 mod typing;
+
+#[path = "energy.rs"]
+mod energy;
