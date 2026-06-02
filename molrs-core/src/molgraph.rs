@@ -52,6 +52,21 @@ pub enum PropValue {
     Int(I),
 }
 
+impl PropValue {
+    /// Numeric value as `f64`, accepting both `F64` and `Int` variants.
+    ///
+    /// Use this for quantities that are conceptually numeric but may be stored
+    /// as either type depending on the producer — e.g. a bond `"order"` written
+    /// as `2` (Int) vs `2.0` (F64). Returns `None` for non-numeric (`Str`).
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            PropValue::F64(v) => Some(*v),
+            PropValue::Int(v) => Some(*v as f64),
+            PropValue::Str(_) => None,
+        }
+    }
+}
+
 impl From<f64> for PropValue {
     fn from(v: f64) -> Self {
         PropValue::F64(v)
@@ -202,6 +217,8 @@ new_key_type! {
     pub struct AngleId;
     /// Stable handle to a dihedral in a [`MolGraph`].
     pub struct DihedralId;
+    /// Stable handle to an improper in a [`MolGraph`].
+    pub struct ImproperId;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +246,13 @@ pub struct Dihedral {
     pub props: HashMap<String, PropValue>,
 }
 
+/// An improper dihedral between four atoms (i is conventionally the central atom).
+#[derive(Debug, Clone)]
+pub struct Improper {
+    pub atoms: [AtomId; 4],
+    pub props: HashMap<String, PropValue>,
+}
+
 // ---------------------------------------------------------------------------
 // MolGraph
 // ---------------------------------------------------------------------------
@@ -241,6 +265,7 @@ pub struct MolGraph {
     bonds: SlotMap<BondId, Bond>,
     angles: SlotMap<AngleId, Angle>,
     dihedrals: SlotMap<DihedralId, Dihedral>,
+    impropers: SlotMap<ImproperId, Improper>,
     adjacency: HashMap<AtomId, Vec<BondId>>,
 }
 
@@ -258,6 +283,7 @@ impl MolGraph {
             bonds: SlotMap::with_key(),
             angles: SlotMap::with_key(),
             dihedrals: SlotMap::with_key(),
+            impropers: SlotMap::with_key(),
             adjacency: HashMap::new(),
         }
     }
@@ -306,6 +332,17 @@ impl MolGraph {
             .collect();
         for did in doomed_dihedrals {
             self.dihedrals.remove(did);
+        }
+
+        // Remove impropers referencing this atom.
+        let doomed_impropers: Vec<ImproperId> = self
+            .impropers
+            .iter()
+            .filter(|(_, im)| im.atoms.contains(&id))
+            .map(|(iid, _)| iid)
+            .collect();
+        for iid in doomed_impropers {
+            self.impropers.remove(iid);
         }
 
         Ok(atom)
@@ -466,6 +503,68 @@ impl MolGraph {
             .ok_or_else(|| MolRsError::not_found("dihedral", format!("DihedralId {:?}", id)))
     }
 
+    /// Get a mutable reference to an angle (e.g. to edit its props).
+    pub fn get_angle_mut(&mut self, id: AngleId) -> Result<&mut Angle, MolRsError> {
+        self.angles
+            .get_mut(id)
+            .ok_or_else(|| MolRsError::not_found("angle", format!("AngleId {:?}", id)))
+    }
+
+    /// Get a mutable reference to a dihedral (e.g. to edit its props).
+    pub fn get_dihedral_mut(&mut self, id: DihedralId) -> Result<&mut Dihedral, MolRsError> {
+        self.dihedrals
+            .get_mut(id)
+            .ok_or_else(|| MolRsError::not_found("dihedral", format!("DihedralId {:?}", id)))
+    }
+
+    // =====================================================================
+    // Improper CRUD
+    // =====================================================================
+
+    /// Add an improper dihedral (i-j-k-l; i conventionally central).
+    pub fn add_improper(
+        &mut self,
+        i: AtomId,
+        j: AtomId,
+        k: AtomId,
+        l: AtomId,
+    ) -> Result<ImproperId, MolRsError> {
+        for &atom_id in &[i, j, k, l] {
+            if !self.atoms.contains_key(atom_id) {
+                return Err(MolRsError::not_found(
+                    "atom",
+                    format!("AtomId {:?}", atom_id),
+                ));
+            }
+        }
+        let imp = Improper {
+            atoms: [i, j, k, l],
+            props: HashMap::new(),
+        };
+        Ok(self.impropers.insert(imp))
+    }
+
+    /// Remove an improper.
+    pub fn remove_improper(&mut self, id: ImproperId) -> Result<Improper, MolRsError> {
+        self.impropers
+            .remove(id)
+            .ok_or_else(|| MolRsError::not_found("improper", format!("ImproperId {:?}", id)))
+    }
+
+    /// Get a reference to an improper.
+    pub fn get_improper(&self, id: ImproperId) -> Result<&Improper, MolRsError> {
+        self.impropers
+            .get(id)
+            .ok_or_else(|| MolRsError::not_found("improper", format!("ImproperId {:?}", id)))
+    }
+
+    /// Get a mutable reference to an improper (e.g. to edit its props).
+    pub fn get_improper_mut(&mut self, id: ImproperId) -> Result<&mut Improper, MolRsError> {
+        self.impropers
+            .get_mut(id)
+            .ok_or_else(|| MolRsError::not_found("improper", format!("ImproperId {:?}", id)))
+    }
+
     // =====================================================================
     // Iteration & Query
     // =====================================================================
@@ -490,6 +589,11 @@ impl MolGraph {
         self.dihedrals.iter()
     }
 
+    /// Iterate over all `(ImproperId, &Improper)` pairs.
+    pub fn impropers(&self) -> impl Iterator<Item = (ImproperId, &Improper)> {
+        self.impropers.iter()
+    }
+
     /// Number of atoms.
     pub fn n_atoms(&self) -> usize {
         self.atoms.len()
@@ -505,6 +609,10 @@ impl MolGraph {
     /// Number of dihedrals.
     pub fn n_dihedrals(&self) -> usize {
         self.dihedrals.len()
+    }
+    /// Number of impropers.
+    pub fn n_impropers(&self) -> usize {
+        self.impropers.len()
     }
 
     /// Iterate over neighbor atom IDs of a given atom (via bond connectivity).
@@ -797,6 +905,26 @@ impl MolGraph {
             frame.insert("dihedrals", dih_block);
         }
 
+        // Impropers block.
+        if !self.impropers.is_empty() {
+            let mut imp_block = Block::new();
+            let mut ci: Vec<U> = Vec::with_capacity(self.impropers.len());
+            let mut cj: Vec<U> = Vec::with_capacity(self.impropers.len());
+            let mut ck: Vec<U> = Vec::with_capacity(self.impropers.len());
+            let mut cl: Vec<U> = Vec::with_capacity(self.impropers.len());
+            for (_, im) in &self.impropers {
+                ci.push(id_to_row[&im.atoms[0]] as U);
+                cj.push(id_to_row[&im.atoms[1]] as U);
+                ck.push(id_to_row[&im.atoms[2]] as U);
+                cl.push(id_to_row[&im.atoms[3]] as U);
+            }
+            let _ = imp_block.insert("atomi", Array1::from_vec(ci).into_dyn());
+            let _ = imp_block.insert("atomj", Array1::from_vec(cj).into_dyn());
+            let _ = imp_block.insert("atomk", Array1::from_vec(ck).into_dyn());
+            let _ = imp_block.insert("atoml", Array1::from_vec(cl).into_dyn());
+            frame.insert("impropers", imp_block);
+        }
+
         frame
     }
 
@@ -918,6 +1046,31 @@ impl MolGraph {
                     && al < atom_ids.len()
                 {
                     g.add_dihedral(atom_ids[ai], atom_ids[aj], atom_ids[ak], atom_ids[al])?;
+                }
+            }
+        }
+
+        // Impropers.
+        if let Some(imp_block) = frame.get("impropers")
+            && let (Some(ci), Some(cj), Some(ck), Some(cl)) = (
+                imp_block.get_uint("atomi"),
+                imp_block.get_uint("atomj"),
+                imp_block.get_uint("atomk"),
+                imp_block.get_uint("atoml"),
+            )
+        {
+            let ni = imp_block.nrows().unwrap_or(0);
+            for row in 0..ni {
+                let ai = ci[[row]] as usize;
+                let aj = cj[[row]] as usize;
+                let ak = ck[[row]] as usize;
+                let al = cl[[row]] as usize;
+                if ai < atom_ids.len()
+                    && aj < atom_ids.len()
+                    && ak < atom_ids.len()
+                    && al < atom_ids.len()
+                {
+                    g.add_improper(atom_ids[ai], atom_ids[aj], atom_ids[ak], atom_ids[al])?;
                 }
             }
         }
@@ -1110,6 +1263,70 @@ mod tests {
 
         g.remove_dihedral(did).expect("remove dihedral");
         assert_eq!(g.n_dihedrals(), 0);
+    }
+
+    #[test]
+    fn test_improper_crud() {
+        let mut g = MolGraph::new();
+        let a = g.add_atom(Atom::new());
+        let b = g.add_atom(Atom::new());
+        let c = g.add_atom(Atom::new());
+        let d = g.add_atom(Atom::new());
+
+        let iid = g.add_improper(a, b, c, d).expect("add improper");
+        assert_eq!(g.n_impropers(), 1);
+        assert_eq!(
+            g.get_improper(iid).expect("get improper").atoms,
+            [a, b, c, d]
+        );
+        // props are editable via get_improper_mut
+        g.get_improper_mut(iid)
+            .expect("get_mut")
+            .props
+            .insert("kind".into(), PropValue::Str("oop".into()));
+        assert_eq!(g.impropers().count(), 1);
+
+        g.remove_improper(iid).expect("remove improper");
+        assert_eq!(g.n_impropers(), 0);
+    }
+
+    #[test]
+    fn test_improper_invalid_atom() {
+        let mut g = MolGraph::new();
+        let a = g.add_atom(Atom::new());
+        let b = g.add_atom(Atom::new());
+        let c = g.add_atom(Atom::new());
+        let d = g.add_atom(Atom::new());
+        let removed = d;
+        g.remove_atom(removed).expect("remove");
+        assert!(g.add_improper(a, b, c, removed).is_err());
+    }
+
+    #[test]
+    fn test_remove_atom_cascades_impropers() {
+        let mut g = MolGraph::new();
+        let a = g.add_atom(Atom::new());
+        let b = g.add_atom(Atom::new());
+        let c = g.add_atom(Atom::new());
+        let d = g.add_atom(Atom::new());
+        g.add_improper(a, b, c, d).expect("add improper");
+        assert_eq!(g.n_impropers(), 1);
+        // removing a referenced atom must drop the improper
+        g.remove_atom(c).expect("remove atom");
+        assert_eq!(g.n_impropers(), 0);
+    }
+
+    #[test]
+    fn test_improper_frame_roundtrip() {
+        let mut g = MolGraph::new();
+        let a = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
+        let b = g.add_atom(Atom::xyz("C", 1.0, 0.0, 0.0));
+        let c = g.add_atom(Atom::xyz("C", 0.0, 1.0, 0.0));
+        let d = g.add_atom(Atom::xyz("C", 0.0, 0.0, 1.0));
+        g.add_improper(a, b, c, d).expect("add improper");
+        let frame = g.to_frame();
+        let g2 = MolGraph::from_frame(&frame).expect("from_frame");
+        assert_eq!(g2.n_impropers(), 1);
     }
 
     // ----- Iteration -----

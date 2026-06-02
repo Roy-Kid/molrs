@@ -50,7 +50,7 @@ mod region;
 use region::{PyHollowSphere, PyRegion, PySphere};
 
 pub(crate) mod molgraph;
-use molgraph::PyAtomistic;
+use molgraph::{PyAtomistic, PyCoarseGrain, PyGraph};
 
 mod embed;
 use embed::{PyEmbedOptions, PyEmbedReport, PyEmbedResult, PyStageReport};
@@ -69,6 +69,7 @@ use compute::{
 mod compute_extra;
 mod dielectric;
 mod signal;
+mod transport;
 mod validate;
 
 /// Root Python module for the molrs library.
@@ -125,8 +126,10 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHollowSphere>()?;
     m.add_class::<PyRegion>()?;
 
-    // Molecular graph
+    // Molecular graph hierarchy (base before subclasses)
+    m.add_class::<PyGraph>()?;
     m.add_class::<PyAtomistic>()?;
+    m.add_class::<PyCoarseGrain>()?;
 
     // Embed
     m.add_class::<PyEmbedOptions>()?;
@@ -173,6 +176,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Dielectric
     dielectric::register_dielectric(m)?;
+    transport::register_transport(m)?;
 
     // Validation
     validate::register_validate(m)?;

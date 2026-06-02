@@ -36,17 +36,12 @@ pub fn detect_rotatable_bonds(graph: &MolGraph) -> Vec<(AtomId, AtomId)> {
             let a = bond.atoms[0];
             let b = bond.atoms[1];
 
-            // Single bond only (order defaults to 1.0 if unset)
+            // Single bond only (order defaults to 1.0 if unset). Accept order
+            // stored as either F64 or Int via PropValue::as_f64.
             let order = bond
                 .props
                 .get("order")
-                .and_then(|v| {
-                    if let super::molgraph::PropValue::F64(f) = v {
-                        Some(*f)
-                    } else {
-                        None
-                    }
-                })
+                .and_then(|v| v.as_f64())
                 .unwrap_or(1.0);
             if (order - 1.0).abs() > 0.01 {
                 return None;

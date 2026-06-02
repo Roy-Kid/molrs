@@ -54,8 +54,10 @@ from .molrs import (
     Sphere,
     HollowSphere,
     Region,
-    # Molecular graph
+    # Molecular graph hierarchy
+    Graph,
     Atomistic,
+    CoarseGrain,
     # Embed
     EmbedOptions,
     EmbedReport,
@@ -75,6 +77,7 @@ from . import compute  # analysis subpackage â€” molrs.compute.{density,order,â€
 from . import signal
 from . import validate
 from . import dielectric
+from . import transport
 
 __all__ = [
     "io",
@@ -82,6 +85,7 @@ __all__ = [
     "signal",
     "validate",
     "dielectric",
+    "transport",
     "Box",
     "LinkedCell",
     "NeighborQuery",
@@ -117,7 +121,9 @@ __all__ = [
     "Sphere",
     "HollowSphere",
     "Region",
+    "Graph",
     "Atomistic",
+    "CoarseGrain",
     "EmbedOptions",
     "EmbedReport",
     "EmbedResult",

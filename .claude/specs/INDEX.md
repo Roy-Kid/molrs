@@ -2,7 +2,7 @@
 
 One row per spec produced by `/molrs-spec`. Newest on top.
 
-| 2026-06-01 | [molgraph-pybind-01-hierarchy](molgraph-pybind-01-hierarchy.md) | in-flight | molrs-core, molrs-python | 暴露 MolGraph 层级到 Python（Graph ← Atomistic/CoarseGrain）+ 角/二面角/impropers/属性/extend 绑定扩面；molpy 子类化后端的先决项 P0（T1 core impropers 已完成验证，T2–T4 绑定进行中） |
+| 2026-06-01 | [molgraph-pybind-01-hierarchy](molgraph-pybind-01-hierarchy.md) | code-complete | molrs-core, molrs-python | 暴露 MolGraph 层级到 Python（Graph ← Atomistic/CoarseGrain）+ 角/二面角/impropers/属性/extend 绑定扩面；molpy 子类化后端的先决项 P0（5/5 acceptance verified） |
 | 2026-06-01 | [core-perception-01-aromaticity](core-perception-01-aromaticity.md) | approved | molrs-core | Atomistic::perceive_aromaticity()，对齐 RDKit 默认芳香性模型（chain core-perception 1/2） |
 | 2026-06-01 | [core-perception-02-smarts-rings](core-perception-02-smarts-rings.md) | approved | molrs-core | SMARTS r{lo-hi} 区间 + x<n> 环连接度，去掉 torsion_prefs shim（chain core-perception 2/2） |
 | 2026-06-01 | [etkdg-smarts-01-engine](etkdg-smarts-01-engine.md) | code-complete | molrs-core | SMARTS 子结构匹配引擎（含递归 $()），对照 RDKit GetSubstructMatches（chain etkdg-smarts 1/2） |

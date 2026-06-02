@@ -801,6 +801,11 @@ fn assemble_fragments(
 
     let mut coords = vec![[0.0_f64; 3]; n];
     let mut frag_placed = vec![false; fragments.len()];
+    // Per-atom placement mask: an atom is "placed" once its world coords are
+    // committed.  Clash scoring (below) measures the candidate fragment's
+    // minimum distance to any already-placed atom so distant fragments do not
+    // fold back onto earlier ones.
+    let mut atom_is_placed = vec![false; n];
     let mut component_offset = 0.0_f64;
 
     for root in 0..fragments.len() {
@@ -810,6 +815,7 @@ fn assemble_fragments(
 
         for &idx in &fragments[root] {
             coords[idx] = add(local_coords[idx], [component_offset, 0.0, 0.0]);
+            atom_is_placed[idx] = true;
         }
         frag_placed[root] = true;
         let mut q = VecDeque::new();
@@ -822,9 +828,8 @@ fn assemble_fragments(
                     continue;
                 }
                 let pos_f = coords[atom_f];
-                let dir = connection_direction(&coords, &fragments[f], atom_f, rng);
+                let base_dir = connection_direction(&coords, &fragments[f], atom_f, rng);
                 let target_len = ideal_bond_length(mol, atom_ids[atom_f], atom_ids[atom_g]);
-                let target_g = add(pos_f, scale(dir, target_len));
 
                 let centroid_g = centroid_of_fragment(local_coords, &fragments[g]);
                 let origin_local = local_coords[atom_g];
@@ -836,13 +841,76 @@ fn assemble_fragments(
                         v_local = [1.0, 0.0, 0.0];
                     }
                 }
-                let torsion = rng.random_range(0.0..(2.0 * std::f64::consts::PI));
 
-                for &idx in &fragments[g] {
-                    let rel = sub(local_coords[idx], origin_local);
-                    let rel_aligned = rotate_from_to(rel, v_local, dir);
-                    let rel_twisted = rotate_about_axis(rel_aligned, dir, torsion);
-                    coords[idx] = add(target_g, rel_twisted);
+                // Clash-aware placement.  A torsion about the connector bond
+                // cannot move the connector atom itself, so when the
+                // connection direction folds the new fragment back into the
+                // already-placed cloud (the many-fragment failure mode) no
+                // torsion can recover.  We therefore search jointly over a set
+                // of candidate connector directions (the base direction plus a
+                // spread of random directions) and, for each, multiple
+                // torsions, keeping the placement whose closest approach to any
+                // already-placed atom is largest.  The bond partner atom_f is
+                // excluded from scoring (the new fragment is intentionally
+                // ~one bond length away from it).
+                const N_DIR_SAMPLES: usize = 16;
+                const N_TORSION_SAMPLES: usize = 18;
+                let mut candidate = vec![[0.0_f64; 3]; fragments[g].len()];
+                let mut best_candidate: Vec<[f64; 3]> = candidate.clone();
+                let mut best_score = f64::NEG_INFINITY;
+
+                'search: for d in 0..N_DIR_SAMPLES {
+                    let dir = if d == 0 {
+                        base_dir
+                    } else {
+                        // Random unit directions explore the full sphere so the
+                        // new fragment can always be steered into open space.
+                        random_unit(rng)
+                    };
+                    let target_g = add(pos_f, scale(dir, target_len));
+
+                    for k in 0..N_TORSION_SAMPLES {
+                        let base =
+                            (k as f64) * (2.0 * std::f64::consts::PI / N_TORSION_SAMPLES as f64);
+                        let jitter = rng.random_range(-0.15..0.15);
+                        let torsion = base + jitter;
+
+                        for (slot, &idx) in fragments[g].iter().enumerate() {
+                            let rel = sub(local_coords[idx], origin_local);
+                            let rel_aligned = rotate_from_to(rel, v_local, dir);
+                            let rel_twisted = rotate_about_axis(rel_aligned, dir, torsion);
+                            candidate[slot] = add(target_g, rel_twisted);
+                        }
+
+                        // Score = min distance from any candidate atom to any
+                        // already-placed atom (excluding the bond partner).
+                        let mut score = f64::INFINITY;
+                        for cand in &candidate {
+                            for (i, &placed) in atom_is_placed.iter().enumerate() {
+                                if !placed || i == atom_f {
+                                    continue;
+                                }
+                                let dd = norm(sub(*cand, coords[i]));
+                                if dd < score {
+                                    score = dd;
+                                }
+                            }
+                        }
+
+                        if score > best_score {
+                            best_score = score;
+                            best_candidate.copy_from_slice(&candidate);
+                        }
+                        // Early-out: a clear placement is good enough.
+                        if best_score > 2.0 {
+                            break 'search;
+                        }
+                    }
+                }
+
+                for (slot, &idx) in fragments[g].iter().enumerate() {
+                    coords[idx] = best_candidate[slot];
+                    atom_is_placed[idx] = true;
                 }
 
                 frag_placed[g] = true;

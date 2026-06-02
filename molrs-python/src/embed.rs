@@ -18,8 +18,10 @@ use pyo3::prelude::*;
 
 use molrs_embed::{EmbedOptions, EmbedSpeed, StageKind, generate_3d};
 
+use molrs::molgraph::MolGraph;
+
 use crate::helpers::molrs_error_to_pyerr;
-use crate::molgraph::PyAtomistic;
+use crate::molgraph::{PyAtomistic, PyGraph};
 
 /// Options controlling 3D coordinate generation.
 ///
@@ -221,7 +223,7 @@ impl PyEmbedReport {
 /// >>> report = result.report
 #[pyclass(name = "EmbedResult", unsendable)]
 pub struct PyEmbedResult {
-    pub(crate) mol_inner: Option<PyAtomistic>,
+    pub(crate) mol_inner: Option<MolGraph>,
     pub(crate) report_inner: Option<PyEmbedReport>,
 }
 
@@ -241,10 +243,12 @@ impl PyEmbedResult {
     /// RuntimeError
     ///     If the molecule has already been consumed.
     #[getter]
-    fn mol(&mut self) -> PyResult<PyAtomistic> {
-        self.mol_inner
+    fn mol(&mut self, py: Python<'_>) -> PyResult<Py<PyAtomistic>> {
+        let graph = self
+            .mol_inner
             .take()
-            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("mol already consumed"))
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("mol already consumed"))?;
+        Py::new(py, (PyAtomistic, PyGraph { inner: graph }))
     }
 
     /// Generation report with per-stage metrics.
@@ -312,13 +316,12 @@ fn stage_kind_name(kind: StageKind) -> &'static str {
 /// 9
 #[pyfunction]
 #[pyo3(name = "generate_3d", signature = (mol, options=None))]
-pub fn generate_3d_py(
-    mol: &PyAtomistic,
-    options: Option<&PyEmbedOptions>,
-) -> PyResult<PyEmbedResult> {
+pub fn generate_3d_py(mol: &PyGraph, options: Option<&PyEmbedOptions>) -> PyResult<PyEmbedResult> {
     let opts = options.map(|o| o.inner.clone()).unwrap_or_default();
 
-    let (result_mol, report) = generate_3d(&mol.inner, &opts).map_err(molrs_error_to_pyerr)?;
+    let atomistic = molrs::atomistic::Atomistic::try_from_molgraph(mol.inner.clone())
+        .map_err(molrs_error_to_pyerr)?;
+    let (result_mol, report) = generate_3d(&atomistic, &opts).map_err(molrs_error_to_pyerr)?;
 
     let stages: Vec<PyStageReport> = report
         .stages
@@ -340,7 +343,7 @@ pub fn generate_3d_py(
     };
 
     Ok(PyEmbedResult {
-        mol_inner: Some(PyAtomistic { inner: result_mol }),
+        mol_inner: Some(result_mol.into_inner()),
         report_inner: Some(py_report),
     })
 }

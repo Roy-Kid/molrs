@@ -171,10 +171,11 @@ fn bond_order(mol: &MolGraph, bid: BondId) -> f64 {
         Ok(b) => &b.props,
         Err(_) => return 1.0,
     };
-    match props.get("kekule_order").or_else(|| props.get("order")) {
-        Some(PropValue::F64(v)) => *v,
-        _ => 1.0,
-    }
+    props
+        .get("kekule_order")
+        .or_else(|| props.get("order"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
 }
 
 /// Atomic number of an atom (from its `"element"` symbol). `0` if unknown.
@@ -628,10 +629,7 @@ pub fn perceive_aromaticity(mol: &mut MolGraph) -> usize {
         .bonds()
         .filter(|(_, b)| !b.props.contains_key("kekule_order"))
         .map(|(bid, b)| {
-            let o = match b.props.get("order") {
-                Some(PropValue::F64(v)) => *v,
-                _ => 1.0,
-            };
+            let o = b.props.get("order").and_then(|v| v.as_f64()).unwrap_or(1.0);
             (bid, o)
         })
         .collect();

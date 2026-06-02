@@ -166,15 +166,10 @@ fn bond_order_sum(mol: &MolGraph, atom_id: AtomId) -> f64 {
         .into_iter()
         .filter_map(|bid| mol.get_bond(bid).ok())
         .map(|bond| {
+            // Accept order stored as either F64 (2.0) or Int (2); absent → single.
             bond.props
                 .get("order")
-                .and_then(|v| {
-                    if let super::molgraph::PropValue::F64(f) = v {
-                        Some(*f)
-                    } else {
-                        None
-                    }
-                })
+                .and_then(|v| v.as_f64())
                 .unwrap_or(1.0)
         })
         .sum()

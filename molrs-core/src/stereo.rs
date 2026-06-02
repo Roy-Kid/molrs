@@ -172,13 +172,7 @@ pub fn assign_bond_stereo_from_3d(mol: &MolGraph) -> HashMap<BondId, BondStereo>
         let order = bond
             .props
             .get("order")
-            .and_then(|v| {
-                if let super::molgraph::PropValue::F64(f) = v {
-                    Some(*f)
-                } else {
-                    None
-                }
-            })
+            .and_then(|v| v.as_f64())
             .unwrap_or(1.0);
 
         if (order - 2.0).abs() > 0.5 {
