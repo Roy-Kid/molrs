@@ -24,11 +24,12 @@
 //! - **Chiral / improper / flat-ring knowledge**: full port of the
 //!   `findChiralSets` + basic-knowledge logic. Chirality sign is taken from
 //!   the input 3D coordinates (molrs has no RDKit `ChiralTag`).
-//! - **Experimental torsions**: *partial*. The ETKDGv3 SMARTS table is keyed
-//!   by a substructure-matching engine that molrs does not have; we embed a
-//!   representative subset and a feasible element/hybridization matcher. See
-//!   `torsion_prefs` for the precise boundary. Tetrangle smoothing is omitted
-//!   because RDKit's reference matrix does not apply it.
+//! - **Experimental torsions**: full port. The complete ETKDGv3 CrystalFF
+//!   three-table set (v2 ++ small-rings ++ macrocycles) is matched by the core
+//!   SMARTS engine (`molrs::smarts`), reproducing RDKit
+//!   `getExperimentalTorsions` (first-match-wins, one torsion per rotatable
+//!   bond). See `torsion_prefs` for the precise boundary. Tetrangle smoothing
+//!   is omitted because RDKit's reference matrix does not apply it.
 
 mod bounds;
 mod chirality;

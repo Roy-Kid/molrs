@@ -104,15 +104,12 @@ pub fn generate_3d_impl(
     }
 
     // --- Build ETKDGv3 constraints ---------------------------------------
+    // Experimental torsions are assigned through the full CrystalFF
+    // three-table set (v2 ++ small-rings ++ macrocycles) matched by the core
+    // SMARTS engine (`molrs::smarts`), reproducing RDKit
+    // `getExperimentalTorsions`. See `distgeom::torsion_prefs`.
     let version = EtkdgVersion::Etkdgv3;
     let constraints = distgeom::build_constraints(&work, version)?;
-    report.warnings.push(format!(
-        "ETKDGv3 experimental-torsion layer is a representative subset \
-         (no SMARTS engine): {} torsion(s) assigned over {} rotatable candidates; \
-         conformer fidelity for flexible molecules is limited accordingly",
-        constraints.experimental_torsions.len(),
-        count_rotatable(&work)
-    ));
 
     // --- Retry loop ------------------------------------------------------
     let max_iters = retry::effective_max_iterations(opts.max_iterations_internal(), n);
@@ -360,22 +357,6 @@ fn mmff_cleanup(mol: &MolGraph, coords3d: &mut [f64]) -> Result<(f64, usize, boo
     let (e, _grad_rms, steps, conv) =
         mmff_min::minimize_lbfgs(coords3d, 1000, 1e-3, |p| ff.eval(p));
     Ok((e, steps, conv))
-}
-
-/// Count acyclic single-bonded heavy-atom pairs (rough rotatable-bond count for
-/// the torsion-partiality warning).
-fn count_rotatable(mol: &MolGraph) -> usize {
-    let mut count = 0;
-    for (_, bond) in mol.bonds() {
-        let order = bond.props.get("order").and_then(|p| match p {
-            molrs::molgraph::PropValue::F64(v) => Some(*v),
-            _ => None,
-        });
-        if order == Some(1.0) {
-            count += 1;
-        }
-    }
-    count
 }
 
 /// Place a single-atom molecule at the origin.
