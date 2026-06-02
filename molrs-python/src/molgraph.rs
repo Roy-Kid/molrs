@@ -219,7 +219,7 @@ impl PyGraph {
                 rows.len()
             )));
         }
-        for (aid, row) in ids.into_iter().zip(rows.into_iter()) {
+        for (aid, row) in ids.into_iter().zip(rows) {
             let atom = self.inner.get_atom_mut(aid).map_err(molrs_error_to_pyerr)?;
             atom.set("x", row[0]);
             atom.set("y", row[1]);

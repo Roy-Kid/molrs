@@ -59,10 +59,13 @@ pub mod environment;
 pub mod error;
 pub mod gyration_tensor;
 pub mod inertia_tensor;
+pub mod jacf;
 pub mod kmeans;
 pub mod msd;
+pub mod onsager;
 pub mod order;
 pub mod pca;
+pub mod persist;
 pub mod pmft;
 pub mod radius_of_gyration;
 pub mod rdf;
@@ -98,14 +101,17 @@ pub use environment::{
 pub use error::ComputeError;
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
+pub use jacf::{JacfResult, green_kubo_conductivity};
 pub use kmeans::{KMeans, KMeansResult};
 pub use msd::{MSD, MSDResult, MSDTimeSeries, MsdMode};
+pub use onsager::{OnsagerResult, onsager_correlation};
 pub use order::{
     ContinuousCoordination, ContinuousCoordinationResult, Cubatic, CubaticResult, Hexatic,
     HexaticResult, Nematic, NematicResult, RotationalAutocorrelation,
     RotationalAutocorrelationResult, SolidLiquid, SolidLiquidResult, Steinhardt, SteinhardtResult,
 };
 pub use pca::{Pca2, PcaResult};
+pub use persist::{PersistResult, SurvivalMethod, pair_survival_tcf};
 pub use pmft::{
     PMFTR12, PMFTR12Args, PMFTR12Result, PMFTXY, PMFTXYArgs, PMFTXYResult, PMFTXYT, PMFTXYTArgs,
     PMFTXYTResult, PMFTXYZ, PMFTXYZArgs, PMFTXYZResult,

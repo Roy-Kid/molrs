@@ -164,7 +164,10 @@ pub fn register_dielectric(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dielectric_compute_current_density, m)?)?;
     m.add_function(wrap_pyfunction!(dielectric_static_dielectric_constant, m)?)?;
     m.add_function(wrap_pyfunction!(dielectric_einstein_helfand_spectrum, m)?)?;
-    m.add_function(wrap_pyfunction!(dielectric_einstein_helfand_conductivity, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        dielectric_einstein_helfand_conductivity,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(dielectric_green_kubo_spectrum, m)?)?;
     m.add_function(wrap_pyfunction!(dielectric_decompose_current, m)?)?;
     Ok(())

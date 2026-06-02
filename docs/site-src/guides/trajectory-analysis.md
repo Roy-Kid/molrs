@@ -100,6 +100,17 @@ print("centers:", centers.centers.reshape(clusters.num_clusters, 3))
 The neighbor list defines connectivity. Change the cutoff and you change the
 graph that clustering sees.
 
+## Transport & Electrolyte Analysis
+
+Three further kernels target electrolyte transport properties — Onsager
+coefficients (`transport.Onsager`), Green–Kubo conductivity from the current ACF
+(`transport.Jacf`), and pair persistence / residence times
+(`transport.Persist`). Like the dielectric kernels they are array-based free
+functions: the caller assembles the per-frame collective quantities and the Rust
+layer does the windowed correlation. See the dedicated
+[Transport Kernels](transport.md) reference for signatures, units, equations, and
+examples.
+
 ## Choosing Batch Shape
 
 Use one frame when you are checking a single snapshot. Use a sequence of frames

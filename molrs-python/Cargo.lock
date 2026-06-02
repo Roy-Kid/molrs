@@ -642,6 +642,7 @@ name = "molcrafts-molrs-embed"
 version = "0.0.17"
 dependencies = [
  "molcrafts-molrs-core",
+ "molcrafts-molrs-ff",
  "ndarray",
  "once_cell",
  "rand",

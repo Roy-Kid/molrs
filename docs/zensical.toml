@@ -25,6 +25,7 @@ nav = [
     { "Force Fields" = "guides/force-field.md" },
     { "I/O Formats" = "guides/io-formats.md" },
     { "Trajectory Analysis" = "guides/trajectory-analysis.md" },
+    { "Transport Kernels" = "guides/transport.md" },
   ] },
   { "Reference" = [
     { "Rust" = "reference/rust.md" },

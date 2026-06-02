@@ -178,3 +178,17 @@ domain. The layout mirrors freud and the underlying Rust crate
 ::: molrs.compute.ml.KMeans
 
 ::: molrs.compute.ml.KMeansResult
+
+## Transport
+
+Electrolyte transport kernels (ports of the *tame* recipes). See the
+[Transport Kernels](../guides/transport.md) guide for signatures, units, and
+worked examples.
+
+### `molrs.transport`
+
+::: molrs.transport.Onsager
+
+::: molrs.transport.Jacf
+
+::: molrs.transport.Persist

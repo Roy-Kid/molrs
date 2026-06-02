@@ -28,6 +28,10 @@ fn io_module_reexported() {
 #[cfg(feature = "smiles")]
 #[test]
 fn smiles_module_reexported() {
+    // `smiles` is a module re-export (`pub use molrs_io::smiles`), not a crate
+    // alias like the others, so `use … as _;` trips `unused_imports`. The unused
+    // import IS the wiring smoke (it compiles iff the re-export resolves); allow it.
+    #[allow(unused_imports)]
     use molrs::smiles as _;
 }
 
