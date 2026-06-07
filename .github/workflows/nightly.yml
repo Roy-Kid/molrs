@@ -71,6 +71,9 @@ jobs:
         run: |
           set -euo pipefail
           DEV="${{ needs.prepare.outputs.version }}"
+          # Only stamp the pyproject [project] version — maturin uses that for
+          # the wheel. The Cargo.toml crate version is left as valid SemVer
+          # (Cargo rejects PEP 440 `.devN` pre-releases, which use a `.` not `-`).
           python - "$DEV" <<'PY'
           import re, sys, pathlib
           dev = sys.argv[1]
@@ -81,12 +84,6 @@ jobs:
           t = re.sub(r'^version\s*=\s*".*?"',
                      f'version = "{dev}"', t, count=1, flags=re.M)
           p.write_text(t)
-          # Keep the crate version in sync so maturin sees one consistent value.
-          c = pathlib.Path("molrs-python/Cargo.toml")
-          ct = c.read_text()
-          ct = re.sub(r'^version\s*=\s*".*?"',
-                      f'version = "{dev}"', ct, count=1, flags=re.M)
-          c.write_text(ct)
           PY
 
       - name: Build wheel
