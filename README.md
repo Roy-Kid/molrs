@@ -63,6 +63,12 @@ molcrafts-molrs = { version = "0.0.16", features = ["io", "smiles", "embed"] }
 
 Python: `pip install molcrafts-molrs` (import as `molrs`). Browser: `npm install @molcrafts/molrs`.
 
+> **Python nightly.** Bleeding-edge Python wheels are published to the separate
+> project `molcrafts-molrs-nightly` (versioned `X.Y.Z.devN`) on every push to the
+> `nightly` branch — Python only; crates.io and npm ship exclusively from `v*`
+> tags. Install with `pip install --pre molcrafts-molrs-nightly`. It imports as
+> `molrs`, so it cannot be installed alongside the stable `molcrafts-molrs`.
+
 ## Build from source
 
 Building from source needs the Rust toolchain. The pinned channel, the

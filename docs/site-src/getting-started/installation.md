@@ -14,6 +14,24 @@ The Python import name is `molrs`. The npm package uses the scoped name
 `@molcrafts/molrs`, while the generated TypeScript module exports classes such
 as `Frame`, `Block`, `Box`, and analysis helpers directly.
 
+## Python nightly builds
+
+Bleeding-edge **Python** wheels are published to a separate PyPI project,
+`molcrafts-molrs-nightly`, on every push to the `nightly` branch. This is
+Python-only — the Rust crates (crates.io) and the npm package ship exclusively
+from `v*` release tags and have no nightly channel.
+
+Each build is versioned `X.Y.Z.devN` (a PEP 440 dev release), so opt in with
+`--pre`:
+
+```bash
+pip install --pre molcrafts-molrs-nightly
+```
+
+The nightly wheel imports as `molrs`, exactly like the stable one, so the two
+**cannot be installed at the same time**. Use a dedicated virtual environment
+for nightly testing.
+
 ## Verify the Environment
 
 === "Python"
