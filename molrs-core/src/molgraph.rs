@@ -59,6 +59,7 @@ use super::block::Block;
 use super::frame::Frame;
 use crate::entity_table::{Cell, EntityTable};
 use crate::error::MolRsError;
+use crate::keys;
 use crate::types::{F, I, U};
 
 // ---------------------------------------------------------------------------
@@ -129,13 +130,14 @@ impl Atom {
         Self::default()
     }
 
-    /// Convenience: create an atom with symbol + xyz.
+    /// Convenience: create an atom with symbol + xyz (via the [`crate::keys`]
+    /// field convention — no literal field names).
     pub fn xyz(symbol: &str, x: f64, y: f64, z: f64) -> Self {
         let mut a = Self::new();
-        a.set("element", symbol);
-        a.set("x", x);
-        a.set("y", y);
-        a.set("z", z);
+        a.set(keys::ELEMENT, symbol);
+        a.set(keys::X, x);
+        a.set(keys::Y, y);
+        a.set(keys::Z, z);
         a
     }
 
