@@ -674,15 +674,21 @@ impl MolGraph {
     }
 
     // =====================================================================
-    // Frame conversion
+    // Frame conversion (shared mechanism)
+    //
+    // The PUBLIC `to_frame` / `from_frame` API is provided by the **leaf**
+    // types ([`Atomistic`](crate::atomistic::Atomistic) /
+    // [`CoarseGrain`](crate::coarsegrain::CoarseGrain)), since converting to/from
+    // the central [`Frame`] is a domain operation with leaf-specific block/kind
+    // requirements. These `pub(crate)` methods are only the shared,
+    // registry-driven implementation the leaves call — not data-struct API.
     // =====================================================================
 
-    /// Export to a [`Frame`]. Each unique node prop key becomes a column in the
-    /// `"atoms"` block. Every non-empty relation kind becomes a block (named by
-    /// the kind) with `atomi`/`atomj`/… columns referencing node row order, plus
-    /// one column per relation property key — registry-driven, no per-kind
-    /// special-casing.
-    pub fn to_frame(&self) -> Frame {
+    /// Shared implementation of leaf `to_frame`. Each node-component becomes a
+    /// column in the `"atoms"` block; every non-empty relation kind becomes a
+    /// block (named by the kind) with `atomi`/`atomj`/… columns referencing node
+    /// row order plus one column per relation property — registry-driven.
+    pub(crate) fn to_frame(&self) -> Frame {
         use ndarray::Array1;
 
         let mut frame = Frame::new();
@@ -794,7 +800,7 @@ impl MolGraph {
     /// via its `atomi`/`atomj`/… columns, with any extra columns read back as
     /// props. Kinds not registered on `self` are skipped (a bare graph keeps
     /// only nodes; register kinds first to read their relations).
-    pub fn read_frame(&mut self, frame: &Frame) -> Result<(), MolRsError> {
+    pub(crate) fn read_frame(&mut self, frame: &Frame) -> Result<(), MolRsError> {
         let atoms_block = frame
             .get("atoms")
             .ok_or_else(|| MolRsError::parse("Frame missing 'atoms' block"))?;
@@ -890,16 +896,6 @@ impl MolGraph {
             }
         }
         Ok(())
-    }
-
-    /// Import a [`Frame`] into a fresh, kind-less graph (nodes only; relation
-    /// blocks are skipped since no kinds are registered). Domain leaf types
-    /// override this to register their kinds first — see
-    /// [`Atomistic::from_frame`](crate::atomistic::Atomistic::from_frame).
-    pub fn from_frame(frame: &Frame) -> Result<Self, MolRsError> {
-        let mut g = MolGraph::new();
-        g.read_frame(frame)?;
-        Ok(g)
     }
 }
 

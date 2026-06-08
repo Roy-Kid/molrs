@@ -25,6 +25,7 @@ use std::ops::{Deref, DerefMut};
 
 use crate::atomistic::{Bond, BondId};
 use crate::error::MolRsError;
+use crate::frame::Frame;
 use crate::molgraph::{Atom, KindId, MolGraph, NodeId};
 
 /// Handle to a bead (a graph node).
@@ -122,6 +123,22 @@ impl CoarseGrain {
     /// Number of CG bonds.
     pub fn n_bonds(&self) -> usize {
         self.graph.n_relations(self.bond)
+    }
+
+    /// Export to a tabular [`Frame`] (`beads` block + a `bonds` block).
+    ///
+    /// CoarseGrain owns its frame conversion because the central [`Frame`] is a
+    /// domain interface with CG-specific block requirements.
+    pub fn to_frame(&self) -> Frame {
+        self.graph.to_frame()
+    }
+
+    /// Build from a [`Frame`], registering the CG `bonds` kind first so the
+    /// `bonds` block is read back.
+    pub fn from_frame(frame: &Frame) -> Result<Self, MolRsError> {
+        let mut cg = Self::new();
+        cg.graph.read_frame(frame)?;
+        Ok(cg)
     }
 
     /// Promote from a [`MolGraph`], validating all nodes have `"bead_type"`.
