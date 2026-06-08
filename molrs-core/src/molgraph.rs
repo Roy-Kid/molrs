@@ -57,7 +57,9 @@ use smallvec::SmallVec;
 
 use super::block::Block;
 use super::frame::Frame;
+use crate::entity_table::{Cell, EntityTable};
 use crate::error::MolRsError;
+use crate::keys;
 use crate::types::{F, I, U};
 
 // ---------------------------------------------------------------------------
@@ -194,6 +196,11 @@ impl Atom {
         self.props.keys().map(|k| k.as_str())
     }
 
+    /// Iterate over all `(key, value)` property pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &PropValue)> {
+        self.props.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
     /// Number of properties.
     pub fn len(&self) -> usize {
         self.props.len()
@@ -285,7 +292,8 @@ pub struct Group {
 /// relations. Knows nothing of "atoms" or "bonds" — those live in leaf types.
 #[derive(Debug, Clone)]
 pub struct MolGraph {
-    nodes: SlotMap<NodeId, Atom>,
+    /// Node entities + their components, stored as an aligned column table.
+    nodes: EntityTable<NodeId>,
     /// Relation arenas, indexed by `KindId.0`.
     kinds: Vec<SlotMap<RelationId, Relation>>,
     /// Arity of each kind, indexed by `KindId.0`.
@@ -313,7 +321,7 @@ impl MolGraph {
     /// Create an empty graph with **no** kinds registered.
     pub fn new() -> Self {
         Self {
-            nodes: SlotMap::with_key(),
+            nodes: EntityTable::new(),
             kinds: Vec::new(),
             kind_arity: Vec::new(),
             kind_name: Vec::new(),
@@ -371,26 +379,29 @@ impl MolGraph {
     // Node CRUD (generic)
     // =====================================================================
 
-    /// Insert a field-less node, returning its stable handle. The node's
-    /// property bag starts empty (no `element` / `bead_type` is forced).
+    /// Insert a field-less node, returning its stable handle. The node has no
+    /// components set (no `element` / `bead_type` is forced).
     pub fn add_node(&mut self) -> NodeId {
-        self.add_node_with(Atom::new())
-    }
-
-    /// Insert a node carrying a property bag, returning its stable handle.
-    pub fn add_node_with(&mut self, payload: Atom) -> NodeId {
-        let id = self.nodes.insert(payload);
+        let id = self.nodes.spawn();
         self.adjacency.insert(id, Vec::new());
         id
     }
 
+    /// Insert a node carrying a property bag, returning its stable handle.
+    pub fn add_node_with(&mut self, payload: Atom) -> NodeId {
+        let id = self.add_node();
+        self.write_atom(id, &payload);
+        id
+    }
+
     /// Remove a node and every relation that references it, across **all**
-    /// registered kinds (registry-driven cascade).
+    /// registered kinds (registry-driven cascade). Returns the node's property
+    /// bag (materialized).
     pub fn remove_node(&mut self, id: NodeId) -> Result<Atom, MolRsError> {
-        let payload = self
-            .nodes
-            .remove(id)
-            .ok_or_else(|| MolRsError::not_found("node", format!("NodeId {:?}", id)))?;
+        if !self.nodes.contains(id) {
+            return Err(MolRsError::not_found("node", format!("NodeId {:?}", id)));
+        }
+        let payload = self.read_atom(id);
 
         for kid in 0..self.kinds.len() {
             let doomed: Vec<RelationId> = self.kinds[kid]
@@ -404,31 +415,87 @@ impl MolGraph {
             }
         }
         self.adjacency.remove(&id);
+        self.nodes.despawn(id);
         Ok(payload)
     }
 
-    /// Get a reference to a node's property bag.
-    pub fn get_node(&self, id: NodeId) -> Result<&Atom, MolRsError> {
-        self.nodes
-            .get(id)
-            .ok_or_else(|| MolRsError::not_found("node", format!("NodeId {:?}", id)))
+    /// Materialize a node's property bag (owned copy of its set components).
+    pub fn get_node(&self, id: NodeId) -> Result<Atom, MolRsError> {
+        if !self.nodes.contains(id) {
+            return Err(MolRsError::not_found("node", format!("NodeId {:?}", id)));
+        }
+        Ok(self.read_atom(id))
     }
 
-    /// Get a mutable reference to a node's property bag.
-    pub fn get_node_mut(&mut self, id: NodeId) -> Result<&mut Atom, MolRsError> {
-        self.nodes
-            .get_mut(id)
-            .ok_or_else(|| MolRsError::not_found("node", format!("NodeId {:?}", id)))
+    /// Set a single component on a node.
+    pub fn set_node(
+        &mut self,
+        id: NodeId,
+        key: &str,
+        val: impl Into<PropValue>,
+    ) -> Result<(), MolRsError> {
+        match val.into() {
+            PropValue::F64(v) => self.nodes.set_f64(id, key, v),
+            PropValue::Int(v) => self.nodes.set_i32(id, key, v),
+            PropValue::Str(s) => self.nodes.set_str(id, key, &s),
+        }
     }
 
-    /// Iterate over all `(NodeId, &Atom)` pairs.
-    pub fn nodes(&self) -> impl Iterator<Item = (NodeId, &Atom)> {
-        self.nodes.iter()
+    /// Clear a single component on a node (no-op if absent).
+    pub fn clear_node(&mut self, id: NodeId, key: &str) -> Result<(), MolRsError> {
+        self.nodes.clear(id, key)
+    }
+
+    /// Iterate over all `(NodeId, Atom)` pairs (each property bag materialized).
+    pub fn nodes(&self) -> impl Iterator<Item = (NodeId, Atom)> + '_ {
+        self.nodes.handles().map(move |id| (id, self.read_atom(id)))
+    }
+
+    /// Live node handles in row order.
+    pub fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.nodes.handles()
+    }
+
+    /// Borrow the underlying node column table (for zero-copy column access).
+    pub fn node_table(&self) -> &EntityTable<NodeId> {
+        &self.nodes
+    }
+
+    /// Mutable access to the underlying node column table.
+    pub fn node_table_mut(&mut self) -> &mut EntityTable<NodeId> {
+        &mut self.nodes
     }
 
     /// Number of nodes.
     pub fn n_nodes(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// Write an [`Atom`]'s properties into node `id`'s columns.
+    fn write_atom(&mut self, id: NodeId, atom: &Atom) {
+        for (key, val) in atom.iter() {
+            let r = match val {
+                PropValue::F64(v) => self.nodes.set_f64(id, key, *v),
+                PropValue::Int(v) => self.nodes.set_i32(id, key, *v),
+                PropValue::Str(s) => self.nodes.set_str(id, key, s),
+            };
+            debug_assert!(r.is_ok(), "component type conflict writing '{key}'");
+            let _ = r;
+        }
+    }
+
+    /// Materialize node `id`'s set components into an [`Atom`].
+    fn read_atom(&self, id: NodeId) -> Atom {
+        let mut atom = Atom::new();
+        for (key, cell) in self.nodes.row_cells(id) {
+            match cell {
+                Cell::F64(v) => atom.set(key, v),
+                Cell::I32(v) => atom.set(key, v),
+                Cell::Str(s) => atom.set(key, s),
+                Cell::Bool(_) => {}
+            }
+        }
+        atom
     }
 
     /// Iterate over neighbor node IDs of a given node (via arity-2 relations).
@@ -483,7 +550,7 @@ impl MolGraph {
             )));
         }
         for &n in nodes {
-            if !self.nodes.contains_key(n) {
+            if !self.nodes.contains(n) {
                 return Err(MolRsError::not_found("node", format!("NodeId {:?}", n)));
             }
         }
@@ -577,13 +644,13 @@ impl MolGraph {
     // Spatial transforms
     // =====================================================================
 
-    /// Translate all nodes that have `x`/`y`/`z` props.
+    /// Translate all nodes that have coordinate components.
     pub fn translate(&mut self, delta: [f64; 3]) {
-        for (_, node) in self.nodes.iter_mut() {
-            let keys = ["x", "y", "z"];
-            for (i, key) in keys.iter().enumerate() {
-                if let Some(PropValue::F64(v)) = node.get_mut(key) {
-                    *v += delta[i];
+        let ids: Vec<NodeId> = self.nodes.handles().collect();
+        for id in ids {
+            for (i, key) in keys::COORDS.iter().enumerate() {
+                if let Ok(v) = self.nodes.get_f64(id, key) {
+                    let _ = self.nodes.set_f64(id, key, v + delta[i]);
                 }
             }
         }
@@ -601,10 +668,13 @@ impl MolGraph {
         let sin_a = angle.sin();
         let origin = about.unwrap_or([0.0, 0.0, 0.0]);
 
-        for (_, node) in self.nodes.iter_mut() {
-            let (Some(PropValue::F64(x)), Some(PropValue::F64(y)), Some(PropValue::F64(z))) =
-                (node.get("x"), node.get("y"), node.get("z"))
-            else {
+        let ids: Vec<NodeId> = self.nodes.handles().collect();
+        for id in ids {
+            let (Ok(x), Ok(y), Ok(z)) = (
+                self.nodes.get_f64(id, keys::X),
+                self.nodes.get_f64(id, keys::Y),
+                self.nodes.get_f64(id, keys::Z),
+            ) else {
                 continue;
             };
             let p = [x - origin[0], y - origin[1], z - origin[2]];
@@ -621,9 +691,9 @@ impl MolGraph {
                 p[1] * cos_a + cross[1] * sin_a + k[1] * kdotp * (1.0 - cos_a) + origin[1],
                 p[2] * cos_a + cross[2] * sin_a + k[2] * kdotp * (1.0 - cos_a) + origin[2],
             ];
-            node.set("x", rotated[0]);
-            node.set("y", rotated[1]);
-            node.set("z", rotated[2]);
+            let _ = self.nodes.set_f64(id, keys::X, rotated[0]);
+            let _ = self.nodes.set_f64(id, keys::Y, rotated[1]);
+            let _ = self.nodes.set_f64(id, keys::Z, rotated[2]);
         }
     }
 
@@ -638,8 +708,9 @@ impl MolGraph {
     /// are carried across.
     pub fn merge(&mut self, other: MolGraph) {
         let mut node_map: HashMap<NodeId, NodeId> = HashMap::new();
-        for (old_id, payload) in &other.nodes {
-            let new_id = self.add_node_with(payload.clone());
+        for old_id in other.nodes.handles() {
+            let payload = other.read_atom(old_id);
+            let new_id = self.add_node_with(payload);
             node_map.insert(old_id, new_id);
         }
 
@@ -671,7 +742,7 @@ impl MolGraph {
 
         let mut frame = Frame::new();
 
-        let node_ids: Vec<NodeId> = self.nodes.keys().collect();
+        let node_ids: Vec<NodeId> = self.nodes.handles().collect();
         let n = node_ids.len();
         let id_to_row: HashMap<NodeId, usize> = node_ids
             .iter()
@@ -679,58 +750,22 @@ impl MolGraph {
             .map(|(i, &id)| (id, i))
             .collect();
 
-        // ---- atoms (node) block: one column per unique prop key ----
-        let mut all_keys: Vec<String> = {
-            let mut set = std::collections::BTreeSet::new();
-            for (_, node) in &self.nodes {
-                for k in node.keys() {
-                    set.insert(k.to_owned());
-                }
-            }
-            set.into_iter().collect()
-        };
+        // ---- atoms (node) block: one column per component (zero-copy reads;
+        // columns are already dense and aligned to node row order) ----
+        let mut all_keys: Vec<String> = self.nodes.columns().map(|s| s.to_owned()).collect();
         all_keys.sort();
 
         let mut atoms_block = Block::new();
         for key in &all_keys {
-            let first_val = node_ids
-                .iter()
-                .filter_map(|&id| self.nodes.get(id).and_then(|a| a.get(key)))
-                .next();
-            match first_val {
-                Some(PropValue::F64(_)) => {
-                    let col: Vec<F> = node_ids
-                        .iter()
-                        .map(|&id| {
-                            self.nodes
-                                .get(id)
-                                .and_then(|a| a.get_f64(key))
-                                .unwrap_or(0.0) as F
-                        })
-                        .collect();
-                    let _ = atoms_block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
-                }
-                Some(PropValue::Int(_)) => {
-                    let col: Vec<I> = node_ids
-                        .iter()
-                        .map(|&id| self.nodes.get(id).and_then(|a| a.get_int(key)).unwrap_or(0))
-                        .collect();
-                    let _ = atoms_block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
-                }
-                Some(PropValue::Str(_)) => {
-                    let col: Vec<String> = node_ids
-                        .iter()
-                        .map(|&id| {
-                            self.nodes
-                                .get(id)
-                                .and_then(|a| a.get_str(key))
-                                .unwrap_or("")
-                                .to_owned()
-                        })
-                        .collect();
-                    let _ = atoms_block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
-                }
-                _ => {}
+            if let Ok((data, _)) = self.nodes.column_f64(key) {
+                let _ =
+                    atoms_block.insert(key.as_str(), Array1::from_vec(data.to_vec()).into_dyn());
+            } else if let Ok((data, _)) = self.nodes.column_i32(key) {
+                let _ =
+                    atoms_block.insert(key.as_str(), Array1::from_vec(data.to_vec()).into_dyn());
+            } else if let Ok((data, _)) = self.nodes.column_str(key) {
+                let _ =
+                    atoms_block.insert(key.as_str(), Array1::from_vec(data.to_vec()).into_dyn());
             }
         }
         if n > 0 {
@@ -1011,7 +1046,7 @@ mod tests {
         assert!(g.get_node(n).unwrap().is_empty());
         g.translate([1.0, 2.0, 3.0]);
         assert!(g.get_node(n).unwrap().get_f64("x").is_none());
-        g.get_node_mut(n).unwrap().set("element", "C");
+        g.set_node(n, "element", "C").unwrap();
         assert_eq!(g.get_node(n).unwrap().get_str("element"), Some("C"));
     }
 
@@ -1183,7 +1218,7 @@ mod tests {
         let id = g.add_node_with(Atom::xyz("C", 0.0, 0.0, 0.0));
         g.add_node_with(Atom::xyz("H", 1.0, 0.0, 0.0));
         let g2 = g.clone();
-        g.get_node_mut(id).unwrap().set("x", 99.0);
+        g.set_node(id, "x", 99.0).unwrap();
         assert_eq!(g2.get_node(id).unwrap().get_f64("x"), Some(0.0));
         assert_eq!(g2.n_nodes(), 2);
     }

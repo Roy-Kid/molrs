@@ -364,10 +364,9 @@ fn mmff_cleanup(mol: &Atomistic, coords3d: &mut [f64]) -> Result<(f64, usize, bo
 fn place_single_atom(mol: &mut Atomistic) -> Result<(), MolRsError> {
     let id = mol.atoms().map(|(id, _)| id).next();
     if let Some(id) = id {
-        let atom = mol.get_atom_mut(id)?;
-        atom.set("x", 0.0);
-        atom.set("y", 0.0);
-        atom.set("z", 0.0);
+        mol.set_atom(id, "x", 0.0)?;
+        mol.set_atom(id, "y", 0.0)?;
+        mol.set_atom(id, "z", 0.0)?;
     }
     Ok(())
 }
@@ -377,10 +376,9 @@ fn place_single_atom(mol: &mut Atomistic) -> Result<(), MolRsError> {
 fn write_coords(mol: &mut Atomistic, coords: &[f64]) -> Result<(), MolRsError> {
     let ids: Vec<_> = mol.atoms().map(|(id, _)| id).collect();
     for (i, id) in ids.into_iter().enumerate() {
-        let atom = mol.get_atom_mut(id)?;
-        atom.set("x", coords[i * 3]);
-        atom.set("y", coords[i * 3 + 1]);
-        atom.set("z", coords[i * 3 + 2]);
+        mol.set_atom(id, "x", coords[i * 3])?;
+        mol.set_atom(id, "y", coords[i * 3 + 1])?;
+        mol.set_atom(id, "z", coords[i * 3 + 2])?;
     }
     Ok(())
 }

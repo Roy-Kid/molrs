@@ -68,9 +68,10 @@ fn apply_flags(g: &mut Atomistic, ids: &[AtomId], meta: &Value) {
     for (k, &id) in ids.iter().enumerate() {
         let arom = atom_arom[k].as_i64().unwrap();
         let chg = charges[k].as_i64().unwrap();
-        let atom = g.get_atom_mut(id).unwrap();
-        atom.set("is_aromatic", PropValue::Int(arom as i32));
-        atom.set("formal_charge", PropValue::Int(chg as i32));
+        g.set_atom(id, "is_aromatic", PropValue::Int(arom as i32))
+            .unwrap();
+        g.set_atom(id, "formal_charge", PropValue::Int(chg as i32))
+            .unwrap();
     }
     // Mark aromatic bonds (order 1.5 + is_aromatic prop).
     let bond_arom = meta["bond_aromatic"].as_array().unwrap();

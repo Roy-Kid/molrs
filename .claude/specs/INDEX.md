@@ -2,6 +2,8 @@
 
 One row per spec produced by `/molrs-spec`. Newest on top.
 
+| 2026-06-08 | [molgraph-ecs-01-core](molgraph-ecs-01-core.md) | draft | molrs-core | MolGraph→ECS：图实例即 world(纯数据,无全局/scheduler/手创)；system 即吃 world 的自由函数(perceive_aromaticity(mol)…)；component=共享行序对齐稠密列+null 掩码(零拷贝/对齐/O(1)/句柄稳定)；零硬编码字段=引用内置 key 约定+直接访问+错即报错。chain molgraph-ecs 1/3(inversion 量级,breaking molrs) |
+| 2026-06-08 | [molgraph-ecs-02-pybind](molgraph-ecs-02-pybind.md) | draft | molrs-python | 暴露 ECS world 到 Python：entity 稳定句柄(int)+component 列零拷贝 numpy view(写穿)+system 模块自由函数(molrs.perceive_aromaticity(mol))+叶子可子类化+零拷贝 adopt(chain molgraph-ecs 2/3,依赖 01) |
 | 2026-06-08 | [molgraph-abstract-01-core](molgraph-abstract-01-core.md) | code-complete | molrs-core | 反转 MolGraph 为领域无关 interned kind 标签 n 元关系存储（SmallVec nodes/Option props/KindId 数组索引）；领域词下沉 Atomistic/CoarseGrain 叶子；dihedral/improper→4 元+kind；修 merge 漏 impropers bug；预留 containment 轴（chain molgraph-abstract 1/2，refines molgraph-pybind-01 D2） |
 | 2026-06-08 | [molgraph-abstract-02-pybind](molgraph-abstract-02-pybind.md) | approved | molrs-python | Python 暴露反转层级：PyGraph 仅通用关系 API + 无字段 add_node，领域方法移到 PyAtomistic/PyCoarseGrain 叶子；向后兼容 molpy to_molrs/embed 不回归（chain molgraph-abstract 2/2，依赖 01） |
 | 2026-06-01 | [molgraph-pybind-01-hierarchy](molgraph-pybind-01-hierarchy.md) | code-complete | molrs-core, molrs-python | 暴露 MolGraph 层级到 Python（Graph ← Atomistic/CoarseGrain）+ 角/二面角/impropers/属性/extend 绑定扩面；molpy 子类化后端的先决项 P0（5/5 acceptance verified） |

@@ -81,10 +81,9 @@ pub(crate) fn embed_distance_geometry(
     recenter(&mut coords);
 
     for (i, atom_id) in atom_ids.iter().copied().enumerate() {
-        let atom = mol.get_atom_mut(atom_id)?;
-        atom.set("x", coords[i][0]);
-        atom.set("y", coords[i][1]);
-        atom.set("z", coords[i][2]);
+        mol.set_atom(atom_id, "x", coords[i][0])?;
+        mol.set_atom(atom_id, "y", coords[i][1])?;
+        mol.set_atom(atom_id, "z", coords[i][2])?;
     }
 
     Ok(BuildSummary {
@@ -836,18 +835,22 @@ fn recenter(coords: &mut [[f64; 3]]) {
 fn covalent_radius(mol: &Atomistic, atom_id: AtomId) -> f64 {
     mol.get_atom(atom_id)
         .ok()
-        .and_then(|a| a.get_str("element"))
-        .and_then(Element::by_symbol)
-        .map(|e| e.covalent_radius() as f64)
+        .and_then(|a| {
+            a.get_str("element")
+                .and_then(Element::by_symbol)
+                .map(|e| e.covalent_radius() as f64)
+        })
         .unwrap_or(0.77)
 }
 
 fn vdw_radius(mol: &Atomistic, atom_id: AtomId) -> f64 {
     mol.get_atom(atom_id)
         .ok()
-        .and_then(|a| a.get_str("element"))
-        .and_then(Element::by_symbol)
-        .map(|e| e.vdw_radius() as f64)
+        .and_then(|a| {
+            a.get_str("element")
+                .and_then(Element::by_symbol)
+                .map(|e| e.vdw_radius() as f64)
+        })
         .unwrap_or(1.8)
 }
 

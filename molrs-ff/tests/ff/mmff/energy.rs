@@ -72,9 +72,8 @@ fn load_sdf(path: &Path) -> Atomistic {
             for q in 0..pairs {
                 let ai: usize = toks[1 + 2 * q].parse::<usize>().expect("chg atom") - 1;
                 let chg: i32 = toks[2 + 2 * q].parse().expect("chg val");
-                g.get_atom_mut(ids[ai])
-                    .expect("atom")
-                    .set("formal_charge", PropValue::Int(chg));
+                g.set_atom(ids[ai], "formal_charge", PropValue::Int(chg))
+                    .expect("atom");
             }
         }
     }

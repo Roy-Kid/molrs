@@ -33,9 +33,9 @@ fn water() {
 
     // --- 2. Atom property system ---
     // set() / get_f64() / get_str()
-    mol.get_atom_mut(o).expect("O atom").set("charge", -0.8476);
-    mol.get_atom_mut(h1).expect("H1 atom").set("charge", 0.4238);
-    mol.get_atom_mut(h2).expect("H2 atom").set("charge", 0.4238);
+    mol.set_atom(o, "charge", -0.8476).expect("O atom");
+    mol.set_atom(h1, "charge", 0.4238).expect("H1 atom");
+    mol.set_atom(h2, "charge", 0.4238).expect("H2 atom");
 
     let o_atom = mol.get_atom(o).expect("O atom");
     println!(
@@ -49,15 +49,16 @@ fn water() {
     assert_eq!(mol.get_atom(o).expect("O atom")["x"], PropValue::F64(0.0));
 
     // keys() and contains_key()
-    let keys: Vec<&str> = mol.get_atom(o).expect("O atom").keys().collect();
+    let o_atom = mol.get_atom(o).expect("O atom");
+    let keys: Vec<&str> = o_atom.keys().collect();
     println!("  O atom keys: {:?}", keys);
     println!(
         "  contains 'charge'? {}",
         mol.get_atom(o).expect("O atom").contains_key("charge")
     );
 
-    // remove() a property
-    mol.get_atom_mut(o).expect("O atom").remove("charge");
+    // clear a property
+    mol.clear_atom(o, "charge").expect("O atom");
     println!(
         "  After removing 'charge': contains_key = {}",
         mol.get_atom(o).expect("O atom").contains_key("charge")
@@ -113,21 +114,15 @@ fn water() {
     // --- 5. Neighbor queries ---
     println!("\nNeighbors of O:");
     for nid in mol.neighbors(o) {
-        let sym = mol
-            .get_atom(nid)
-            .expect("neighbor atom")
-            .get_str("symbol")
-            .unwrap();
+        let atom = mol.get_atom(nid).expect("neighbor atom");
+        let sym = atom.get_str("symbol").unwrap();
         println!("  -> {}", sym);
     }
 
     println!("\nNeighbor bonds of O (with bond order):");
     for (nid, order) in mol.neighbor_bonds(o) {
-        let sym = mol
-            .get_atom(nid)
-            .expect("neighbor atom")
-            .get_str("symbol")
-            .unwrap();
+        let atom = mol.get_atom(nid).expect("neighbor atom");
+        let sym = atom.get_str("symbol").unwrap();
         println!("  -> {} (order = {:.1})", sym, order);
     }
 
@@ -229,7 +224,7 @@ fn coarse_grained() {
     cg.add_bond(id1, id2).expect("add CG bond");
 
     // Annotate a bead with extra properties via the generic node accessor.
-    cg.get_node_mut(id1).expect("bead 1").set("mass", 72.0);
+    cg.set_node(id1, "mass", 72.0).expect("bead 1");
 
     println!("CG model: {} beads, {} bonds", cg.n_beads(), cg.n_bonds());
 

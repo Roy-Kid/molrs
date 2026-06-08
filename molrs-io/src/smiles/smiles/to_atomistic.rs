@@ -300,15 +300,11 @@ impl<'a> Builder<'a> {
     }
 
     fn set_prop(&mut self, id: AtomId, key: &str, val: f64) {
-        if let Ok(atom) = self.mol.get_atom_mut(id) {
-            atom.set(key, val);
-        }
+        let _ = self.mol.set_atom(id, key, val);
     }
 
     fn set_prop_str(&mut self, id: AtomId, key: &str, val: &str) {
-        if let Ok(atom) = self.mol.get_atom_mut(id) {
-            atom.set(key, val);
-        }
+        let _ = self.mol.set_atom(id, key, val);
     }
 }
 

@@ -76,8 +76,7 @@ impl Perceived {
 fn element_of(mol: &Atomistic, id: AtomId) -> Element {
     mol.get_atom(id)
         .ok()
-        .and_then(|a| a.get_str("element"))
-        .and_then(Element::by_symbol)
+        .and_then(|a| a.get_str("element").and_then(Element::by_symbol))
         .unwrap_or(Element::C)
 }
 

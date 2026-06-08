@@ -131,9 +131,7 @@ fn aromatic_working_copy(mol: &Atomistic, p: &Perceived) -> Atomistic {
     let mut g = mol.clone();
     for (i, &aid) in p.atom_ids.iter().enumerate() {
         if p.atoms[i].aromatic {
-            if let Ok(a) = g.get_atom_mut(aid) {
-                a.set("is_aromatic", 1_i32);
-            }
+            let _ = g.set_atom(aid, "is_aromatic", 1_i32);
         }
     }
     // Flag aromatic bonds so `:` and `BondFacts.aromatic` agree.

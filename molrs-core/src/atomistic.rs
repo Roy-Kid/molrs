@@ -122,18 +122,28 @@ impl Atomistic {
         self.graph.remove_node(id)
     }
 
-    /// Get a reference to an atom.
-    pub fn get_atom(&self, id: AtomId) -> Result<&Atom, MolRsError> {
+    /// Materialize an atom's property bag (owned copy of its set components).
+    pub fn get_atom(&self, id: AtomId) -> Result<Atom, MolRsError> {
         self.graph.get_node(id)
     }
 
-    /// Get a mutable reference to an atom.
-    pub fn get_atom_mut(&mut self, id: AtomId) -> Result<&mut Atom, MolRsError> {
-        self.graph.get_node_mut(id)
+    /// Set a single component on an atom.
+    pub fn set_atom(
+        &mut self,
+        id: AtomId,
+        key: &str,
+        val: impl Into<PropValue>,
+    ) -> Result<(), MolRsError> {
+        self.graph.set_node(id, key, val)
     }
 
-    /// Iterate over all `(AtomId, &Atom)` pairs.
-    pub fn atoms(&self) -> impl Iterator<Item = (AtomId, &Atom)> {
+    /// Clear a single component on an atom (no-op if absent).
+    pub fn clear_atom(&mut self, id: AtomId, key: &str) -> Result<(), MolRsError> {
+        self.graph.clear_node(id, key)
+    }
+
+    /// Iterate over all `(AtomId, Atom)` pairs (each property bag materialized).
+    pub fn atoms(&self) -> impl Iterator<Item = (AtomId, Atom)> + '_ {
         self.graph.nodes()
     }
 

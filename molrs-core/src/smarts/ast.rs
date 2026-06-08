@@ -62,10 +62,7 @@ impl<'m> MolContext<'m> {
                 .neighbors(id)
                 .filter(|&nb| {
                     mol.get_atom(nb)
-                        .ok()
-                        .and_then(|a| a.get_str("element"))
-                        .map(element_is_hydrogen)
-                        .unwrap_or(false)
+                        .is_ok_and(|a| a.get_str("element").is_some_and(element_is_hydrogen))
                 })
                 .count() as u32;
             h_count.insert(id, h);
@@ -118,17 +115,21 @@ fn element_is_hydrogen(sym: &str) -> bool {
 }
 
 /// Read an atom's element symbol, defaulting to `""` when absent.
-fn atom_symbol(mol: &Atomistic, id: AtomId) -> &str {
+fn atom_symbol(mol: &Atomistic, id: AtomId) -> String {
     mol.get_atom(id)
         .ok()
-        .and_then(|a| a.get_str("element"))
-        .unwrap_or("")
+        .and_then(|a| a.get_str("element").map(str::to_owned))
+        .unwrap_or_default()
 }
 
 /// Read an atom's formal charge as an integer (`PropValue::Int` or `F64`).
 fn atom_charge(mol: &Atomistic, id: AtomId) -> i32 {
-    match mol.get_atom(id).ok().and_then(|a| a.get("formal_charge")) {
-        Some(PropValue::Int(v)) => *v,
+    match mol
+        .get_atom(id)
+        .ok()
+        .and_then(|a| a.get("formal_charge").cloned())
+    {
+        Some(PropValue::Int(v)) => v,
         Some(PropValue::F64(v)) => v.round() as i32,
         _ => 0,
     }
@@ -195,12 +196,12 @@ impl AtomPrimitive {
             AtomPrimitive::AnyAromatic => ctx.is_aromatic(id),
             AtomPrimitive::AnyAliphatic => !ctx.is_aromatic(id),
             AtomPrimitive::AliphaticElement(z) => {
-                !ctx.is_aromatic(id) && symbol_matches_z(atom_symbol(mol, id), *z)
+                !ctx.is_aromatic(id) && symbol_matches_z(&atom_symbol(mol, id), *z)
             }
             AtomPrimitive::AromaticElement(z) => {
-                ctx.is_aromatic(id) && symbol_matches_z(atom_symbol(mol, id), *z)
+                ctx.is_aromatic(id) && symbol_matches_z(&atom_symbol(mol, id), *z)
             }
-            AtomPrimitive::AtomicNum(z) => symbol_matches_z(atom_symbol(mol, id), *z),
+            AtomPrimitive::AtomicNum(z) => symbol_matches_z(&atom_symbol(mol, id), *z),
             AtomPrimitive::TotalH(n) => ctx.h_count(id) == *n,
             AtomPrimitive::TotalConnections(n) => ctx.degree(id) == *n,
             AtomPrimitive::Degree(n) => ctx.degree(id) == *n,

@@ -95,9 +95,11 @@ impl EnergyModel {
             let radius = mol
                 .get_atom(atom_id)
                 .ok()
-                .and_then(|a| a.get_str("element"))
-                .and_then(Element::by_symbol)
-                .map(|e| e.vdw_radius() as f64)
+                .and_then(|a| {
+                    a.get_str("element")
+                        .and_then(Element::by_symbol)
+                        .map(|e| e.vdw_radius() as f64)
+                })
                 .unwrap_or(1.7);
             vdw[i] = radius;
         }
@@ -270,10 +272,9 @@ impl EnergyModel {
         coords: &[[f64; 3]],
     ) -> Result<(), MolRsError> {
         for (i, atom_id) in self.atom_ids.iter().copied().enumerate() {
-            let atom = mol.get_atom_mut(atom_id)?;
-            atom.set("x", coords[i][0]);
-            atom.set("y", coords[i][1]);
-            atom.set("z", coords[i][2]);
+            mol.set_atom(atom_id, "x", coords[i][0])?;
+            mol.set_atom(atom_id, "y", coords[i][1])?;
+            mol.set_atom(atom_id, "z", coords[i][2])?;
         }
         Ok(())
     }
@@ -817,16 +818,16 @@ fn ideal_angle_for_center(mol: &Atomistic, center: AtomId) -> f64 {
 }
 
 fn ideal_bond_length(mol: &Atomistic, a: AtomId, b: AtomId) -> f64 {
-    let sym_a = mol.get_atom(a).ok().and_then(|x| x.get_str("element"));
-    let sym_b = mol.get_atom(b).ok().and_then(|x| x.get_str("element"));
-    let r_a = sym_a
-        .and_then(Element::by_symbol)
-        .map(|e| e.covalent_radius() as f64)
-        .unwrap_or(0.77);
-    let r_b = sym_b
-        .and_then(Element::by_symbol)
-        .map(|e| e.covalent_radius() as f64)
-        .unwrap_or(0.77);
+    let elem_a = mol
+        .get_atom(a)
+        .ok()
+        .and_then(|x| x.get_str("element").and_then(Element::by_symbol));
+    let elem_b = mol
+        .get_atom(b)
+        .ok()
+        .and_then(|x| x.get_str("element").and_then(Element::by_symbol));
+    let r_a = elem_a.map(|e| e.covalent_radius() as f64).unwrap_or(0.77);
+    let r_b = elem_b.map(|e| e.covalent_radius() as f64).unwrap_or(0.77);
     let order = bond_order_between(mol, a, b);
 
     let mut length = r_a + r_b;

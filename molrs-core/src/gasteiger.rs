@@ -127,10 +127,7 @@ fn hybridization_mode(mol: &Atomistic, id: AtomId) -> &'static str {
             .neighbors(id)
             .filter(|&nbr| {
                 mol.get_atom(nbr)
-                    .ok()
-                    .and_then(|a| a.get_str("element"))
-                    .map(|s| s == "O")
-                    .unwrap_or(false)
+                    .is_ok_and(|a| a.get_str("element") == Some("O"))
             })
             .count();
         return match n_oxygen {
@@ -220,9 +217,9 @@ fn split_charge_conjugated(
                 let sym_k = mol
                     .get_atom(k_id)
                     .ok()
-                    .and_then(|a| a.get_str("element"))
-                    .unwrap_or("");
-                let elem_k = Element::by_symbol(sym_k);
+                    .and_then(|a| a.get_str("element").map(str::to_owned))
+                    .unwrap_or_default();
+                let elem_k = Element::by_symbol(&sym_k);
                 if elem_i.is_some()
                     && elem_i == elem_k
                     && let Some(&ki) = atom_idx.get(&k_id)
@@ -298,10 +295,10 @@ pub fn compute_gasteiger_charges(
             let sym = mol
                 .get_atom(id)
                 .ok()
-                .and_then(|a| a.get_str("element"))
-                .unwrap_or("");
+                .and_then(|a| a.get_str("element").map(str::to_owned))
+                .unwrap_or_default();
             let mode = hybridization_mode(mol, id);
-            gasteiger_params(sym, mode)
+            gasteiger_params(&sym, mode)
         })
         .collect();
 

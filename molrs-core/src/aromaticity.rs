@@ -183,17 +183,23 @@ fn bond_order(mol: &Atomistic, bid: BondId) -> f64 {
 fn atomic_num(mol: &Atomistic, id: AtomId) -> u8 {
     mol.get_atom(id)
         .ok()
-        .and_then(|a| a.get_str("element"))
-        .and_then(Element::by_symbol)
-        .map(|e| e.z())
+        .and_then(|a| {
+            a.get_str("element")
+                .and_then(Element::by_symbol)
+                .map(|e| e.z())
+        })
         .unwrap_or(0)
 }
 
 /// Formal charge (`"formal_charge"` prop, default 0).
 fn formal_charge(mol: &Atomistic, id: AtomId) -> i32 {
-    match mol.get_atom(id).ok().and_then(|a| a.get("formal_charge")) {
-        Some(PropValue::Int(v)) => *v,
-        Some(PropValue::F64(v)) => *v as i32,
+    match mol
+        .get_atom(id)
+        .ok()
+        .and_then(|a| a.get("formal_charge").cloned())
+    {
+        Some(PropValue::Int(v)) => v,
+        Some(PropValue::F64(v)) => v as i32,
         _ => 0,
     }
 }
@@ -695,9 +701,7 @@ pub fn perceive_aromaticity(mol: &mut Atomistic) -> usize {
     let all_atom_ids: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
     for id in all_atom_ids {
         let arom = aromatic_atoms.contains(&id);
-        if let Ok(atom) = mol.get_atom_mut(id) {
-            atom.set("is_aromatic", PropValue::Int(if arom { 1 } else { 0 }));
-        }
+        let _ = mol.set_atom(id, "is_aromatic", PropValue::Int(if arom { 1 } else { 0 }));
     }
 
     let all_bond_ids: Vec<BondId> = mol.bonds().map(|(id, _)| id).collect();

@@ -90,16 +90,10 @@ fn ring_detection(mol: &Atomistic) {
     // Per-bond ring membership
     println!("\n  Per-bond ring info:");
     for (bid, bond) in mol.bonds() {
-        let a_sym = mol
-            .get_atom(bond.nodes[0])
-            .expect("atom exists")
-            .get_str("symbol")
-            .unwrap();
-        let b_sym = mol
-            .get_atom(bond.nodes[1])
-            .expect("atom exists")
-            .get_str("symbol")
-            .unwrap();
+        let a_atom = mol.get_atom(bond.nodes[0]).expect("atom exists");
+        let a_sym = a_atom.get_str("symbol").unwrap();
+        let b_atom = mol.get_atom(bond.nodes[1]).expect("atom exists");
+        let b_sym = b_atom.get_str("symbol").unwrap();
         let order = bond
             .props
             .get("order")
@@ -190,10 +184,10 @@ fn summary(mol: &Atomistic) {
     println!("  Dihedrals: {}", mol.n_dihedrals());
 
     // Element breakdown
-    let mut elements: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut elements: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (_id, atom) in mol.atoms() {
         if let Some(sym) = atom.get_str("symbol") {
-            *elements.entry(sym).or_default() += 1;
+            *elements.entry(sym.to_owned()).or_default() += 1;
         }
     }
     print!("  Formula:  ");

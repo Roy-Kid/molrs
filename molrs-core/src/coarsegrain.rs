@@ -89,13 +89,13 @@ impl CoarseGrain {
         self.graph.remove_node(id)
     }
 
-    /// Get a reference to a bead.
-    pub fn get_bead(&self, id: BeadId) -> Result<&Atom, MolRsError> {
+    /// Materialize a bead's property bag (owned copy of its set components).
+    pub fn get_bead(&self, id: BeadId) -> Result<Atom, MolRsError> {
         self.graph.get_node(id)
     }
 
-    /// Iterate over all `(BeadId, &Atom)` pairs.
-    pub fn beads(&self) -> impl Iterator<Item = (BeadId, &Atom)> {
+    /// Iterate over all `(BeadId, Atom)` pairs (each property bag materialized).
+    pub fn beads(&self) -> impl Iterator<Item = (BeadId, Atom)> + '_ {
         self.graph.nodes()
     }
 
