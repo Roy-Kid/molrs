@@ -45,7 +45,7 @@
 //! assert_eq!(g.n_nodes(), 2);
 //! assert_eq!(g.n_relations(bond), 1);
 //!
-//! g.translate([1.0, 0.0, 0.0]);
+//! molrs_core::geometry::translate(&mut g, [1.0, 0.0, 0.0]);
 //! assert!((g.get_node(o).expect("get node").get_f64("x").unwrap() - 1.0).abs() < 1e-12);
 //! ```
 
@@ -59,7 +59,6 @@ use super::block::Block;
 use super::frame::Frame;
 use crate::entity_table::{Cell, EntityTable};
 use crate::error::MolRsError;
-use crate::keys;
 use crate::types::{F, I, U};
 
 // ---------------------------------------------------------------------------
@@ -640,62 +639,8 @@ impl MolGraph {
         }
     }
 
-    // =====================================================================
-    // Spatial transforms
-    // =====================================================================
-
-    /// Translate all nodes that have coordinate components.
-    pub fn translate(&mut self, delta: [f64; 3]) {
-        let ids: Vec<NodeId> = self.nodes.handles().collect();
-        for id in ids {
-            for (i, key) in keys::COORDS.iter().enumerate() {
-                if let Ok(v) = self.nodes.get_f64(id, key) {
-                    let _ = self.nodes.set_f64(id, key, v + delta[i]);
-                }
-            }
-        }
-    }
-
-    /// Rotate all nodes that have `x`/`y`/`z` props around `axis` by `angle`
-    /// (radians), optionally about a center point.
-    pub fn rotate(&mut self, axis: [f64; 3], angle: f64, about: Option<[f64; 3]>) {
-        let len = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
-        if len < 1e-15 {
-            return;
-        }
-        let k = [axis[0] / len, axis[1] / len, axis[2] / len];
-        let cos_a = angle.cos();
-        let sin_a = angle.sin();
-        let origin = about.unwrap_or([0.0, 0.0, 0.0]);
-
-        let ids: Vec<NodeId> = self.nodes.handles().collect();
-        for id in ids {
-            let (Ok(x), Ok(y), Ok(z)) = (
-                self.nodes.get_f64(id, keys::X),
-                self.nodes.get_f64(id, keys::Y),
-                self.nodes.get_f64(id, keys::Z),
-            ) else {
-                continue;
-            };
-            let p = [x - origin[0], y - origin[1], z - origin[2]];
-
-            // Rodrigues' rotation formula.
-            let kdotp = k[0] * p[0] + k[1] * p[1] + k[2] * p[2];
-            let cross = [
-                k[1] * p[2] - k[2] * p[1],
-                k[2] * p[0] - k[0] * p[2],
-                k[0] * p[1] - k[1] * p[0],
-            ];
-            let rotated = [
-                p[0] * cos_a + cross[0] * sin_a + k[0] * kdotp * (1.0 - cos_a) + origin[0],
-                p[1] * cos_a + cross[1] * sin_a + k[1] * kdotp * (1.0 - cos_a) + origin[1],
-                p[2] * cos_a + cross[2] * sin_a + k[2] * kdotp * (1.0 - cos_a) + origin[2],
-            ];
-            let _ = self.nodes.set_f64(id, keys::X, rotated[0]);
-            let _ = self.nodes.set_f64(id, keys::Y, rotated[1]);
-            let _ = self.nodes.set_f64(id, keys::Z, rotated[2]);
-        }
-    }
+    // Spatial transforms are free-function *systems* — see [`crate::geometry`]
+    // (`translate`, `rotate`). The data structure carries no geometry methods.
 
     // =====================================================================
     // Composition
@@ -1044,7 +989,7 @@ mod tests {
         let mut g = MolGraph::new();
         let n = g.add_node();
         assert!(g.get_node(n).unwrap().is_empty());
-        g.translate([1.0, 2.0, 3.0]);
+        crate::geometry::translate(&mut g, [1.0, 2.0, 3.0]);
         assert!(g.get_node(n).unwrap().get_f64("x").is_none());
         g.set_node(n, "element", "C").unwrap();
         assert_eq!(g.get_node(n).unwrap().get_str("element"), Some("C"));
@@ -1148,11 +1093,11 @@ mod tests {
     fn test_translate_and_rotate() {
         let mut g = MolGraph::new();
         let id = g.add_node_with(Atom::xyz("C", 1.0, 0.0, 0.0));
-        g.translate([10.0, 20.0, 30.0]);
+        crate::geometry::translate(&mut g, [10.0, 20.0, 30.0]);
         let a = g.get_node(id).unwrap();
         assert!((a.get_f64("x").unwrap() - 11.0).abs() < 1e-12);
         let id2 = g.add_node_with(Atom::xyz("C", 1.0, 0.0, 0.0));
-        g.rotate([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2, None);
+        crate::geometry::rotate(&mut g, [0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2, None);
         let b = g.get_node(id2).unwrap();
         assert!((b.get_f64("x").unwrap()).abs() < 1e-12);
         assert!((b.get_f64("y").unwrap() - 1.0).abs() < 1e-12);

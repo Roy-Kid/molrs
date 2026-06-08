@@ -46,6 +46,7 @@ pub mod frame;
 pub mod frame_access;
 pub mod frame_view;
 pub mod gasteiger;
+pub mod geometry;
 pub mod hydrogens;
 pub mod keys;
 pub mod mapping;

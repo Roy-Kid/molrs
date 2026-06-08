@@ -381,12 +381,8 @@ impl Atomistic {
         &mut self.graph
     }
 
-    /// Perceive aromaticity (RDKit default `AROMATICITY_RDKIT` model) and
-    /// annotate the graph in place. Returns the number of atoms flagged
-    /// aromatic. See [`crate::aromaticity::perceive_aromaticity`].
-    pub fn perceive_aromaticity(&mut self) -> usize {
-        crate::aromaticity::perceive_aromaticity(self)
-    }
+    // Aromaticity perception is a free-function *system*:
+    // [`crate::aromaticity::perceive_aromaticity`]. No algorithm method here.
 }
 
 #[cfg(test)]

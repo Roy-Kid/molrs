@@ -204,7 +204,7 @@ impl CGMapping {
             let dx = bx - tcx;
             let dy = by - tcy;
             let dz = bz - tcz;
-            fragment.translate([dx, dy, dz]);
+            crate::geometry::translate(&mut fragment, [dx, dy, dz]);
 
             result.merge(fragment.into_inner());
         }
