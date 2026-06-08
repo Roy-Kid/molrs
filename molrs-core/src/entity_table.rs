@@ -173,6 +173,21 @@ impl Column {
     }
 }
 
+/// A borrowed view of one component value (the dynamic counterpart to the typed
+/// `get_*` accessors). Lets a caller read a cell without statically knowing its
+/// element type — used to materialize a node's full property set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Cell<'a> {
+    /// 64-bit float value.
+    F64(F),
+    /// 32-bit integer value.
+    I32(I),
+    /// String value.
+    Str(&'a str),
+    /// Boolean value.
+    Bool(bool),
+}
+
 fn missing(key: &str) -> MolRsError {
     MolRsError::NotFound {
         entity: "component",
@@ -183,6 +198,17 @@ fn missing(key: &str) -> MolRsError {
 fn type_conflict(key: &str, want: &str, got: &str) -> MolRsError {
     MolRsError::Validation {
         message: format!("component '{key}' is typed {got}, not {want}"),
+    }
+}
+
+/// Borrow the value at `row` of `col` as a [`Cell`]. Caller guarantees the row
+/// is valid (present).
+fn cell_at(col: &Column, row: usize) -> Cell<'_> {
+    match col {
+        Column::F64(d, _) => Cell::F64(d[row]),
+        Column::I32(d, _) => Cell::I32(d[row]),
+        Column::Str(d, _) => Cell::Str(&d[row]),
+        Column::Bool(d, _) => Cell::Bool(d[row]),
     }
 }
 
@@ -293,6 +319,31 @@ impl<K: Key> EntityTable<K> {
             Some(row) => self.cols.get(key).is_some_and(|c| c.validity().get(row)),
             None => false,
         }
+    }
+
+    /// Read one component value of entity `k` without statically knowing its
+    /// element type. `None` if the handle is stale, the column is absent, or the
+    /// value is null for this entity.
+    pub fn value(&self, k: K, key: &str) -> Option<Cell<'_>> {
+        let row = self.row(k)?;
+        let col = self.cols.get(key)?;
+        if !col.validity().get(row) {
+            return None;
+        }
+        Some(cell_at(col, row))
+    }
+
+    /// Iterate over every present `(component_name, value)` of entity `k` (skips
+    /// null/absent components). Empty for a stale handle.
+    pub fn row_cells(&self, k: K) -> impl Iterator<Item = (&str, Cell<'_>)> {
+        let row = self.row(k);
+        self.cols.iter().filter_map(move |(name, col)| {
+            let row = row?;
+            if !col.validity().get(row) {
+                return None;
+            }
+            Some((name.as_str(), cell_at(col, row)))
+        })
     }
 
     /// Clear component `key` for entity `k` (set null). No-op if the column or
@@ -544,6 +595,36 @@ mod tests {
         assert!(!t.despawn(b)); // already gone → false, no panic
         assert!(t.get_f64(b, "x").is_err()); // stale handle errors
         assert!(t.contains(a));
+    }
+
+    #[test]
+    fn value_and_row_cells_read_dynamically() {
+        let mut t = T::new();
+        let a = t.spawn();
+        t.set_f64(a, "x", 1.5).unwrap();
+        t.set_i32(a, "n", 7).unwrap();
+        t.set_str(a, "el", "C").unwrap();
+        assert_eq!(t.value(a, "x"), Some(Cell::F64(1.5)));
+        assert_eq!(t.value(a, "n"), Some(Cell::I32(7)));
+        assert_eq!(t.value(a, "el"), Some(Cell::Str("C")));
+        assert_eq!(t.value(a, "absent"), None);
+        // row_cells yields exactly the present components.
+        let mut cells: Vec<(String, Cell<'_>)> =
+            t.row_cells(a).map(|(k, v)| (k.to_owned(), v)).collect();
+        cells.sort_by(|p, q| p.0.cmp(&q.0));
+        assert_eq!(
+            cells,
+            vec![
+                ("el".to_owned(), Cell::Str("C")),
+                ("n".to_owned(), Cell::I32(7)),
+                ("x".to_owned(), Cell::F64(1.5)),
+            ]
+        );
+        // A second, sparser entity only surfaces its own present cells.
+        let b = t.spawn();
+        t.set_f64(b, "x", 9.0).unwrap();
+        assert_eq!(t.value(b, "el"), None);
+        assert_eq!(t.row_cells(b).count(), 1);
     }
 
     #[test]
