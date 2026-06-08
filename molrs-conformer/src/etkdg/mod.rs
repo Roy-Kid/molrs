@@ -26,14 +26,14 @@ mod retry;
 use rand::{SeedableRng, random, rngs::StdRng};
 
 use crate::distgeom::{self, ChiralSign, DgConstraints, EtkdgVersion};
-use crate::options::{EmbedOptions, ForceFieldKind};
-use crate::report::{EmbedReport, StageKind, StageReport};
+use crate::options::{ConformerOptions, ForceFieldKind};
+use crate::report::{ConformerReport, ConformerStageReport, StageKind};
+use molrs::atomistic::Atomistic;
 use molrs::error::MolRsError;
 use molrs::hydrogens::add_hydrogens;
-use molrs::molgraph::MolGraph;
 use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
 
-use crate::options::EmbedAlgorithm;
+use crate::options::ConformerAlgorithm;
 
 /// Embedding dimension for the first stage (RDKit ETKDG uses 4D).
 const EMBED_DIM: usize = 4;
@@ -48,9 +48,9 @@ const CHIRAL_RATIO_TOL: f64 = 0.8;
 /// are used only to seed chiral-volume signs (so a stereochemically-defined
 /// input keeps its handedness) and are otherwise overwritten.
 pub fn generate_3d_impl(
-    mol: &MolGraph,
-    opts: &EmbedOptions,
-) -> Result<(MolGraph, EmbedReport), MolRsError> {
+    mol: &Atomistic,
+    opts: &ConformerOptions,
+) -> Result<(Atomistic, ConformerReport), MolRsError> {
     if mol.n_atoms() == 0 {
         return Err(MolRsError::validation(
             "cannot generate 3D structure for empty molecule",
@@ -59,7 +59,8 @@ pub fn generate_3d_impl(
 
     // ETKDG is the only algorithm; report it as DistanceGeometry (the honest
     // label) and keep the public enum unchanged.
-    let mut report = EmbedReport::new(EmbedAlgorithm::DistanceGeometry, ForceFieldKind::MMFF94);
+    let mut report =
+        ConformerReport::new(ConformerAlgorithm::DistanceGeometry, ForceFieldKind::MMFF94);
 
     let seed = opts.rng_seed.unwrap_or_else(random::<u64>);
     if opts.rng_seed.is_none() {
@@ -75,7 +76,7 @@ pub fn generate_3d_impl(
         mol.clone()
     };
     let preprocess_steps = work.n_atoms().saturating_sub(mol.n_atoms());
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::Preprocess,
         energy_before: None,
         energy_after: None,
@@ -91,7 +92,7 @@ pub fn generate_3d_impl(
     if n == 1 {
         let mut out = work;
         place_single_atom(&mut out)?;
-        report.stages.push(StageReport {
+        report.stages.push(ConformerStageReport {
             stage: StageKind::BuildInitial,
             energy_before: None,
             energy_after: None,
@@ -171,7 +172,7 @@ pub fn generate_3d_impl(
         }
     };
 
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::BuildInitial,
         energy_before: None,
         energy_after: None,
@@ -179,7 +180,7 @@ pub fn generate_3d_impl(
         converged: true,
         elapsed_ms: 0,
     });
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::CoarseOptimize,
         energy_before: None,
         energy_after: Some(last_coarse_energy),
@@ -194,7 +195,7 @@ pub fn generate_3d_impl(
         match mmff_cleanup(&work, &mut coords3d) {
             Ok((e, steps, conv)) => {
                 final_energy = Some(e);
-                report.stages.push(StageReport {
+                report.stages.push(ConformerStageReport {
                     stage: StageKind::FinalOptimize,
                     energy_before: None,
                     energy_after: Some(e),
@@ -207,7 +208,7 @@ pub fn generate_3d_impl(
                 report
                     .warnings
                     .push(format!("MMFF94 cleanup skipped: {msg}"));
-                report.stages.push(StageReport {
+                report.stages.push(ConformerStageReport {
                     stage: StageKind::FinalOptimize,
                     energy_before: None,
                     energy_after: None,
@@ -240,7 +241,7 @@ pub fn generate_3d_impl(
     }
     let stereo_steps = stereo_warnings.len();
     report.warnings.extend(stereo_warnings);
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::StereoCheck,
         energy_before: None,
         energy_after: None,
@@ -339,7 +340,7 @@ fn have_opposite_sign(a: f64, b: f64) -> bool {
 
 /// MMFF94 second-stage cleanup minimization. Returns `(energy, steps,
 /// converged)`. Errors (as a message) if the molecule has no MMFF typing.
-fn mmff_cleanup(mol: &MolGraph, coords3d: &mut [f64]) -> Result<(f64, usize, bool), String> {
+fn mmff_cleanup(mol: &Atomistic, coords3d: &mut [f64]) -> Result<(f64, usize, bool), String> {
     // Write current coords so MMFF setup that consults geometry sees them.
     let mut staged = mol.clone();
     write_coords(&mut staged, coords3d).map_err(|e| e.to_string())?;
@@ -360,7 +361,7 @@ fn mmff_cleanup(mol: &MolGraph, coords3d: &mut [f64]) -> Result<(f64, usize, boo
 }
 
 /// Place a single-atom molecule at the origin.
-fn place_single_atom(mol: &mut MolGraph) -> Result<(), MolRsError> {
+fn place_single_atom(mol: &mut Atomistic) -> Result<(), MolRsError> {
     let id = mol.atoms().map(|(id, _)| id).next();
     if let Some(id) = id {
         let atom = mol.get_atom_mut(id)?;
@@ -373,7 +374,7 @@ fn place_single_atom(mol: &mut MolGraph) -> Result<(), MolRsError> {
 
 /// Write a flat `n*3` coordinate buffer back into the molecule (atom-iteration
 /// order matches `distgeom`/`MMFF` indexing).
-fn write_coords(mol: &mut MolGraph, coords: &[f64]) -> Result<(), MolRsError> {
+fn write_coords(mol: &mut Atomistic, coords: &[f64]) -> Result<(), MolRsError> {
     let ids: Vec<_> = mol.atoms().map(|(id, _)| id).collect();
     for (i, id) in ids.into_iter().enumerate() {
         let atom = mol.get_atom_mut(id)?;

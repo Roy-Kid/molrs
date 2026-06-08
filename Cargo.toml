@@ -5,7 +5,7 @@ members = [
     "molrs-io",
     "molrs-compute",
     "molrs-ff",
-    "molrs-embed",
+    "molrs-conformer",
     "molrs-cxxapi",
     "molrs-signal",
 ]
@@ -33,7 +33,7 @@ molrs         = { path = "molrs-core",    version = "0.0.17", package = "molcraf
 molrs_io      = { path = "molrs-io",      version = "0.0.17", package = "molcrafts-molrs-io" }
 molrs_compute = { path = "molrs-compute", version = "0.0.17", package = "molcrafts-molrs-compute" }
 molrs_ff      = { path = "molrs-ff",      version = "0.0.17", package = "molcrafts-molrs-ff" }
-molrs_embed   = { path = "molrs-embed",   version = "0.0.17", package = "molcrafts-molrs-embed" }
+molrs_conformer = { path = "molrs-conformer", version = "0.0.17", package = "molcrafts-molrs-conformer" }
 molrs_cxxapi  = { path = "molrs-cxxapi",  version = "0.0.17", package = "molcrafts-molrs-cxxapi" }
 molrs_signal  = { path = "molrs-signal", version = "0.0.17", package = "molcrafts-molrs-signal" }
 

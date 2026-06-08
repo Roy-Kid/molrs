@@ -17,9 +17,9 @@
 //! stays GREEN; when the merge is implemented they will flip and must be
 //! updated to assert finite energy/forces (see the commented assertions).
 
-use molrs::atomistic::Atomistic;
-use molrs::molgraph::{AtomId, PropValue};
+use molrs::molgraph::PropValue;
 use molrs::types::F;
+use molrs::{AtomId, Atomistic};
 use molrs_ff::typifier::Typifier;
 use molrs_ff::typifier::mmff::MMFFTypifier;
 

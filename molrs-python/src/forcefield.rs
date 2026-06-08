@@ -39,13 +39,13 @@ use numpy::{PyArray1, ToPyArray};
 /// >>> typifier = MMFFTypifier()
 /// >>> potentials = typifier.build(mol)
 /// >>> energy, forces = potentials.eval(coords)
-#[pyclass(name = "Potentials", unsendable)]
+#[pyclass(name = "Potentials")]
 pub struct PyPotentials {
     inner: Potentials,
 }
 
 /// Force-field definition metadata exposed to Python as `molrs.ForceField`.
-#[pyclass(name = "ForceField", unsendable)]
+#[pyclass(name = "ForceField")]
 pub struct PyForceField {
     pub(crate) inner: ForceField,
 }
@@ -139,7 +139,7 @@ impl PyPotentials {
 /// >>> typifier = MMFFTypifier()
 /// >>> frame = typifier.typify(mol)   # typed Frame
 /// >>> potentials = typifier.build(mol)  # compiled Potentials
-#[pyclass(name = "MMFFTypifier", unsendable)]
+#[pyclass(name = "MMFFTypifier")]
 pub struct PyMMFFTypifier {
     inner: MMFFTypifier,
 }

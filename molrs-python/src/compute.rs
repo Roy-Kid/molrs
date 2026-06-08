@@ -72,7 +72,7 @@ fn was_batched(frames: &Bound<'_, PyAny>) -> bool {
 /// Radial distribution function g(r) result.
 ///
 /// `rdf` is already normalized (RDF.compute finalizes eagerly).
-#[pyclass(name = "RDFResult", unsendable)]
+#[pyclass(name = "RDFResult")]
 pub struct PyRDFResult {
     inner: RDFResult,
 }
@@ -133,7 +133,7 @@ impl PyRDFResult {
 ///
 /// Accepts either a single `(frame, nlist)` pair or a list of each. Results
 /// accumulate across frames and are ideal-gas normalized on return.
-#[pyclass(name = "RDF", unsendable)]
+#[pyclass(name = "RDF")]
 pub struct PyRDF {
     inner: RDF,
 }
@@ -190,7 +190,7 @@ impl PyRDF {
 // ---------------------------------------------------------------------------
 
 /// Per-frame MSD result (from a single time point).
-#[pyclass(name = "MSDResult", unsendable)]
+#[pyclass(name = "MSDResult")]
 pub struct PyMSDResult {
     inner: MSDResult,
 }
@@ -220,7 +220,7 @@ impl PyMSDResult {
 ///
 /// `series.data[0]` is the reference frame (mean = 0); `series.data[i]`
 /// compares frame `i` against frame `0`.
-#[pyclass(name = "MSDTimeSeries", unsendable)]
+#[pyclass(name = "MSDTimeSeries")]
 pub struct PyMSDTimeSeries {
     inner: MSDTimeSeries,
 }
@@ -280,7 +280,7 @@ impl PyMSDTimeSeries {
 ///
 /// ``compute(frames)`` uses ``frames[0]`` as the reference and returns a
 /// ``MSDTimeSeries`` of the same length as ``frames``.
-#[pyclass(name = "MSD", unsendable)]
+#[pyclass(name = "MSD")]
 pub struct PyMSD {
     inner: MSD,
 }
@@ -313,7 +313,7 @@ impl PyMSD {
 // ---------------------------------------------------------------------------
 
 /// Per-frame cluster assignment.
-#[pyclass(name = "ClusterResult", unsendable, from_py_object)]
+#[pyclass(name = "ClusterResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyClusterResult {
     pub(crate) inner: ClusterResult,
@@ -346,7 +346,7 @@ impl PyClusterResult {
 }
 
 /// Distance-based cluster analysis.
-#[pyclass(name = "Cluster", unsendable)]
+#[pyclass(name = "Cluster")]
 pub struct PyCluster {
     inner: Cluster,
 }
@@ -406,7 +406,7 @@ impl PyCluster {
 // ---------------------------------------------------------------------------
 
 /// Geometric cluster centers for a single frame.
-#[pyclass(name = "ClusterCentersResult", unsendable, from_py_object)]
+#[pyclass(name = "ClusterCentersResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyClusterCentersResult {
     pub(crate) inner: ClusterCentersResult,
@@ -456,7 +456,7 @@ fn extract_centers_vec(arg: &Bound<'_, PyAny>) -> PyResult<Vec<ClusterCentersRes
     Ok(list.iter().map(|r| r.inner.clone()).collect())
 }
 
-#[pyclass(name = "ClusterCenters", unsendable)]
+#[pyclass(name = "ClusterCenters")]
 pub struct PyClusterCenters {
     inner: ClusterCenters,
 }
@@ -507,7 +507,7 @@ impl PyClusterCenters {
 // ---------------------------------------------------------------------------
 
 /// Per-frame mass-weighted cluster centers and total cluster masses.
-#[pyclass(name = "CenterOfMassResult", unsendable, from_py_object)]
+#[pyclass(name = "CenterOfMassResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyCenterOfMassResult {
     pub(crate) inner: COMResult,
@@ -556,7 +556,7 @@ fn extract_com_vec(arg: &Bound<'_, PyAny>) -> PyResult<Vec<COMResult>> {
     Ok(list.iter().map(|r| r.inner.clone()).collect())
 }
 
-#[pyclass(name = "CenterOfMass", unsendable)]
+#[pyclass(name = "CenterOfMass")]
 pub struct PyCenterOfMass {
     masses: Option<Vec<F>>,
 }
@@ -639,7 +639,7 @@ fn tensor_list_into_pyarray<'py>(
 ///   when a list of frames is passed. For a single frame you get a `(num_clusters, 3, 3)` ndarray.
 /// - list of frames → ndarray of shape `(n_frames, num_clusters, 3, 3)` only if all frames
 ///   have identical cluster counts; otherwise a Python list of per-frame ndarrays.
-#[pyclass(name = "GyrationTensor", unsendable)]
+#[pyclass(name = "GyrationTensor")]
 pub struct PyGyrationTensor {
     inner: GyrationTensor,
 }
@@ -696,7 +696,7 @@ impl PyGyrationTensor {
 // InertiaTensor
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "InertiaTensor", unsendable)]
+#[pyclass(name = "InertiaTensor")]
 pub struct PyInertiaTensor {
     masses: Option<Vec<F>>,
 }
@@ -763,7 +763,7 @@ impl PyInertiaTensor {
 // RadiusOfGyration
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "RadiusOfGyration", unsendable)]
+#[pyclass(name = "RadiusOfGyration")]
 pub struct PyRadiusOfGyration {
     masses: Option<Vec<F>>,
 }
@@ -867,7 +867,7 @@ impl PyRadiusOfGyration {
 ///
 /// Wrap each row (a 1-D float array) with `DescriptorRow(row)`; then pass a
 /// Python list of them to ``Pca2.compute`` / ``KMeans.compute``.
-#[pyclass(name = "DescriptorRow", unsendable, from_py_object)]
+#[pyclass(name = "DescriptorRow", from_py_object)]
 #[derive(Clone)]
 pub struct PyDescriptorRow {
     row: Vec<F>,
@@ -895,7 +895,7 @@ impl molrs_compute::DescriptorRow for PyDescriptorRow {
 }
 
 /// Two-component PCA result.
-#[pyclass(name = "PcaResult", unsendable, from_py_object)]
+#[pyclass(name = "PcaResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyPcaResult {
     pub(crate) inner: PcaResult,
@@ -930,7 +930,7 @@ impl PyPcaResult {
 }
 
 /// Two-component PCA calculator.
-#[pyclass(name = "Pca2", unsendable)]
+#[pyclass(name = "Pca2")]
 pub struct PyPca2 {
     inner: Pca2<PyDescriptorRow>,
 }
@@ -963,7 +963,7 @@ impl PyPca2 {
 // ---------------------------------------------------------------------------
 
 /// k-means cluster labels.
-#[pyclass(name = "KMeansResult", unsendable)]
+#[pyclass(name = "KMeansResult")]
 pub struct PyKMeansResult {
     inner: KMeansResult,
 }
@@ -985,7 +985,7 @@ impl PyKMeansResult {
 }
 
 /// k-means clustering over a PCA projection (2-D).
-#[pyclass(name = "KMeans", unsendable)]
+#[pyclass(name = "KMeans")]
 pub struct PyKMeans {
     inner: KMeans,
 }

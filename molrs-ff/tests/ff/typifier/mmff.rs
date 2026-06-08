@@ -1,9 +1,9 @@
 //! End-to-end MMFF94 typification: MolGraph (built in code) -> typed Frame,
 //! atom-type assignment, bond/angle/torsion classification, and full build.
 
-use molrs::atomistic::Atomistic;
-use molrs::molgraph::{Atom, AtomId, MolGraph, PropValue};
+use molrs::molgraph::{Atom, PropValue};
 use molrs::rings::find_rings;
+use molrs::{AtomId, Atomistic};
 use molrs_ff::typifier::Typifier;
 use molrs_ff::typifier::mmff::MMFFTypifier;
 
@@ -17,16 +17,7 @@ fn atom(sym: &str) -> Atom {
     a
 }
 
-fn bond(mol: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
-    if let Ok(bid) = mol.add_bond(a, b)
-        && let Ok(bd) = mol.get_bond_mut(bid)
-    {
-        bd.props.insert("order".to_string(), PropValue::F64(order));
-    }
-}
-
-/// Same as `bond`, but for an `Atomistic` (MolGraph methods via `Deref`).
-fn bond_a(mol: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
+fn bond(mol: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
     if let Ok(bid) = mol.add_bond(a, b)
         && let Ok(bd) = mol.get_bond_mut(bid)
     {
@@ -62,7 +53,7 @@ fn embedded_mmff94_loads_atom_prop_table() {
 #[test]
 fn methane_carbon_is_type_1_h_is_type_5() {
     let t = typifier();
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
     let c = mol.add_atom(atom("C"));
     let hs: Vec<AtomId> = (0..4).map(|_| mol.add_atom(atom("H"))).collect();
     for &h in &hs {
@@ -79,7 +70,7 @@ fn methane_carbon_is_type_1_h_is_type_5() {
 #[test]
 fn ethane_carbons_are_type_1() {
     let t = typifier();
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
     let c1 = mol.add_atom(atom("C"));
     let c2 = mol.add_atom(atom("C"));
     bond(&mut mol, c1, c2, 1.0);
@@ -110,7 +101,7 @@ fn water_oxygen_is_divalent_oxygen_type_6() {
     // not wired into the typifier). Both H bonded to O get the same hydroxyl-H
     // type. We pin the typer's actual output rather than a textbook value.
     let t = typifier();
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
     let o = mol.add_atom(atom("O"));
     let h1 = mol.add_atom(atom("H"));
     let h2 = mol.add_atom(atom("H"));
@@ -129,7 +120,7 @@ fn water_oxygen_is_divalent_oxygen_type_6() {
 #[test]
 fn benzene_carbons_are_aromatic_type_37() {
     let t = typifier();
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
     let cs: Vec<AtomId> = (0..6).map(|_| mol.add_atom(atom("C"))).collect();
     for i in 0..6 {
         bond(&mut mol, cs[i], cs[(i + 1) % 6], 1.5);
@@ -187,7 +178,7 @@ fn torsion_classification_central_bond_delocalized() {
 #[test]
 fn typify_ethane_produces_expected_topology_blocks() {
     let t = typifier();
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
     let c1 = mol.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
     let c2 = mol.add_atom(Atom::xyz("C", 1.54, 0.0, 0.0));
     bond(&mut mol, c1, c2, 1.0);
@@ -241,7 +232,7 @@ fn methane_typifies_then_build_fails_on_stretch_bend() {
     ];
     for g in geo {
         let h = mol.add_atom_xyz("H", g[0], g[1], g[2]);
-        bond_a(&mut mol, c, h, 1.0);
+        bond(&mut mol, c, h, 1.0);
     }
 
     // Typify succeeds: methane has 5 atoms, 4 bonds, 6 H-C-H angles.

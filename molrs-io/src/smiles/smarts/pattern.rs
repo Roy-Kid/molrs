@@ -18,8 +18,8 @@
 //!
 //! let pat = SmartsPattern::compile("[C;X4]").unwrap();
 //! let mol = to_atomistic(&parse_smiles("CC").unwrap()).unwrap();
-//! // `find_all` takes a `&MolGraph`; `Atomistic` exposes one via `as_molgraph`.
-//! let matches = pat.find_all(mol.as_molgraph()).unwrap();
+//! // `find_all` takes a `&Atomistic`.
+//! let matches = pat.find_all(&mol).unwrap();
 //! assert_eq!(matches.len(), 2); // both sp3 carbons
 //! ```
 

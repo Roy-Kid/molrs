@@ -12,7 +12,7 @@
 //! ```no_run
 //! use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
 //! use molrs_ff::potential::Potential;
-//! # fn run(mol: &molrs::molgraph::MolGraph) -> Result<(), molrs::error::MolRsError> {
+//! # fn run(mol: &molrs::Atomistic) -> Result<(), molrs::error::MolRsError> {
 //! let props = MmffMolProperties::compute(mol, MmffVariant::Mmff94)?;
 //! let ff = MmffForceField::build(mol, &props)?;
 //! let coords = vec![0.0; 3 * props.len()];
@@ -30,8 +30,8 @@ mod params;
 mod stretchbend;
 mod torsion;
 
+use molrs::Atomistic;
 use molrs::error::MolRsError;
-use molrs::molgraph::MolGraph;
 use molrs::types::F;
 
 use super::aromaticity::set_mmff_aromaticity;
@@ -77,7 +77,7 @@ pub struct MmffForceField {
 impl MmffForceField {
     /// Enumerate every MMFF94 energy term (including the empirical-rule
     /// fallbacks) for `mol`, using the atom types / partial charges in `props`.
-    pub fn build(mol: &MolGraph, props: &MmffMolProperties) -> Result<Self, MolRsError> {
+    pub fn build(mol: &Atomistic, props: &MmffMolProperties) -> Result<Self, MolRsError> {
         let base = Topo::build(mol).map_err(|sym| {
             MolRsError::validation(format!("MMFF: unsupported element symbol '{sym}'"))
         })?;

@@ -24,7 +24,7 @@ use crate::forcefield::PyForceField;
 use crate::frame::PyFrame;
 use crate::helpers::{NpF, molrs_error_to_pyerr};
 
-#[pyclass(name = "Trajectory", unsendable, from_py_object)]
+#[pyclass(name = "Trajectory", from_py_object)]
 #[derive(Clone)]
 pub struct PyTrajectory {
     pub(crate) inner: CoreTrajectory,
@@ -42,13 +42,13 @@ pub struct PyObservables {
     inner: Rc<RefCell<CoreMolRec>>,
 }
 
-#[pyclass(name = "ScalarObservable", unsendable, from_py_object)]
+#[pyclass(name = "ScalarObservable", from_py_object)]
 #[derive(Clone)]
 pub struct PyScalarObservable {
     pub(crate) inner: ObservableRecord,
 }
 
-#[pyclass(name = "VectorObservable", unsendable, from_py_object)]
+#[pyclass(name = "VectorObservable", from_py_object)]
 #[derive(Clone)]
 pub struct PyVectorObservable {
     pub(crate) inner: ObservableRecord,

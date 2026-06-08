@@ -35,7 +35,8 @@
 
 use std::collections::HashMap;
 
-use molrs::molgraph::{AtomId, MolGraph, PropValue};
+use molrs::atomistic::{AtomId, Atomistic};
+use molrs::molgraph::PropValue;
 use molrs::smarts::SmartsPattern;
 
 use super::perceive::Perceived;
@@ -126,7 +127,7 @@ fn compile_all() -> Vec<CompiledPattern> {
 /// flag from the project perception, so the SMARTS engine's `a` / `c` / `:`
 /// queries agree with RDKit (the engine reads `is_aromatic`, see
 /// `molrs::smarts` aromaticity convention).
-fn aromatic_working_copy(mol: &MolGraph, p: &Perceived) -> MolGraph {
+fn aromatic_working_copy(mol: &Atomistic, p: &Perceived) -> Atomistic {
     let mut g = mol.clone();
     for (i, &aid) in p.atom_ids.iter().enumerate() {
         if p.atoms[i].aromatic {
@@ -136,7 +137,10 @@ fn aromatic_working_copy(mol: &MolGraph, p: &Perceived) -> MolGraph {
         }
     }
     // Flag aromatic bonds so `:` and `BondFacts.aromatic` agree.
-    let bond_ids: Vec<_> = g.bonds().map(|(bid, b)| (bid, b.atoms)).collect();
+    let bond_ids: Vec<_> = g
+        .bonds()
+        .map(|(bid, b)| (bid, [b.nodes[0], b.nodes[1]]))
+        .collect();
     let idx_of: HashMap<AtomId, usize> = p
         .atom_ids
         .iter()
@@ -176,7 +180,7 @@ pub struct AssignedTorsion {
 /// `p` is the perception of `mol` (aromaticity / hybridization / rings); it is
 /// reused to transplant aromatic flags onto the matching copy. The `r{…}` /
 /// `x<n>` ring primitives are evaluated by the core SMARTS engine directly.
-pub fn assign_with_provenance(mol: &MolGraph, p: &Perceived) -> Vec<AssignedTorsion> {
+pub fn assign_with_provenance(mol: &Atomistic, p: &Perceived) -> Vec<AssignedTorsion> {
     let work = aromatic_working_copy(mol, p);
     let patterns = compile_all();
 
@@ -240,7 +244,7 @@ pub fn assign_with_provenance(mol: &MolGraph, p: &Perceived) -> Vec<AssignedTors
 
 /// Public entry point used by [`super::build_constraints`]: the bare
 /// [`TorsionConstraint`] list (provenance dropped).
-pub fn assign_experimental_torsions(mol: &MolGraph, p: &Perceived) -> Vec<TorsionConstraint> {
+pub fn assign_experimental_torsions(mol: &Atomistic, p: &Perceived) -> Vec<TorsionConstraint> {
     assign_with_provenance(mol, p)
         .into_iter()
         .map(|a| a.constraint)

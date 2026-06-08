@@ -5,7 +5,7 @@
 //!
 //! Run with: `cargo run -p molrs-core --example molgraph_analysis`
 
-use molrs_core::{Atom, MolGraph, PropValue, find_rings};
+use molrs_core::{Atom, Atomistic, PropValue, find_rings};
 
 fn main() {
     let mol = build_benzene();
@@ -15,8 +15,8 @@ fn main() {
 }
 
 /// Build benzene (C6H6) with aromatic bonds.
-fn build_benzene() -> MolGraph {
-    let mut mol = MolGraph::new();
+fn build_benzene() -> Atomistic {
+    let mut mol = Atomistic::new();
 
     // Six carbons in a regular hexagon (C-C ~1.40 A)
     let angles_rad: Vec<f64> = (0..6)
@@ -62,7 +62,7 @@ fn build_benzene() -> MolGraph {
 
 // ─── Ring detection ─────────────────────────────────────────────────────────
 
-fn ring_detection(mol: &MolGraph) {
+fn ring_detection(mol: &Atomistic) {
     println!("=== Ring Detection (Benzene) ===\n");
 
     let rings = find_rings(mol);
@@ -91,12 +91,12 @@ fn ring_detection(mol: &MolGraph) {
     println!("\n  Per-bond ring info:");
     for (bid, bond) in mol.bonds() {
         let a_sym = mol
-            .get_atom(bond.atoms[0])
+            .get_atom(bond.nodes[0])
             .expect("atom exists")
             .get_str("symbol")
             .unwrap();
         let b_sym = mol
-            .get_atom(bond.atoms[1])
+            .get_atom(bond.nodes[1])
             .expect("atom exists")
             .get_str("symbol")
             .unwrap();
@@ -125,7 +125,7 @@ fn ring_detection(mol: &MolGraph) {
 
 // ─── Frame round-trip ───────────────────────────────────────────────────────
 
-fn frame_roundtrip(mol: &MolGraph) {
+fn frame_roundtrip(mol: &Atomistic) {
     println!("=== Frame Round-trip ===\n");
 
     // --- Export to Frame ---
@@ -155,7 +155,7 @@ fn frame_roundtrip(mol: &MolGraph) {
     }
 
     // --- Import from Frame ---
-    let mol2 = MolGraph::from_frame(&frame).expect("round-trip should succeed");
+    let mol2 = Atomistic::from_frame(&frame).expect("round-trip should succeed");
 
     println!("\n  Round-trip verification:");
     println!(
@@ -181,7 +181,7 @@ fn frame_roundtrip(mol: &MolGraph) {
 
 // ─── Summary statistics ─────────────────────────────────────────────────────
 
-fn summary(mol: &MolGraph) {
+fn summary(mol: &Atomistic) {
     println!("=== Benzene Summary ===\n");
 
     println!("  Atoms:     {}", mol.n_atoms());

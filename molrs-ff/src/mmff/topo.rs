@@ -14,8 +14,9 @@
 //! `charges`) read from it and never mutate the graph.
 
 use molrs::element::Element;
-use molrs::molgraph::{AtomId, MolGraph, PropValue};
+use molrs::molgraph::PropValue;
 use molrs::rings::{RingInfo, find_rings};
+use molrs::{AtomId, Atomistic};
 
 /// Bond order (Kekulé): we treat the SDF integer order verbatim.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,10 +72,10 @@ pub struct Topo {
 }
 
 impl Topo {
-    /// Build the snapshot from a [`MolGraph`].
+    /// Build the snapshot from an [`Atomistic`] molecule.
     ///
     /// Returns `Err(symbol)` for an atom whose element symbol is unknown.
-    pub fn build(mol: &MolGraph) -> Result<Self, String> {
+    pub fn build(mol: &Atomistic) -> Result<Self, String> {
         let atom_ids: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
         let idx_of: std::collections::HashMap<AtomId, usize> = atom_ids
             .iter()

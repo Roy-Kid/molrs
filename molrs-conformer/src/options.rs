@@ -5,7 +5,7 @@
 /// Names are algorithm-based (not toolkit-based), so backends can evolve
 /// without coupling public API names to a specific implementation source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EmbedAlgorithm {
+pub enum ConformerAlgorithm {
     /// Rule- and fragment-based coordinate construction.
     ///
     /// This is the algorithm family currently implemented in this crate.
@@ -27,7 +27,7 @@ pub enum ForceFieldKind {
 
 /// Preset quality/speed profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EmbedSpeed {
+pub enum ConformerSpeed {
     /// Short minimization and fewer rotor trials.
     Fast,
     /// Balanced defaults.
@@ -38,13 +38,13 @@ pub enum EmbedSpeed {
 
 /// Options for [`super::generate_3d`].
 #[derive(Debug, Clone)]
-pub struct EmbedOptions {
+pub struct ConformerOptions {
     /// Stage-1 embedding algorithm.
-    pub embed_algorithm: EmbedAlgorithm,
+    pub algorithm: ConformerAlgorithm,
     /// Target force-field family (or auto selection).
     pub forcefield: ForceFieldKind,
     /// Throughput/quality preset.
-    pub speed: EmbedSpeed,
+    pub speed: ConformerSpeed,
     /// Add explicit hydrogens before generation.
     pub add_hydrogens: bool,
     /// Total optimization budget. `0` means "use speed preset default".
@@ -53,12 +53,12 @@ pub struct EmbedOptions {
     pub rng_seed: Option<u64>,
 }
 
-impl Default for EmbedOptions {
+impl Default for ConformerOptions {
     fn default() -> Self {
         Self {
-            embed_algorithm: EmbedAlgorithm::FragmentRules,
+            algorithm: ConformerAlgorithm::FragmentRules,
             forcefield: ForceFieldKind::Auto,
-            speed: EmbedSpeed::Medium,
+            speed: ConformerSpeed::Medium,
             add_hydrogens: true,
             max_steps: 0,
             rng_seed: None,
@@ -66,16 +66,16 @@ impl Default for EmbedOptions {
     }
 }
 
-impl EmbedOptions {
+impl ConformerOptions {
     /// Effective optimization step budget.
     pub(crate) fn effective_max_steps(&self) -> usize {
         if self.max_steps > 0 {
             return self.max_steps;
         }
         match self.speed {
-            EmbedSpeed::Fast => 120,
-            EmbedSpeed::Medium => 260,
-            EmbedSpeed::Better => 520,
+            ConformerSpeed::Fast => 120,
+            ConformerSpeed::Medium => 260,
+            ConformerSpeed::Better => 520,
         }
     }
 
@@ -95,24 +95,24 @@ impl EmbedOptions {
             return 0;
         }
         match self.speed {
-            EmbedSpeed::Fast => (n_rot_bonds * 4).max(8),
-            EmbedSpeed::Medium => (n_rot_bonds * 8).max(20),
-            EmbedSpeed::Better => (n_rot_bonds * 16).max(40),
+            ConformerSpeed::Fast => (n_rot_bonds * 4).max(8),
+            ConformerSpeed::Medium => (n_rot_bonds * 8).max(20),
+            ConformerSpeed::Better => (n_rot_bonds * 16).max(40),
         }
     }
 
     /// Maximum per-step rotor perturbation (radians).
     pub(crate) fn rotor_max_delta(&self) -> f64 {
         match self.speed {
-            EmbedSpeed::Fast => std::f64::consts::PI / 5.0,
-            EmbedSpeed::Medium => std::f64::consts::PI / 3.0,
-            EmbedSpeed::Better => std::f64::consts::PI / 2.0,
+            ConformerSpeed::Fast => std::f64::consts::PI / 5.0,
+            ConformerSpeed::Medium => std::f64::consts::PI / 3.0,
+            ConformerSpeed::Better => std::f64::consts::PI / 2.0,
         }
     }
 
     // --- ETKDG-internal knobs ------------------------------------------------
     //
-    // The public `EmbedOptions` shape is intentionally frozen (constructed by
+    // The public `ConformerOptions` shape is intentionally frozen (constructed by
     // `molrs-python`); the ETKDG pipeline reinterprets the existing fields
     // internally and supplies ETKDG defaults for the rest. `max_steps` doubles
     // as the explicit `maxIterations` override (0 = RDKit's `10×n_atoms`

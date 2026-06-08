@@ -21,13 +21,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::visit::EdgeRef;
 
-use super::molgraph::{AtomId, BondId, MolGraph};
+use super::atomistic::{AtomId, Atomistic, BondId};
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-/// All ring information for a [`MolGraph`], produced by [`find_rings`].
+/// All ring information for an [`Atomistic`], produced by [`find_rings`].
 #[derive(Debug, Clone)]
 pub struct RingInfo {
     /// Each ring is an ordered list of `AtomId`s forming a closed path.
@@ -102,7 +102,7 @@ impl RingInfo {
 // ---------------------------------------------------------------------------
 
 /// Compute the ring information (SSSR / minimum cycle basis) for `mol`.
-pub fn find_rings(mol: &MolGraph) -> RingInfo {
+pub fn find_rings(mol: &Atomistic) -> RingInfo {
     if mol.n_atoms() == 0 {
         return RingInfo::empty();
     }
@@ -127,8 +127,8 @@ pub fn find_rings(mol: &MolGraph) -> RingInfo {
     let mut edge_to_bond: Vec<usize> = Vec::with_capacity(bond_vec.len());
     for (bi, &bid) in bond_vec.iter().enumerate() {
         let b = mol.get_bond(bid).expect("bond must exist");
-        let u = atom_to_idx[&b.atoms[0]];
-        let v = atom_to_idx[&b.atoms[1]];
+        let u = atom_to_idx[&b.nodes[0]];
+        let v = atom_to_idx[&b.nodes[1]];
         graph.add_edge(NodeIndex::new(u), NodeIndex::new(v), ());
         edge_to_bond.push(bi);
     }
@@ -216,7 +216,7 @@ pub fn find_rings(mol: &MolGraph) -> RingInfo {
     let mut bond_map: HashMap<(AtomId, AtomId), BondId> = HashMap::new();
     for &bid in &bond_vec {
         let b = mol.get_bond(bid).expect("bond must exist");
-        let [a, bb] = b.atoms;
+        let (a, bb) = (b.nodes[0], b.nodes[1]);
         bond_map.insert((a, bb), bid);
         bond_map.insert((bb, a), bid);
     }
@@ -346,10 +346,10 @@ fn leading_bit(vec: &[u64], words: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::molgraph::{Atom, MolGraph};
+    use crate::molgraph::Atom;
 
-    fn cycle(n: usize) -> MolGraph {
-        let mut g = MolGraph::new();
+    fn cycle(n: usize) -> Atomistic {
+        let mut g = Atomistic::new();
         let ids: Vec<AtomId> = (0..n).map(|_| g.add_atom(Atom::new())).collect();
         for i in 0..n {
             g.add_bond(ids[i], ids[(i + 1) % n])
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_linear_no_rings() {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let ids: Vec<AtomId> = (0..6).map(|_| g.add_atom(Atom::new())).collect();
         for i in 0..5 {
             g.add_bond(ids[i], ids[i + 1]).expect("add chain bond");
@@ -396,12 +396,12 @@ mod tests {
 
     #[test]
     fn test_empty_mol() {
-        assert_eq!(find_rings(&MolGraph::new()).num_rings(), 0);
+        assert_eq!(find_rings(&Atomistic::new()).num_rings(), 0);
     }
 
     #[test]
     fn test_naphthalene() {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let ids: Vec<AtomId> = (0..10).map(|_| g.add_atom(Atom::new())).collect();
         // Ring A: 0-1-2-3-4-5-0
         for i in 0..5 {

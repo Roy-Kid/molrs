@@ -1035,7 +1035,7 @@ pub fn write_dcd(path: &str, frames: Vec<PyRef<'_, PyFrame>>) -> PyResult<()> {
 /// >>> mol = ir.to_atomistic()
 /// >>> mol.n_atoms
 /// 3
-#[pyclass(name = "SmilesIR", unsendable)]
+#[pyclass(name = "SmilesIR")]
 pub struct PySmilesIR {
     inner: molrs_io::smiles::SmilesIR,
     input: String,
@@ -1060,7 +1060,7 @@ impl PySmilesIR {
     /// molecular graph.
     ///
     /// Hydrogen atoms that are implicit in the SMILES string are **not**
-    /// added here; use :func:`generate_3d` with ``add_hydrogens=True`` for
+    /// added here; use :class:`Conformer` with ``add_hydrogens=True`` for
     /// that.
     ///
     /// Returns

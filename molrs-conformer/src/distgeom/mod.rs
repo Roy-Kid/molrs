@@ -41,8 +41,8 @@ mod torsion_prefs;
 mod torsion_tables;
 mod uff;
 
+use molrs::atomistic::Atomistic;
 use molrs::error::MolRsError;
-use molrs::molgraph::MolGraph;
 
 pub use chirality::{ChiralConstraint, ChiralSign, ImproperConstraint};
 pub use knowledge::KnowledgeTorsion;
@@ -78,14 +78,14 @@ pub struct DgConstraints {
 /// Assign ETKDGv3 experimental torsions to `mol` with table provenance, for
 /// validation against RDKit `getExperimentalTorsions`. Perceives aromaticity /
 /// rings internally, then drives the full SMARTS-table matcher.
-pub fn experimental_torsions_with_provenance(mol: &MolGraph) -> Vec<AssignedTorsion> {
+pub fn experimental_torsions_with_provenance(mol: &Atomistic) -> Vec<AssignedTorsion> {
     let p = perceive::perceive(mol);
     assign_with_provenance(mol, &p)
 }
 
 /// Build the unsmoothed topological bounds matrix for `mol`
 /// (RDKit `setTopolBounds`, `set15bounds=true, scaleVDW=false`).
-pub fn build_bounds(mol: &MolGraph) -> Result<BoundsMatrix, MolRsError> {
+pub fn build_bounds(mol: &Atomistic) -> Result<BoundsMatrix, MolRsError> {
     let n = mol.n_atoms();
     if n == 0 {
         return Err(MolRsError::validation("molecule has no atoms"));
@@ -103,7 +103,7 @@ pub fn build_bounds(mol: &MolGraph) -> Result<BoundsMatrix, MolRsError> {
 /// constraints. (v2 vs v3 differ only in small-ring/macrocycle torsion data,
 /// which is part of the documented experimental-torsion partial.)
 pub fn build_constraints(
-    mol: &MolGraph,
+    mol: &Atomistic,
     version: EtkdgVersion,
 ) -> Result<DgConstraints, MolRsError> {
     let n = mol.n_atoms();

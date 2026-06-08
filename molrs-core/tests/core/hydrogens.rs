@@ -1,7 +1,7 @@
 //! Integration tests for hydrogen addition (src/core/hydrogens.rs).
 
 use molrs_core::{
-    Atom, AtomId, MolGraph, PropValue, add_hydrogens, implicit_h_count, remove_hydrogens,
+    Atom, AtomId, Atomistic, PropValue, add_hydrogens, implicit_h_count, remove_hydrogens,
 };
 
 fn atom(sym: &str) -> Atom {
@@ -10,7 +10,7 @@ fn atom(sym: &str) -> Atom {
     a
 }
 
-fn bond_order(g: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
+fn bond_order(g: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
     if let Ok(bid) = g.add_bond(a, b)
         && let Ok(bnd) = g.get_bond_mut(bid)
     {
@@ -18,7 +18,7 @@ fn bond_order(g: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
     }
 }
 
-fn count_symbol(g: &MolGraph, sym: &str) -> usize {
+fn count_symbol(g: &Atomistic, sym: &str) -> usize {
     g.atoms()
         .filter(|(_, a)| {
             a.get_str("element")
@@ -31,7 +31,7 @@ fn count_symbol(g: &MolGraph, sym: &str) -> usize {
 
 #[test]
 fn test_isolated_carbon_gets_4h() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     g.add_atom(atom("C"));
     let result = add_hydrogens(&g);
     assert_eq!(result.n_atoms(), 5, "C + 4H");
@@ -44,7 +44,7 @@ fn test_isolated_carbon_gets_4h() {
 
 #[test]
 fn test_ethane_c_c_6_hydrogens() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c1 = g.add_atom(atom("C"));
     let c2 = g.add_atom(atom("C"));
     bond_order(&mut g, c1, c2, 1.0);
@@ -57,7 +57,7 @@ fn test_ethane_c_c_6_hydrogens() {
 
 #[test]
 fn test_ethylene_double_bond_4_hydrogens() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c1 = g.add_atom(atom("C"));
     let c2 = g.add_atom(atom("C"));
     bond_order(&mut g, c1, c2, 2.0);
@@ -70,7 +70,7 @@ fn test_ethylene_double_bond_4_hydrogens() {
 
 #[test]
 fn test_acetylene_triple_bond_2_hydrogens() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c1 = g.add_atom(atom("C"));
     let c2 = g.add_atom(atom("C"));
     bond_order(&mut g, c1, c2, 3.0);
@@ -83,7 +83,7 @@ fn test_acetylene_triple_bond_2_hydrogens() {
 
 #[test]
 fn test_benzene_aromatic_6_hydrogens() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let ids: Vec<AtomId> = (0..6).map(|_| g.add_atom(atom("C"))).collect();
     for i in 0..6 {
         bond_order(&mut g, ids[i], ids[(i + 1) % 6], 1.5);
@@ -97,7 +97,7 @@ fn test_benzene_aromatic_6_hydrogens() {
 
 #[test]
 fn test_isolated_oxygen_gets_2h() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     g.add_atom(atom("O"));
     let result = add_hydrogens(&g);
     assert_eq!(result.n_atoms(), 3, "O + 2H");
@@ -108,7 +108,7 @@ fn test_isolated_oxygen_gets_2h() {
 
 #[test]
 fn test_nitrogen_1_bond_gets_2h() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let n = g.add_atom(atom("N"));
     let c = g.add_atom(atom("C"));
     bond_order(&mut g, n, c, 1.0);
@@ -122,7 +122,7 @@ fn test_nitrogen_1_bond_gets_2h() {
 
 #[test]
 fn test_nh4_plus_implicit_count_is_4() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let mut n_atom = Atom::new();
     n_atom.set("element", "N");
     n_atom.set("formal_charge", 1.0_f64);
@@ -133,7 +133,7 @@ fn test_nh4_plus_implicit_count_is_4() {
 
 #[test]
 fn test_nh4_plus_add_hydrogens() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let mut n_atom = Atom::new();
     n_atom.set("element", "N");
     n_atom.set("formal_charge", 1.0_f64);
@@ -147,7 +147,7 @@ fn test_nh4_plus_add_hydrogens() {
 
 #[test]
 fn test_existing_hydrogens_not_modified() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c = g.add_atom(atom("C"));
     let h = g.add_atom(atom("H"));
     bond_order(&mut g, c, h, 1.0);
@@ -162,7 +162,7 @@ fn test_existing_hydrogens_not_modified() {
 
 #[test]
 fn test_noble_gas_no_hydrogens() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     g.add_atom(atom("Ne"));
     let result = add_hydrogens(&g);
     assert_eq!(result.n_atoms(), 1, "Ne should receive no H");
@@ -172,7 +172,7 @@ fn test_noble_gas_no_hydrogens() {
 
 #[test]
 fn test_isolated_sulfur_gets_2h() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     g.add_atom(atom("S"));
     let result = add_hydrogens(&g);
     assert_eq!(count_symbol(&result, "H"), 2, "S (no bonds) → 2H");
@@ -182,7 +182,7 @@ fn test_isolated_sulfur_gets_2h() {
 
 #[test]
 fn test_missing_bond_order_defaults_to_single() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c1 = g.add_atom(atom("C"));
     let c2 = g.add_atom(atom("C"));
     g.add_bond(c1, c2).expect("add bond"); // no order property
@@ -195,7 +195,7 @@ fn test_missing_bond_order_defaults_to_single() {
 
 #[test]
 fn test_add_hydrogens_immutable() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c = g.add_atom(atom("C"));
     let before_atoms = g.n_atoms();
     let before_bonds = g.n_bonds();
@@ -213,7 +213,7 @@ fn test_add_hydrogens_immutable() {
 
 #[test]
 fn test_remove_hydrogens_roundtrip_methane() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     g.add_atom(atom("C"));
     let with_h = add_hydrogens(&g);
     assert_eq!(with_h.n_atoms(), 5, "C + 4H");
@@ -226,7 +226,7 @@ fn test_remove_hydrogens_roundtrip_methane() {
 
 #[test]
 fn test_remove_hydrogens_roundtrip_benzene() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let ids: Vec<AtomId> = (0..6).map(|_| g.add_atom(atom("C"))).collect();
     for i in 0..6 {
         bond_order(&mut g, ids[i], ids[(i + 1) % 6], 1.5);
@@ -243,7 +243,7 @@ fn test_remove_hydrogens_roundtrip_benzene() {
 #[test]
 fn test_remove_hydrogens_partial_explicit() {
     // C with 1 explicit H + add_hydrogens → 5 atoms; remove → back to 1C
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c = g.add_atom(atom("C"));
     let h = g.add_atom(atom("H"));
     bond_order(&mut g, c, h, 1.0);
@@ -258,7 +258,7 @@ fn test_remove_hydrogens_partial_explicit() {
 
 #[test]
 fn test_remove_hydrogens_immutable() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     g.add_atom(atom("C"));
     let with_h = add_hydrogens(&g);
     let before = with_h.n_atoms();
@@ -270,7 +270,7 @@ fn test_remove_hydrogens_immutable() {
 
 #[test]
 fn test_remove_hydrogens_water_roundtrip() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     g.add_atom(atom("O"));
     let with_h = add_hydrogens(&g);
     assert_eq!(with_h.n_atoms(), 3, "O + 2H");
@@ -282,7 +282,7 @@ fn test_remove_hydrogens_water_roundtrip() {
 
 #[test]
 fn test_remove_hydrogens_noble_gas_unchanged() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     g.add_atom(atom("Ne"));
     let stripped = remove_hydrogens(&g);
     assert_eq!(stripped.n_atoms(), 1, "Ne unchanged");

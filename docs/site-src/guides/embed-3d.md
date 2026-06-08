@@ -29,13 +29,7 @@ when the code is correct.
 import molrs
 
 mol = molrs.parse_smiles("c1ccccc1").to_atomistic()
-result = molrs.generate_3d(
-    mol,
-    molrs.EmbedOptions(speed="medium", seed=123),
-)
-
-mol3d = result.mol
-report = result.report
+mol3d, report = molrs.Conformer(speed="medium", seed=123).generate(mol)
 
 print("atoms:", mol3d.n_atoms)
 print("final energy:", report.final_energy)
@@ -50,7 +44,7 @@ that needs attention.
 
 ## Reading Coordinates from the Result
 
-`generate_3d` returns an `Atomistic`, not a frame. Convert it when you need
+`Conformer.generate` returns an `Atomistic`, not a frame. Convert it when you need
 column data:
 
 ```python

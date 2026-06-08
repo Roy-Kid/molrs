@@ -5,18 +5,18 @@ use rand::{SeedableRng, random, rngs::StdRng};
 use super::builder::embed_fragment_rules;
 use super::distance_geometry::embed_distance_geometry;
 use super::optimizer::{EnergyModel, lbfgs, steepest_descent};
-use super::options::{EmbedAlgorithm, EmbedOptions, ForceFieldKind};
-use super::report::{EmbedReport, StageKind, StageReport};
+use super::options::{ConformerAlgorithm, ConformerOptions, ForceFieldKind};
+use super::report::{ConformerReport, ConformerStageReport, StageKind};
 use super::rotor_search;
 use super::stereo_guard;
+use molrs::atomistic::Atomistic;
 use molrs::error::MolRsError;
 use molrs::hydrogens::add_hydrogens;
-use molrs::molgraph::MolGraph;
 
 pub(crate) fn generate_3d_impl(
-    mol: &MolGraph,
-    opts: &EmbedOptions,
-) -> Result<(MolGraph, EmbedReport), MolRsError> {
+    mol: &Atomistic,
+    opts: &ConformerOptions,
+) -> Result<(Atomistic, ConformerReport), MolRsError> {
     if mol.n_atoms() == 0 {
         return Err(MolRsError::validation(
             "cannot generate 3D structure for empty molecule",
@@ -25,7 +25,7 @@ pub(crate) fn generate_3d_impl(
 
     let mut preprocess_warnings = Vec::new();
     let forcefield_used = resolve_forcefield(opts.forcefield, &mut preprocess_warnings);
-    let mut report = EmbedReport::new(opts.embed_algorithm, forcefield_used);
+    let mut report = ConformerReport::new(opts.algorithm, forcefield_used);
     report.warnings.extend(preprocess_warnings);
 
     let seed = opts.rng_seed.unwrap_or_else(random::<u64>);
@@ -47,7 +47,7 @@ pub(crate) fn generate_3d_impl(
     } else {
         0
     };
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::Preprocess,
         energy_before: None,
         energy_after: None,
@@ -58,12 +58,12 @@ pub(crate) fn generate_3d_impl(
 
     let stereo_before = stereo_guard::capture_if_3d(&work);
 
-    let summary = match opts.embed_algorithm {
-        EmbedAlgorithm::FragmentRules => embed_fragment_rules(&mut work, &mut rng)?,
-        EmbedAlgorithm::DistanceGeometry => embed_distance_geometry(&mut work, &mut rng)?,
+    let summary = match opts.algorithm {
+        ConformerAlgorithm::FragmentRules => embed_fragment_rules(&mut work, &mut rng)?,
+        ConformerAlgorithm::DistanceGeometry => embed_distance_geometry(&mut work, &mut rng)?,
     };
     report.warnings.extend(summary.warnings);
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::BuildInitial,
         energy_before: None,
         energy_after: None,
@@ -77,7 +77,7 @@ pub(crate) fn generate_3d_impl(
 
     let e0 = model.energy(&coords);
     let coarse = steepest_descent(&model, &mut coords, opts.coarse_steps(), 0.02, 1e-3);
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::CoarseOptimize,
         energy_before: Some(e0),
         energy_after: Some(coarse.energy),
@@ -87,7 +87,7 @@ pub(crate) fn generate_3d_impl(
     });
 
     let rotor = rotor_search::run(&work, &model, &mut coords, opts, &mut rng);
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::RotorSearch,
         energy_before: Some(rotor.energy_before),
         energy_after: Some(rotor.energy_after),
@@ -98,7 +98,7 @@ pub(crate) fn generate_3d_impl(
 
     let e1 = model.energy(&coords);
     let final_min = lbfgs(&model, &mut coords, opts.final_steps(), 5e-4);
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::FinalOptimize,
         energy_before: Some(e1),
         energy_after: Some(final_min.energy),
@@ -116,7 +116,7 @@ pub(crate) fn generate_3d_impl(
     stereo_warnings.extend(stereo_guard::post_generation_warnings(&work));
     let stereo_steps = stereo_warnings.len();
     report.warnings.extend(stereo_warnings);
-    report.stages.push(StageReport {
+    report.stages.push(ConformerStageReport {
         stage: StageKind::StereoCheck,
         energy_before: None,
         energy_after: None,

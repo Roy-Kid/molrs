@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use molrs::element::Element;
 use molrs::hydrogens::implicit_h_count;
-use molrs::molgraph::{AtomId, MolGraph};
 use molrs::rings::RingInfo;
+use molrs::{AtomId, Atomistic};
 
 use super::params::{MMFFParams, PropKey};
 
@@ -35,7 +35,7 @@ impl AtomMmffProps {
 
 /// Compute the MMFF classification properties for an atom.
 fn compute_mmff_props(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_id: AtomId,
     ring_info: &RingInfo,
 ) -> Option<AtomMmffProps> {
@@ -128,7 +128,7 @@ fn compute_mmff_props(
 
 /// Assign MMFF94 atom types to all atoms in the molecular graph.
 pub(crate) fn assign_atom_types(
-    mol: &MolGraph,
+    mol: &Atomistic,
     ring_info: &RingInfo,
     params: &MMFFParams,
 ) -> HashMap<AtomId, u32> {
@@ -149,7 +149,7 @@ pub(crate) fn assign_atom_types(
 fn match_atom_type(
     props: &AtomMmffProps,
     atom_id: AtomId,
-    mol: &MolGraph,
+    mol: &Atomistic,
     ring_info: &RingInfo,
     params: &MMFFParams,
 ) -> u32 {
@@ -182,7 +182,7 @@ fn match_atom_type(
 fn disambiguate(
     candidates: &[u32],
     atom_id: AtomId,
-    _mol: &MolGraph,
+    _mol: &Atomistic,
     ring_info: &RingInfo,
     _params: &MMFFParams,
 ) -> u32 {

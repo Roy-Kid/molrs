@@ -15,7 +15,8 @@
 
 use std::collections::HashMap;
 
-use crate::molgraph::{AtomId, MolGraph, PropValue};
+use crate::atomistic::{AtomId, Atomistic};
+use crate::molgraph::PropValue;
 
 use super::ast::{BondFacts, MolContext, RecursiveEval};
 use super::parser::QueryGraph;
@@ -24,7 +25,7 @@ use super::parser::QueryGraph;
 fn bond_facts(ctx: &MolContext, a: AtomId, b: AtomId) -> Option<BondFacts> {
     let mol = ctx.mol;
     for (bid, bond) in mol.bonds() {
-        let [x, y] = bond.atoms;
+        let (x, y) = (bond.nodes[0], bond.nodes[1]);
         if (x == a && y == b) || (x == b && y == a) {
             let order = match bond.props.get("order") {
                 Some(PropValue::F64(v)) => *v,
@@ -248,7 +249,7 @@ fn backtrack(
 ///
 /// Each result is a vector indexed by query-atom order: `result[i]` is the
 /// `AtomId` matched by query atom `i`.
-pub fn find_matches(query: &QueryGraph, mol: &MolGraph) -> Vec<Vec<AtomId>> {
+pub fn find_matches(query: &QueryGraph, mol: &Atomistic) -> Vec<Vec<AtomId>> {
     let ctx = MolContext::new(mol);
     let mut out = Vec::new();
     enumerate_matches(query, &ctx, None, &mut |assign| {
@@ -259,7 +260,7 @@ pub fn find_matches(query: &QueryGraph, mol: &MolGraph) -> Vec<Vec<AtomId>> {
 }
 
 /// Whether at least one embedding exists.
-pub fn has_match(query: &QueryGraph, mol: &MolGraph) -> bool {
+pub fn has_match(query: &QueryGraph, mol: &Atomistic) -> bool {
     let ctx = MolContext::new(mol);
     let mut found = false;
     enumerate_matches(query, &ctx, None, &mut |_| {

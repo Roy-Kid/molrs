@@ -2,9 +2,9 @@
 //!
 //! [`add_hydrogens`] computes the number of implicit hydrogens each heavy atom
 //! requires (based on its element's default valences and the sum of its current
-//! bond orders) and returns a **new** [`MolGraph`] with explicit H atoms added.
+//! bond orders) and returns a **new** [`Atomistic`] with explicit H atoms added.
 //!
-//! [`remove_hydrogens`] does the inverse: it returns a new [`MolGraph`] with
+//! [`remove_hydrogens`] does the inverse: it returns a new [`Atomistic`] with
 //! all terminal explicit hydrogen atoms removed.
 //!
 //! # Immutability
@@ -24,18 +24,19 @@
 //! late atoms N/O/F the two formulations happen to agree, but for early atoms
 //! (B, C, Si, …) they diverge, which is exactly the bug this rule fixes.
 
+use super::atomistic::{AtomId, Atomistic, BondId};
 use super::element::Element;
-use super::molgraph::{Atom, AtomId, BondId, MolGraph};
+use super::molgraph::Atom;
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Return a new [`MolGraph`] with explicit hydrogen atoms added to every
+/// Return a new [`Atomistic`] with explicit hydrogen atoms added to every
 /// heavy atom that has unfilled valence.
 ///
 /// Hydrogen atoms already present (symbol == "H") are not modified.
-pub fn add_hydrogens(mol: &MolGraph) -> MolGraph {
+pub fn add_hydrogens(mol: &Atomistic) -> Atomistic {
     let mut new_mol = mol.clone();
 
     // Collect (atom_id, n_implicit_h) for all heavy atoms up front so that
@@ -69,15 +70,15 @@ pub fn add_hydrogens(mol: &MolGraph) -> MolGraph {
     new_mol
 }
 
-/// Return a new [`MolGraph`] with all terminal explicit hydrogen atoms removed.
+/// Return a new [`Atomistic`] with all terminal explicit hydrogen atoms removed.
 ///
 /// Only hydrogen atoms with exactly one neighbor (degree == 1) are removed,
 /// which is the standard cheminformatics convention for "non-bridging" H.
 /// Incident bonds, angles, and dihedrals are cascade-deleted by
-/// [`MolGraph::remove_atom`].
+/// [`Atomistic::remove_atom`].
 ///
 /// The original `MolGraph` is never mutated; a clone is returned.
-pub fn remove_hydrogens(mol: &MolGraph) -> MolGraph {
+pub fn remove_hydrogens(mol: &Atomistic) -> Atomistic {
     let mut new_mol = mol.clone();
     let h_ids: Vec<AtomId> = new_mol
         .atoms()
@@ -107,7 +108,7 @@ pub fn remove_hydrogens(mol: &MolGraph) -> MolGraph {
 ///
 /// Returns `None` if the atom has no recognisable element symbol or if its
 /// element has no defined default valences (e.g. noble gases).
-pub fn implicit_h_count(mol: &MolGraph, atom_id: AtomId) -> Option<u32> {
+pub fn implicit_h_count(mol: &Atomistic, atom_id: AtomId) -> Option<u32> {
     let atom = mol.get_atom(atom_id).ok()?;
     let sym = atom.get_str("element")?;
     let element = Element::by_symbol(sym)?;
@@ -160,7 +161,7 @@ pub fn implicit_h_count(mol: &MolGraph, atom_id: AtomId) -> Option<u32> {
 }
 
 /// Sum of bond orders for all bonds incident to `atom_id`.
-fn bond_order_sum(mol: &MolGraph, atom_id: AtomId) -> f64 {
+fn bond_order_sum(mol: &Atomistic, atom_id: AtomId) -> f64 {
     // Build a local bond-id list from bond iteration (adjacency is private).
     bond_ids_for(mol, atom_id)
         .into_iter()
@@ -180,10 +181,10 @@ fn bond_order_sum(mol: &MolGraph, atom_id: AtomId) -> f64 {
 /// O(E) — acceptable for the sizes of typical drug molecules.  If a
 /// `neighbors_with_bonds` API is added to `MolGraph` in the future this can
 /// be replaced with an O(degree) call.
-fn bond_ids_for(mol: &MolGraph, atom_id: AtomId) -> Vec<BondId> {
+fn bond_ids_for(mol: &Atomistic, atom_id: AtomId) -> Vec<BondId> {
     mol.bonds()
         .filter_map(|(bid, bond)| {
-            if bond.atoms[0] == atom_id || bond.atoms[1] == atom_id {
+            if bond.nodes[0] == atom_id || bond.nodes[1] == atom_id {
                 Some(bid)
             } else {
                 None
@@ -199,7 +200,7 @@ fn bond_ids_for(mol: &MolGraph, atom_id: AtomId) -> Vec<BondId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::molgraph::{MolGraph, PropValue};
+    use crate::molgraph::PropValue;
 
     fn atom(sym: &str) -> Atom {
         let mut a = Atom::new();
@@ -207,7 +208,7 @@ mod tests {
         a
     }
 
-    fn bond_with_order(mol: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
+    fn bond_with_order(mol: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
         if let Ok(bid) = mol.add_bond(a, b)
             && let Ok(bond) = mol.get_bond_mut(bid)
         {
@@ -219,7 +220,7 @@ mod tests {
     #[test]
     fn test_methane_skeleton() {
         // Isolated C — should get 4 H.
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c = g.add_atom(atom("C"));
         let result = add_hydrogens(&g);
         // original unchanged
@@ -238,7 +239,7 @@ mod tests {
     #[test]
     fn test_ethane_c_c() {
         // C-C single bond: each C needs 3 H.
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom("C"));
         let c2 = g.add_atom(atom("C"));
         bond_with_order(&mut g, c1, c2, 1.0);
@@ -249,7 +250,7 @@ mod tests {
     #[test]
     fn test_ethylene_c_double_c() {
         // C=C double bond: each C needs 2 H.
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom("C"));
         let c2 = g.add_atom(atom("C"));
         bond_with_order(&mut g, c1, c2, 2.0);
@@ -260,7 +261,7 @@ mod tests {
     #[test]
     fn test_benzene_aromatic() {
         // 6-membered ring with bond order 1.5: each C should get 1 H.
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let ids: Vec<AtomId> = (0..6).map(|_| g.add_atom(atom("C"))).collect();
         for i in 0..6 {
             bond_with_order(&mut g, ids[i], ids[(i + 1) % 6], 1.5);
@@ -273,7 +274,7 @@ mod tests {
     fn test_benzene_kekule() {
         // Kekule benzene: alternating single/double bonds.
         // Each C has bond_order_sum = 1+2 = 3, needs 1 H. Total = 6 H.
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let ids: Vec<AtomId> = (0..6).map(|_| g.add_atom(atom("C"))).collect();
         let orders = [2.0, 1.0, 2.0, 1.0, 2.0, 1.0];
         for i in 0..6 {
@@ -291,12 +292,12 @@ mod tests {
     #[test]
     fn test_ethylene_round_trip_frame() {
         // C=C → to_frame → from_frame → add_hydrogens should give 4H not 6H
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom("C"));
         let c2 = g.add_atom(atom("C"));
         bond_with_order(&mut g, c1, c2, 2.0);
         let frame = g.to_frame();
-        let g2 = MolGraph::from_frame(&frame).unwrap();
+        let g2 = Atomistic::from_frame(&frame).unwrap();
         let result = add_hydrogens(&g2);
         assert_eq!(result.n_atoms(), 6, "C=C round-trip should give 2C + 4H");
     }
@@ -304,12 +305,12 @@ mod tests {
     #[test]
     fn test_acetylene_round_trip_frame() {
         // C#C → to_frame → from_frame → add_hydrogens should give 2H
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom("C"));
         let c2 = g.add_atom(atom("C"));
         bond_with_order(&mut g, c1, c2, 3.0);
         let frame = g.to_frame();
-        let g2 = MolGraph::from_frame(&frame).unwrap();
+        let g2 = Atomistic::from_frame(&frame).unwrap();
         let result = add_hydrogens(&g2);
         assert_eq!(result.n_atoms(), 4, "C#C round-trip should give 2C + 2H");
     }
@@ -317,7 +318,7 @@ mod tests {
     #[test]
     fn test_water() {
         // Isolated O → 2 H
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let _o = g.add_atom(atom("O"));
         let result = add_hydrogens(&g);
         assert_eq!(result.n_atoms(), 3);
@@ -326,7 +327,7 @@ mod tests {
     #[test]
     fn test_ammonia_like() {
         // N with 1 bond → 2 H  (valence 3)
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let n = g.add_atom(atom("N"));
         let c = g.add_atom(atom("C"));
         bond_with_order(&mut g, n, c, 1.0);
@@ -338,7 +339,7 @@ mod tests {
     #[test]
     fn test_nh4_plus() {
         // NH4+: formal_charge=1 on N → needs 4 H
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let mut n_atom = Atom::new();
         n_atom.set("element", "N");
         n_atom.set("formal_charge", 1.0_f64);
@@ -350,7 +351,7 @@ mod tests {
     /// Build a single charged heavy atom (no heavy neighbours) and check its
     /// implicit-H count against RDKit's `GetTotalNumHs()`.
     fn charged_atom_h(sym: &str, fc: f64) -> u32 {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let mut a = Atom::new();
         a.set("element", sym);
         a.set("formal_charge", fc);
@@ -379,14 +380,14 @@ mod tests {
     }
 
     /// Helper: implicit-H on `atom_id` of a built graph.
-    fn h_at(g: &MolGraph, id: AtomId) -> u32 {
+    fn h_at(g: &Atomistic, id: AtomId) -> u32 {
         implicit_h_count(g, id).unwrap_or(0)
     }
 
     #[test]
     fn test_rdkit_multi_atom_parity() {
         // ethane CC: each C has bos 1 -> 3 H
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom("C"));
         let c2 = g.add_atom(atom("C"));
         bond_with_order(&mut g, c1, c2, 1.0);
@@ -394,14 +395,14 @@ mod tests {
         assert_eq!(h_at(&g, c2), 3, "ethane C -> 3 H");
 
         // ethylene C=C: each C has bos 2 -> 2 H
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom("C"));
         let c2 = g.add_atom(atom("C"));
         bond_with_order(&mut g, c1, c2, 2.0);
         assert_eq!(h_at(&g, c1), 2, "ethylene C -> 2 H");
 
         // benzene (aromatic, bos 1.5+1.5=3): each C -> 1 H
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let ids: Vec<AtomId> = (0..6).map(|_| g.add_atom(atom("C"))).collect();
         for i in 0..6 {
             bond_with_order(&mut g, ids[i], ids[(i + 1) % 6], 1.5);
@@ -410,7 +411,7 @@ mod tests {
 
         // acetate CC(=O)[O-]: methyl C -> 3, carbonyl C -> 0,
         // carbonyl O (=O) -> 0, [O-] (single bond, fc -1) -> 0
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c_me = g.add_atom(atom("C"));
         let c_carb = g.add_atom(atom("C"));
         let o_dbl = g.add_atom(atom("O"));
@@ -430,7 +431,7 @@ mod tests {
     #[test]
     fn test_no_double_h_on_existing_hydrogen() {
         // Existing H atoms should not get more H added.
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c = g.add_atom(atom("C"));
         let h = g.add_atom(atom("H"));
         bond_with_order(&mut g, c, h, 1.0);
@@ -448,7 +449,7 @@ mod tests {
     #[test]
     fn test_remove_hydrogens_methane() {
         // C + 4H → remove → 1 atom (C only), 0 bonds
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         g.add_atom(atom("C"));
         let with_h = add_hydrogens(&g);
         assert_eq!(with_h.n_atoms(), 5);
@@ -460,7 +461,7 @@ mod tests {
     #[test]
     fn test_remove_hydrogens_ethane() {
         // 2C + 6H → remove → 2 atoms, 1 bond (C-C preserved)
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom("C"));
         let c2 = g.add_atom(atom("C"));
         bond_with_order(&mut g, c1, c2, 1.0);
@@ -474,7 +475,7 @@ mod tests {
     #[test]
     fn test_remove_hydrogens_immutable() {
         // Original graph must remain unchanged after remove_hydrogens
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         g.add_atom(atom("C"));
         let with_h = add_hydrogens(&g);
         let before = with_h.n_atoms();
@@ -485,7 +486,7 @@ mod tests {
     #[test]
     fn test_remove_hydrogens_no_h_present() {
         // C=C without any H → unchanged
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom("C"));
         let c2 = g.add_atom(atom("C"));
         bond_with_order(&mut g, c1, c2, 2.0);
@@ -497,7 +498,7 @@ mod tests {
     #[test]
     fn test_remove_hydrogens_cascades_angles() {
         // Build C with H and an angle involving H, then remove H → angle gone
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c = g.add_atom(atom("C"));
         let h1 = g.add_atom(atom("H"));
         let h2 = g.add_atom(atom("H"));

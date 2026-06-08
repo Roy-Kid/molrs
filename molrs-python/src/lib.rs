@@ -52,8 +52,8 @@ use region::{PyHollowSphere, PyRegion, PySphere};
 pub(crate) mod molgraph;
 use molgraph::{PyAtomistic, PyCoarseGrain, PyGraph};
 
-mod embed;
-use embed::{PyEmbedOptions, PyEmbedReport, PyEmbedResult, PyStageReport};
+mod conformer;
+use conformer::{PyConformer, PyConformerReport, PyConformerStageReport};
 
 mod forcefield;
 use forcefield::{PyForceField, PyMMFFTypifier, PyPotentials};
@@ -131,12 +131,10 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAtomistic>()?;
     m.add_class::<PyCoarseGrain>()?;
 
-    // Embed
-    m.add_class::<PyEmbedOptions>()?;
-    m.add_class::<PyEmbedReport>()?;
-    m.add_class::<PyEmbedResult>()?;
-    m.add_class::<PyStageReport>()?;
-    m.add_function(wrap_pyfunction!(embed::generate_3d_py, m)?)?;
+    // Conformer generation
+    m.add_class::<PyConformer>()?;
+    m.add_class::<PyConformerReport>()?;
+    m.add_class::<PyConformerStageReport>()?;
 
     // Force field
     m.add_class::<PyForceField>()?;

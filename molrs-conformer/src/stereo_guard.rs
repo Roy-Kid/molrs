@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use molrs::molgraph::{AtomId, BondId, MolGraph};
+use molrs::atomistic::{AtomId, Atomistic, BondId};
 use molrs::stereo::{
     BondStereo, TetrahedralStereo, assign_bond_stereo_from_3d, assign_stereo_from_3d,
     find_chiral_centers,
@@ -14,7 +14,7 @@ pub(crate) struct StereoSnapshot {
     bonds: HashMap<BondId, BondStereo>,
 }
 
-pub(crate) fn capture_if_3d(mol: &MolGraph) -> Option<StereoSnapshot> {
+pub(crate) fn capture_if_3d(mol: &Atomistic) -> Option<StereoSnapshot> {
     let has_all_coords = mol.atoms().all(|(_, atom)| {
         atom.get_f64("x").is_some() && atom.get_f64("y").is_some() && atom.get_f64("z").is_some()
     });
@@ -70,7 +70,7 @@ pub(crate) fn compare_snapshots(
     warnings
 }
 
-pub(crate) fn post_generation_warnings(mol: &MolGraph) -> Vec<String> {
+pub(crate) fn post_generation_warnings(mol: &Atomistic) -> Vec<String> {
     let mut warnings = Vec::new();
 
     let chiral = find_chiral_centers(mol);

@@ -21,7 +21,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 
-use molrs_core::{Atom, AtomId, BondId, MolGraph, PropValue, SmartsPattern, perceive_aromaticity};
+use molrs_core::{Atom, AtomId, Atomistic, BondId, PropValue, SmartsPattern, perceive_aromaticity};
 use serde_json::Value;
 
 const MOLECULES: &[&str] = &[
@@ -49,7 +49,7 @@ fn fixtures_dir() -> PathBuf {
 
 /// Minimal V2000 molfile loader: element + connectivity + bond order, atom
 /// order preserved. Coordinates parsed but unused.
-fn load_sdf(name: &str) -> (MolGraph, Vec<AtomId>) {
+fn load_sdf(name: &str) -> (Atomistic, Vec<AtomId>) {
     let path = fixtures_dir().join(format!("{name}.sdf"));
     let text = fs::read_to_string(&path).expect("read sdf");
     let lines: Vec<&str> = text.lines().collect();
@@ -58,7 +58,7 @@ fn load_sdf(name: &str) -> (MolGraph, Vec<AtomId>) {
     let n_atoms: usize = counts[0..3].trim().parse().expect("atom count");
     let n_bonds: usize = counts[3..6].trim().parse().expect("bond count");
 
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let mut ids = Vec::with_capacity(n_atoms);
     for i in 0..n_atoms {
         let l = lines[4 + i];
@@ -88,7 +88,7 @@ fn load_meta(name: &str) -> Value {
 }
 
 /// Read the perceived `is_aromatic` flag of an atom (0/1).
-fn atom_is_aromatic(g: &MolGraph, id: AtomId) -> i64 {
+fn atom_is_aromatic(g: &Atomistic, id: AtomId) -> i64 {
     match g.get_atom(id).unwrap().get("is_aromatic") {
         Some(PropValue::Int(v)) => *v as i64,
         Some(PropValue::F64(v)) => (*v != 0.0) as i64,
@@ -97,7 +97,7 @@ fn atom_is_aromatic(g: &MolGraph, id: AtomId) -> i64 {
 }
 
 /// Whether a bond is perceived aromatic (order ~= 1.5).
-fn bond_is_aromatic(g: &MolGraph, bid: BondId) -> bool {
+fn bond_is_aromatic(g: &Atomistic, bid: BondId) -> bool {
     match g.get_bond(bid).unwrap().props.get("order") {
         Some(PropValue::F64(v)) => (v - 1.5).abs() < 1e-6,
         _ => false,
@@ -132,8 +132,8 @@ fn test_per_atom_and_bond_match_rdkit() {
         let mut got_bonds: BTreeSet<(usize, usize)> = BTreeSet::new();
         for (bid, bond) in g.bonds() {
             if bond_is_aromatic(&g, bid) {
-                let i = row_of[&bond.atoms[0]];
-                let j = row_of[&bond.atoms[1]];
+                let i = row_of[&bond.nodes[0]];
+                let j = row_of[&bond.nodes[1]];
                 got_bonds.insert((i.min(j), i.max(j)));
             }
         }

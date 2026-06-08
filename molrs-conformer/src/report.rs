@@ -1,6 +1,6 @@
 //! Stage-level reporting for 3D generation.
 
-use super::options::{EmbedAlgorithm, ForceFieldKind};
+use super::options::{ConformerAlgorithm, ForceFieldKind};
 
 /// Pipeline stage identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub enum StageKind {
 
 /// Single-stage run metrics.
 #[derive(Debug, Clone)]
-pub struct StageReport {
+pub struct ConformerStageReport {
     /// Stage identifier.
     pub stage: StageKind,
     /// Optional input energy for the stage.
@@ -38,22 +38,22 @@ pub struct StageReport {
 
 /// End-to-end generation report.
 #[derive(Debug, Clone)]
-pub struct EmbedReport {
+pub struct ConformerReport {
     /// Embedding algorithm used by stage-1.
-    pub embed_algorithm_used: EmbedAlgorithm,
+    pub embed_algorithm_used: ConformerAlgorithm,
     /// Resolved backend used by this run.
     pub forcefield_used: ForceFieldKind,
     /// Stage-by-stage execution data.
-    pub stages: Vec<StageReport>,
+    pub stages: Vec<ConformerStageReport>,
     /// Non-fatal issues and behavior notes.
     pub warnings: Vec<String>,
     /// Final model energy if available.
     pub final_energy: Option<f64>,
 }
 
-impl EmbedReport {
+impl ConformerReport {
     pub(crate) fn new(
-        embed_algorithm_used: EmbedAlgorithm,
+        embed_algorithm_used: ConformerAlgorithm,
         forcefield_used: ForceFieldKind,
     ) -> Self {
         Self {

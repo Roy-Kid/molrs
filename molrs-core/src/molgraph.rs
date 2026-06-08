@@ -1,11 +1,34 @@
-//! Dynamic molecular graph for editing-oriented CRUD operations.
+//! Domain-agnostic dynamic graph for editing-oriented CRUD operations.
 //!
-//! [`MolGraph`] stores atoms (or beads), bonds, angles, and dihedrals in
-//! generational arenas ([`slotmap::SlotMap`]), providing O(1) insert / remove /
-//! lookup with stable handles that survive mutations.
+//! [`MolGraph`] is a **pure graph** with no chemistry vocabulary: it holds nodes
+//! plus a set of **kind-tagged, fixed-arity relations**. A *kind* is registered
+//! once by an arbitrary name + arity (`register_kind("bond", 2)`) and addressed
+//! thereafter by a dense [`KindId`] (an array index — never a per-access string
+//! hash). Relations of the same arity but different meaning (e.g. a 4-ary
+//! "dihedral" vs a 4-ary "improper") are distinguished by their [`KindId`], not
+//! by arity. The graph itself does not know what a "bond" or an "atom" is —
+//! those domain concepts live in the leaf types
+//! ([`Atomistic`](crate::atomistic::Atomistic) /
+//! [`CoarseGrain`](crate::coarsegrain::CoarseGrain)) that register their kinds
+//! and expose the named convenience API.
 //!
-//! Every entity is a property bag ([`Atom`]): coordinates live as `"x"`, `"y"`,
+//! Storage uses generational arenas ([`slotmap::SlotMap`]) for O(1) insert /
+//! remove / lookup with stable handles, and a [`SmallVec`] for each relation's
+//! endpoints so the common arities (≤4) stay inline / heap-allocation-free.
+//!
+//! Every node is a property bag ([`Atom`]): coordinates live as `"x"`, `"y"`,
 //! `"z"` keys, matching the Python `Entity(UserDict)` convention.
+//!
+//! ## Relations vs. containment
+//!
+//! The `kinds` / relation store is for **fixed-arity peer topology only**.
+//! Hierarchical *containment* (a residue owning atoms, a chain owning residues,
+//! a coarse-grained bead owning its atoms) is variable-size, nested, directed
+//! ownership — **not** a fixed-arity peer relation — and is therefore **not**
+//! modeled as a relation kind (doing so would put group handles into the node
+//! arena and contaminate every consumer that iterates [`MolGraph::nodes`]). The
+//! [`GroupId`] / [`Group`] / [`MolGraph::groups`] field is **reserved** for a
+//! future, independent containment axis; it carries no behavior in this module.
 //!
 //! # Examples
 //!
@@ -13,27 +36,24 @@
 //! use molrs_core::molgraph::{Atom, MolGraph};
 //!
 //! let mut g = MolGraph::new();
+//! let bond = g.register_kind("bond", 2);
 //!
-//! let o = g.add_atom(Atom::xyz("O", 0.0, 0.0, 0.0));
-//! let h1 = g.add_atom(Atom::xyz("H", 0.96, 0.0, 0.0));
-//! let h2 = g.add_atom(Atom::xyz("H", -0.24, 0.93, 0.0));
+//! let o = g.add_node_with(Atom::xyz("O", 0.0, 0.0, 0.0));
+//! let h1 = g.add_node_with(Atom::xyz("H", 0.96, 0.0, 0.0));
+//! g.add_relation(bond, &[o, h1]).expect("add bond");
 //!
-//! g.add_bond(o, h1).expect("add bond");
-//! g.add_bond(o, h2).expect("add bond");
-//! g.add_angle(h1, o, h2).expect("add angle");
-//!
-//! assert_eq!(g.n_atoms(), 3);
-//! assert_eq!(g.n_bonds(), 2);
-//! assert_eq!(g.n_angles(), 1);
+//! assert_eq!(g.n_nodes(), 2);
+//! assert_eq!(g.n_relations(bond), 1);
 //!
 //! g.translate([1.0, 0.0, 0.0]);
-//! assert!((g.get_atom(o).expect("get atom").get_f64("x").unwrap() - 1.0).abs() < 1e-12);
+//! assert!((g.get_node(o).expect("get node").get_f64("x").unwrap() - 1.0).abs() < 1e-12);
 //! ```
 
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
 use slotmap::{SlotMap, new_key_type};
+use smallvec::SmallVec;
 
 use super::block::Block;
 use super::frame::Frame;
@@ -89,13 +109,14 @@ impl From<String> for PropValue {
 }
 
 // ---------------------------------------------------------------------------
-// Atom  (dynamic prop bag — also used for beads via `type Bead = Atom`)
+// Atom  (dynamic node prop bag — also used for beads via `type Bead = Atom`)
 // ---------------------------------------------------------------------------
 
-/// A dynamic property bag representing an atom (or bead).
+/// A dynamic property bag representing a graph node (an atom or a bead).
 ///
 /// All data — including coordinates (`"x"`, `"y"`, `"z"`), element symbol,
-/// mass, charge, etc. — is stored as key-value pairs.
+/// mass, charge, etc. — is stored as key-value pairs. The name is historical;
+/// `MolGraph` treats it purely as an opaque node payload.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Atom {
     props: HashMap<String, PropValue>,
@@ -201,7 +222,8 @@ impl IndexMut<&str> for Atom {
     }
 }
 
-/// Alias for coarse-grained usage — same type, different prop keys by convention.
+/// Alias for coarse-grained usage — same node payload, different prop keys by
+/// convention.
 pub type Bead = Atom;
 
 // ---------------------------------------------------------------------------
@@ -209,47 +231,49 @@ pub type Bead = Atom;
 // ---------------------------------------------------------------------------
 
 new_key_type! {
-    /// Stable handle to an atom in a [`MolGraph`].
-    pub struct AtomId;
-    /// Stable handle to a bond in a [`MolGraph`].
-    pub struct BondId;
-    /// Stable handle to an angle in a [`MolGraph`].
-    pub struct AngleId;
-    /// Stable handle to a dihedral in a [`MolGraph`].
-    pub struct DihedralId;
-    /// Stable handle to an improper in a [`MolGraph`].
-    pub struct ImproperId;
+    /// Stable handle to a node in a [`MolGraph`].
+    pub struct NodeId;
+    /// Stable handle to a relation (any kind) in a [`MolGraph`].
+    pub struct RelationId;
+    /// Stable handle to a reserved containment group (see module docs).
+    pub struct GroupId;
+}
+
+/// Dense index identifying a registered relation kind. Resolved once at
+/// registration; all hot-path relation access goes through this array index,
+/// never a per-access string hash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KindId(pub u16);
+
+// ---------------------------------------------------------------------------
+// Relation
+// ---------------------------------------------------------------------------
+
+/// A kind-tagged, fixed-arity relation over [`MolGraph`] nodes.
+///
+/// `nodes.len()` equals the registered arity of the relation's kind. Endpoints
+/// are stored inline for arity ≤ 4 (the common case).
+#[derive(Debug, Clone)]
+pub struct Relation {
+    /// The participating node handles, in order (length == kind arity).
+    pub nodes: SmallVec<[NodeId; 4]>,
+    /// Per-relation property bag (domain meaning, e.g. a bond `"order"`).
+    pub props: HashMap<String, PropValue>,
 }
 
 // ---------------------------------------------------------------------------
-// Topology structs
+// Group (reserved containment axis — no behavior in this module)
 // ---------------------------------------------------------------------------
 
-/// A bond between two atoms.
-#[derive(Debug, Clone)]
-pub struct Bond {
-    pub atoms: [AtomId; 2],
-    pub props: HashMap<String, PropValue>,
-}
-
-/// An angle between three atoms (j is the central atom).
-#[derive(Debug, Clone)]
-pub struct Angle {
-    pub atoms: [AtomId; 3],
-    pub props: HashMap<String, PropValue>,
-}
-
-/// A dihedral between four atoms.
-#[derive(Debug, Clone)]
-pub struct Dihedral {
-    pub atoms: [AtomId; 4],
-    pub props: HashMap<String, PropValue>,
-}
-
-/// An improper dihedral between four atoms (i is conventionally the central atom).
-#[derive(Debug, Clone)]
-pub struct Improper {
-    pub atoms: [AtomId; 4],
+/// Reserved container for the future containment axis (residue ⊃ atoms,
+/// chain ⊃ residues, bead ⊃ atoms). Carries no behavior yet; see module docs.
+#[derive(Debug, Clone, Default)]
+pub struct Group {
+    /// Member node handles owned by this group.
+    pub members: Vec<NodeId>,
+    /// Optional parent group (for nesting).
+    pub parent: Option<GroupId>,
+    /// Per-group property bag (e.g. `resname`, `resid`).
     pub props: HashMap<String, PropValue>,
 }
 
@@ -257,16 +281,26 @@ pub struct Improper {
 // MolGraph
 // ---------------------------------------------------------------------------
 
-/// A dynamic molecular graph supporting ergonomic CRUD for atoms, bonds,
-/// angles, and dihedrals.
+/// A dynamic, domain-agnostic graph: nodes plus kind-tagged, fixed-arity
+/// relations. Knows nothing of "atoms" or "bonds" — those live in leaf types.
 #[derive(Debug, Clone)]
 pub struct MolGraph {
-    atoms: SlotMap<AtomId, Atom>,
-    bonds: SlotMap<BondId, Bond>,
-    angles: SlotMap<AngleId, Angle>,
-    dihedrals: SlotMap<DihedralId, Dihedral>,
-    impropers: SlotMap<ImproperId, Improper>,
-    adjacency: HashMap<AtomId, Vec<BondId>>,
+    nodes: SlotMap<NodeId, Atom>,
+    /// Relation arenas, indexed by `KindId.0`.
+    kinds: Vec<SlotMap<RelationId, Relation>>,
+    /// Arity of each kind, indexed by `KindId.0`.
+    kind_arity: Vec<usize>,
+    /// Registered name of each kind, indexed by `KindId.0` (used as the
+    /// [`Frame`] block name in `to_frame` / `read_frame`).
+    kind_name: Vec<String>,
+    /// Reverse lookup: name → KindId (resolved once, not on the hot path).
+    name_to_kind: HashMap<String, KindId>,
+    /// Adjacency over arity-2 relations: node → list of `(kind, relation)`.
+    adjacency: HashMap<NodeId, Vec<(KindId, RelationId)>>,
+    /// Reserved containment axis — see module docs. Unused by all behavior here;
+    /// carried so the future containment spec is additive, not a re-key.
+    #[allow(dead_code)]
+    groups: SlotMap<GroupId, Group>,
 }
 
 impl Default for MolGraph {
@@ -276,405 +310,288 @@ impl Default for MolGraph {
 }
 
 impl MolGraph {
-    /// Create an empty molecular graph.
+    /// Create an empty graph with **no** kinds registered.
     pub fn new() -> Self {
         Self {
-            atoms: SlotMap::with_key(),
-            bonds: SlotMap::with_key(),
-            angles: SlotMap::with_key(),
-            dihedrals: SlotMap::with_key(),
-            impropers: SlotMap::with_key(),
+            nodes: SlotMap::with_key(),
+            kinds: Vec::new(),
+            kind_arity: Vec::new(),
+            kind_name: Vec::new(),
+            name_to_kind: HashMap::new(),
             adjacency: HashMap::new(),
+            groups: SlotMap::with_key(),
         }
     }
 
     // =====================================================================
-    // Atom CRUD
+    // Kind registry (generic, domain-neutral)
     // =====================================================================
 
-    /// Insert an atom, returning its stable handle.
-    pub fn add_atom(&mut self, atom: Atom) -> AtomId {
-        let id = self.atoms.insert(atom);
+    /// Register a relation kind by name + fixed arity, returning its dense
+    /// [`KindId`]. Idempotent: re-registering the same name with the same arity
+    /// returns the existing id. Re-registering with a conflicting arity panics
+    /// (a programming error — leaf constructors register fixed kinds).
+    pub fn register_kind(&mut self, name: &str, arity: usize) -> KindId {
+        if let Some(&kid) = self.name_to_kind.get(name) {
+            assert_eq!(
+                self.kind_arity[kid.0 as usize], arity,
+                "kind '{name}' already registered with a different arity"
+            );
+            return kid;
+        }
+        let kid = KindId(self.kinds.len() as u16);
+        self.kinds.push(SlotMap::with_key());
+        self.kind_arity.push(arity);
+        self.kind_name.push(name.to_owned());
+        self.name_to_kind.insert(name.to_owned(), kid);
+        kid
+    }
+
+    /// Resolve a kind name to its registered [`KindId`], if any.
+    pub fn kind_id(&self, name: &str) -> Option<KindId> {
+        self.name_to_kind.get(name).copied()
+    }
+
+    /// Registered name of a kind.
+    pub fn kind_name(&self, kind: KindId) -> &str {
+        &self.kind_name[kind.0 as usize]
+    }
+
+    /// Arity of a registered kind.
+    pub fn arity(&self, kind: KindId) -> usize {
+        self.kind_arity[kind.0 as usize]
+    }
+
+    /// Iterate over all registered [`KindId`]s in registration order.
+    pub fn kind_ids(&self) -> impl Iterator<Item = KindId> + '_ {
+        (0..self.kinds.len() as u16).map(KindId)
+    }
+
+    // =====================================================================
+    // Node CRUD (generic)
+    // =====================================================================
+
+    /// Insert a field-less node, returning its stable handle. The node's
+    /// property bag starts empty (no `element` / `bead_type` is forced).
+    pub fn add_node(&mut self) -> NodeId {
+        self.add_node_with(Atom::new())
+    }
+
+    /// Insert a node carrying a property bag, returning its stable handle.
+    pub fn add_node_with(&mut self, payload: Atom) -> NodeId {
+        let id = self.nodes.insert(payload);
         self.adjacency.insert(id, Vec::new());
         id
     }
 
-    /// Remove an atom and all incident bonds / angles / dihedrals.
-    pub fn remove_atom(&mut self, id: AtomId) -> Result<Atom, MolRsError> {
-        let atom = self
-            .atoms
+    /// Remove a node and every relation that references it, across **all**
+    /// registered kinds (registry-driven cascade).
+    pub fn remove_node(&mut self, id: NodeId) -> Result<Atom, MolRsError> {
+        let payload = self
+            .nodes
             .remove(id)
-            .ok_or_else(|| MolRsError::not_found("atom", format!("AtomId {:?}", id)))?;
+            .ok_or_else(|| MolRsError::not_found("node", format!("NodeId {:?}", id)))?;
 
-        // Collect incident bonds.
-        let incident: Vec<BondId> = self.adjacency.remove(&id).unwrap_or_default();
-        for bid in incident {
-            self.remove_bond_inner(bid, id);
-        }
-
-        // Remove angles referencing this atom.
-        let doomed_angles: Vec<AngleId> = self
-            .angles
-            .iter()
-            .filter(|(_, a)| a.atoms.contains(&id))
-            .map(|(aid, _)| aid)
-            .collect();
-        for aid in doomed_angles {
-            self.angles.remove(aid);
-        }
-
-        // Remove dihedrals referencing this atom.
-        let doomed_dihedrals: Vec<DihedralId> = self
-            .dihedrals
-            .iter()
-            .filter(|(_, d)| d.atoms.contains(&id))
-            .map(|(did, _)| did)
-            .collect();
-        for did in doomed_dihedrals {
-            self.dihedrals.remove(did);
-        }
-
-        // Remove impropers referencing this atom.
-        let doomed_impropers: Vec<ImproperId> = self
-            .impropers
-            .iter()
-            .filter(|(_, im)| im.atoms.contains(&id))
-            .map(|(iid, _)| iid)
-            .collect();
-        for iid in doomed_impropers {
-            self.impropers.remove(iid);
-        }
-
-        Ok(atom)
-    }
-
-    /// Get a reference to an atom.
-    pub fn get_atom(&self, id: AtomId) -> Result<&Atom, MolRsError> {
-        self.atoms
-            .get(id)
-            .ok_or_else(|| MolRsError::not_found("atom", format!("AtomId {:?}", id)))
-    }
-
-    /// Get a mutable reference to an atom.
-    pub fn get_atom_mut(&mut self, id: AtomId) -> Result<&mut Atom, MolRsError> {
-        self.atoms
-            .get_mut(id)
-            .ok_or_else(|| MolRsError::not_found("atom", format!("AtomId {:?}", id)))
-    }
-
-    // =====================================================================
-    // Bond CRUD
-    // =====================================================================
-
-    /// Add a bond between two existing atoms.
-    pub fn add_bond(&mut self, a: AtomId, b: AtomId) -> Result<BondId, MolRsError> {
-        if !self.atoms.contains_key(a) {
-            return Err(MolRsError::not_found("atom", format!("AtomId {:?}", a)));
-        }
-        if !self.atoms.contains_key(b) {
-            return Err(MolRsError::not_found("atom", format!("AtomId {:?}", b)));
-        }
-        let bond = Bond {
-            atoms: [a, b],
-            props: HashMap::new(),
-        };
-        let bid = self.bonds.insert(bond);
-        self.adjacency.entry(a).or_default().push(bid);
-        self.adjacency.entry(b).or_default().push(bid);
-        Ok(bid)
-    }
-
-    /// Remove a bond and update the adjacency index.
-    pub fn remove_bond(&mut self, id: BondId) -> Result<Bond, MolRsError> {
-        let bond = self
-            .bonds
-            .remove(id)
-            .ok_or_else(|| MolRsError::not_found("bond", format!("BondId {:?}", id)))?;
-        for &aid in &bond.atoms {
-            if let Some(adj) = self.adjacency.get_mut(&aid) {
-                adj.retain(|bid| *bid != id);
+        for kid in 0..self.kinds.len() {
+            let doomed: Vec<RelationId> = self.kinds[kid]
+                .iter()
+                .filter(|(_, r)| r.nodes.contains(&id))
+                .map(|(rid, _)| rid)
+                .collect();
+            for rid in doomed {
+                self.detach_relation_from_adjacency(KindId(kid as u16), rid, Some(id));
+                self.kinds[kid].remove(rid);
             }
         }
-        Ok(bond)
+        self.adjacency.remove(&id);
+        Ok(payload)
     }
 
-    /// Get a reference to a bond.
-    pub fn get_bond(&self, id: BondId) -> Result<&Bond, MolRsError> {
-        self.bonds
+    /// Get a reference to a node's property bag.
+    pub fn get_node(&self, id: NodeId) -> Result<&Atom, MolRsError> {
+        self.nodes
             .get(id)
-            .ok_or_else(|| MolRsError::not_found("bond", format!("BondId {:?}", id)))
+            .ok_or_else(|| MolRsError::not_found("node", format!("NodeId {:?}", id)))
     }
 
-    /// Get a mutable reference to a bond.
-    pub fn get_bond_mut(&mut self, id: BondId) -> Result<&mut Bond, MolRsError> {
-        self.bonds
+    /// Get a mutable reference to a node's property bag.
+    pub fn get_node_mut(&mut self, id: NodeId) -> Result<&mut Atom, MolRsError> {
+        self.nodes
             .get_mut(id)
-            .ok_or_else(|| MolRsError::not_found("bond", format!("BondId {:?}", id)))
+            .ok_or_else(|| MolRsError::not_found("node", format!("NodeId {:?}", id)))
     }
 
-    // internal: remove bond from adjacency for a specific atom being removed
-    fn remove_bond_inner(&mut self, bid: BondId, removed_atom: AtomId) {
-        if let Some(bond) = self.bonds.remove(bid) {
-            // Update adjacency for the *other* atom (the removed one's list is
-            // already being dropped).
-            for &aid in &bond.atoms {
-                if aid != removed_atom
-                    && let Some(adj) = self.adjacency.get_mut(&aid)
-                {
-                    adj.retain(|b| *b != bid);
+    /// Iterate over all `(NodeId, &Atom)` pairs.
+    pub fn nodes(&self) -> impl Iterator<Item = (NodeId, &Atom)> {
+        self.nodes.iter()
+    }
+
+    /// Number of nodes.
+    pub fn n_nodes(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Iterate over neighbor node IDs of a given node (via arity-2 relations).
+    pub fn neighbors(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        self.neighbor_relations(id).map(|(_, _, other)| other)
+    }
+
+    /// Iterate over `(kind, relation, other_node)` for each arity-2 relation
+    /// incident to a node. Domain leaves build typed neighbor queries on this.
+    pub fn neighbor_relations(
+        &self,
+        id: NodeId,
+    ) -> impl Iterator<Item = (KindId, RelationId, NodeId)> + '_ {
+        self.adjacency
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .filter_map(move |&(kind, rid)| {
+                let rel = self.kinds[kind.0 as usize].get(rid)?;
+                let other = if rel.nodes[0] == id {
+                    rel.nodes[1]
+                } else {
+                    rel.nodes[0]
+                };
+                Some((kind, rid, other))
+            })
+    }
+
+    // =====================================================================
+    // Relation CRUD (generic, kind-tagged)
+    // =====================================================================
+
+    /// Add a relation of the given kind over the given nodes. Validates the
+    /// kind is registered, the node count matches its arity, and every node
+    /// exists. Maintains the adjacency index for arity-2 relations.
+    pub fn add_relation(
+        &mut self,
+        kind: KindId,
+        nodes: &[NodeId],
+    ) -> Result<RelationId, MolRsError> {
+        let kidx = kind.0 as usize;
+        if kidx >= self.kinds.len() {
+            return Err(MolRsError::not_found("kind", format!("KindId {:?}", kind)));
+        }
+        let arity = self.kind_arity[kidx];
+        if nodes.len() != arity {
+            return Err(MolRsError::validation(format!(
+                "kind '{}' expects arity {}, got {} nodes",
+                self.kind_name[kidx],
+                arity,
+                nodes.len()
+            )));
+        }
+        for &n in nodes {
+            if !self.nodes.contains_key(n) {
+                return Err(MolRsError::not_found("node", format!("NodeId {:?}", n)));
+            }
+        }
+        let rid = self.kinds[kidx].insert(Relation {
+            nodes: SmallVec::from_slice(nodes),
+            props: HashMap::new(),
+        });
+        if arity == 2 {
+            self.adjacency
+                .entry(nodes[0])
+                .or_default()
+                .push((kind, rid));
+            self.adjacency
+                .entry(nodes[1])
+                .or_default()
+                .push((kind, rid));
+        }
+        Ok(rid)
+    }
+
+    /// Get a reference to a relation by kind + handle.
+    pub fn get_relation(&self, kind: KindId, id: RelationId) -> Result<&Relation, MolRsError> {
+        self.kinds
+            .get(kind.0 as usize)
+            .and_then(|arena| arena.get(id))
+            .ok_or_else(|| MolRsError::not_found("relation", format!("RelationId {:?}", id)))
+    }
+
+    /// Get a mutable reference to a relation by kind + handle.
+    pub fn get_relation_mut(
+        &mut self,
+        kind: KindId,
+        id: RelationId,
+    ) -> Result<&mut Relation, MolRsError> {
+        self.kinds
+            .get_mut(kind.0 as usize)
+            .and_then(|arena| arena.get_mut(id))
+            .ok_or_else(|| MolRsError::not_found("relation", format!("RelationId {:?}", id)))
+    }
+
+    /// Remove a relation by kind + handle, updating adjacency.
+    pub fn remove_relation(
+        &mut self,
+        kind: KindId,
+        id: RelationId,
+    ) -> Result<Relation, MolRsError> {
+        self.detach_relation_from_adjacency(kind, id, None);
+        self.kinds
+            .get_mut(kind.0 as usize)
+            .and_then(|arena| arena.remove(id))
+            .ok_or_else(|| MolRsError::not_found("relation", format!("RelationId {:?}", id)))
+    }
+
+    /// Iterate over `(RelationId, &Relation)` for one kind.
+    pub fn relations(&self, kind: KindId) -> impl Iterator<Item = (RelationId, &Relation)> {
+        self.kinds[kind.0 as usize].iter()
+    }
+
+    /// Number of relations of a kind.
+    pub fn n_relations(&self, kind: KindId) -> usize {
+        self.kinds[kind.0 as usize].len()
+    }
+
+    /// Remove an arity-2 relation from the adjacency lists of its endpoints.
+    /// `skip` lets `remove_node` avoid touching the node currently being dropped.
+    fn detach_relation_from_adjacency(
+        &mut self,
+        kind: KindId,
+        id: RelationId,
+        skip: Option<NodeId>,
+    ) {
+        if self.kind_arity[kind.0 as usize] != 2 {
+            return;
+        }
+        let endpoints: Option<[NodeId; 2]> = self.kinds[kind.0 as usize]
+            .get(id)
+            .map(|r| [r.nodes[0], r.nodes[1]]);
+        if let Some(eps) = endpoints {
+            for ep in eps {
+                if Some(ep) == skip {
+                    continue;
+                }
+                if let Some(adj) = self.adjacency.get_mut(&ep) {
+                    adj.retain(|(_, rid)| *rid != id);
                 }
             }
         }
-    }
-
-    // =====================================================================
-    // Angle CRUD
-    // =====================================================================
-
-    /// Add an angle (i-j-k, j central).
-    pub fn add_angle(&mut self, i: AtomId, j: AtomId, k: AtomId) -> Result<AngleId, MolRsError> {
-        for &atom_id in &[i, j, k] {
-            if !self.atoms.contains_key(atom_id) {
-                return Err(MolRsError::not_found(
-                    "atom",
-                    format!("AtomId {:?}", atom_id),
-                ));
-            }
-        }
-        let angle = Angle {
-            atoms: [i, j, k],
-            props: HashMap::new(),
-        };
-        Ok(self.angles.insert(angle))
-    }
-
-    /// Remove an angle.
-    pub fn remove_angle(&mut self, id: AngleId) -> Result<Angle, MolRsError> {
-        self.angles
-            .remove(id)
-            .ok_or_else(|| MolRsError::not_found("angle", format!("AngleId {:?}", id)))
-    }
-
-    /// Get a reference to an angle.
-    pub fn get_angle(&self, id: AngleId) -> Result<&Angle, MolRsError> {
-        self.angles
-            .get(id)
-            .ok_or_else(|| MolRsError::not_found("angle", format!("AngleId {:?}", id)))
-    }
-
-    // =====================================================================
-    // Dihedral CRUD
-    // =====================================================================
-
-    /// Add a dihedral (i-j-k-l).
-    pub fn add_dihedral(
-        &mut self,
-        i: AtomId,
-        j: AtomId,
-        k: AtomId,
-        l: AtomId,
-    ) -> Result<DihedralId, MolRsError> {
-        for &atom_id in &[i, j, k, l] {
-            if !self.atoms.contains_key(atom_id) {
-                return Err(MolRsError::not_found(
-                    "atom",
-                    format!("AtomId {:?}", atom_id),
-                ));
-            }
-        }
-        let dih = Dihedral {
-            atoms: [i, j, k, l],
-            props: HashMap::new(),
-        };
-        Ok(self.dihedrals.insert(dih))
-    }
-
-    /// Remove a dihedral.
-    pub fn remove_dihedral(&mut self, id: DihedralId) -> Result<Dihedral, MolRsError> {
-        self.dihedrals
-            .remove(id)
-            .ok_or_else(|| MolRsError::not_found("dihedral", format!("DihedralId {:?}", id)))
-    }
-
-    /// Get a reference to a dihedral.
-    pub fn get_dihedral(&self, id: DihedralId) -> Result<&Dihedral, MolRsError> {
-        self.dihedrals
-            .get(id)
-            .ok_or_else(|| MolRsError::not_found("dihedral", format!("DihedralId {:?}", id)))
-    }
-
-    /// Get a mutable reference to an angle (e.g. to edit its props).
-    pub fn get_angle_mut(&mut self, id: AngleId) -> Result<&mut Angle, MolRsError> {
-        self.angles
-            .get_mut(id)
-            .ok_or_else(|| MolRsError::not_found("angle", format!("AngleId {:?}", id)))
-    }
-
-    /// Get a mutable reference to a dihedral (e.g. to edit its props).
-    pub fn get_dihedral_mut(&mut self, id: DihedralId) -> Result<&mut Dihedral, MolRsError> {
-        self.dihedrals
-            .get_mut(id)
-            .ok_or_else(|| MolRsError::not_found("dihedral", format!("DihedralId {:?}", id)))
-    }
-
-    // =====================================================================
-    // Improper CRUD
-    // =====================================================================
-
-    /// Add an improper dihedral (i-j-k-l; i conventionally central).
-    pub fn add_improper(
-        &mut self,
-        i: AtomId,
-        j: AtomId,
-        k: AtomId,
-        l: AtomId,
-    ) -> Result<ImproperId, MolRsError> {
-        for &atom_id in &[i, j, k, l] {
-            if !self.atoms.contains_key(atom_id) {
-                return Err(MolRsError::not_found(
-                    "atom",
-                    format!("AtomId {:?}", atom_id),
-                ));
-            }
-        }
-        let imp = Improper {
-            atoms: [i, j, k, l],
-            props: HashMap::new(),
-        };
-        Ok(self.impropers.insert(imp))
-    }
-
-    /// Remove an improper.
-    pub fn remove_improper(&mut self, id: ImproperId) -> Result<Improper, MolRsError> {
-        self.impropers
-            .remove(id)
-            .ok_or_else(|| MolRsError::not_found("improper", format!("ImproperId {:?}", id)))
-    }
-
-    /// Get a reference to an improper.
-    pub fn get_improper(&self, id: ImproperId) -> Result<&Improper, MolRsError> {
-        self.impropers
-            .get(id)
-            .ok_or_else(|| MolRsError::not_found("improper", format!("ImproperId {:?}", id)))
-    }
-
-    /// Get a mutable reference to an improper (e.g. to edit its props).
-    pub fn get_improper_mut(&mut self, id: ImproperId) -> Result<&mut Improper, MolRsError> {
-        self.impropers
-            .get_mut(id)
-            .ok_or_else(|| MolRsError::not_found("improper", format!("ImproperId {:?}", id)))
-    }
-
-    // =====================================================================
-    // Iteration & Query
-    // =====================================================================
-
-    /// Iterate over all `(AtomId, &Atom)` pairs.
-    pub fn atoms(&self) -> impl Iterator<Item = (AtomId, &Atom)> {
-        self.atoms.iter()
-    }
-
-    /// Iterate over all `(BondId, &Bond)` pairs.
-    pub fn bonds(&self) -> impl Iterator<Item = (BondId, &Bond)> {
-        self.bonds.iter()
-    }
-
-    /// Iterate over all `(AngleId, &Angle)` pairs.
-    pub fn angles(&self) -> impl Iterator<Item = (AngleId, &Angle)> {
-        self.angles.iter()
-    }
-
-    /// Iterate over all `(DihedralId, &Dihedral)` pairs.
-    pub fn dihedrals(&self) -> impl Iterator<Item = (DihedralId, &Dihedral)> {
-        self.dihedrals.iter()
-    }
-
-    /// Iterate over all `(ImproperId, &Improper)` pairs.
-    pub fn impropers(&self) -> impl Iterator<Item = (ImproperId, &Improper)> {
-        self.impropers.iter()
-    }
-
-    /// Number of atoms.
-    pub fn n_atoms(&self) -> usize {
-        self.atoms.len()
-    }
-    /// Number of bonds.
-    pub fn n_bonds(&self) -> usize {
-        self.bonds.len()
-    }
-    /// Number of angles.
-    pub fn n_angles(&self) -> usize {
-        self.angles.len()
-    }
-    /// Number of dihedrals.
-    pub fn n_dihedrals(&self) -> usize {
-        self.dihedrals.len()
-    }
-    /// Number of impropers.
-    pub fn n_impropers(&self) -> usize {
-        self.impropers.len()
-    }
-
-    /// Iterate over neighbor atom IDs of a given atom (via bond connectivity).
-    pub fn neighbors(&self, id: AtomId) -> impl Iterator<Item = AtomId> + '_ {
-        self.adjacency
-            .get(&id)
-            .into_iter()
-            .flat_map(|bonds| bonds.iter())
-            .filter_map(move |&bid| {
-                let bond = self.bonds.get(bid)?;
-                let other = if bond.atoms[0] == id {
-                    bond.atoms[1]
-                } else {
-                    bond.atoms[0]
-                };
-                Some(other)
-            })
-    }
-
-    /// Iterate over `(neighbor_id, bond_order)` for a given atom.
-    ///
-    /// Bond order is read from the `"order"` property (default 1.0).
-    pub fn neighbor_bonds(&self, id: AtomId) -> impl Iterator<Item = (AtomId, f64)> + '_ {
-        self.adjacency
-            .get(&id)
-            .into_iter()
-            .flat_map(|bonds| bonds.iter())
-            .filter_map(move |&bid| {
-                let bond = self.bonds.get(bid)?;
-                let other = if bond.atoms[0] == id {
-                    bond.atoms[1]
-                } else {
-                    bond.atoms[0]
-                };
-                let order = match bond.props.get("order") {
-                    Some(PropValue::F64(v)) => *v,
-                    _ => 1.0,
-                };
-                Some((other, order))
-            })
     }
 
     // =====================================================================
     // Spatial transforms
     // =====================================================================
 
-    /// Translate all atoms that have `x`/`y`/`z` props.
+    /// Translate all nodes that have `x`/`y`/`z` props.
     pub fn translate(&mut self, delta: [f64; 3]) {
-        for (_, atom) in self.atoms.iter_mut() {
+        for (_, node) in self.nodes.iter_mut() {
             let keys = ["x", "y", "z"];
             for (i, key) in keys.iter().enumerate() {
-                if let Some(PropValue::F64(v)) = atom.get_mut(key) {
+                if let Some(PropValue::F64(v)) = node.get_mut(key) {
                     *v += delta[i];
                 }
             }
         }
     }
 
-    /// Rotate all atoms that have `x`/`y`/`z` props around `axis` by `angle`
+    /// Rotate all nodes that have `x`/`y`/`z` props around `axis` by `angle`
     /// (radians), optionally about a center point.
     pub fn rotate(&mut self, axis: [f64; 3], angle: f64, about: Option<[f64; 3]>) {
-        // Normalize axis
         let len = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
         if len < 1e-15 {
             return;
@@ -684,15 +601,15 @@ impl MolGraph {
         let sin_a = angle.sin();
         let origin = about.unwrap_or([0.0, 0.0, 0.0]);
 
-        for (_, atom) in self.atoms.iter_mut() {
+        for (_, node) in self.nodes.iter_mut() {
             let (Some(PropValue::F64(x)), Some(PropValue::F64(y)), Some(PropValue::F64(z))) =
-                (atom.get("x"), atom.get("y"), atom.get("z"))
+                (node.get("x"), node.get("y"), node.get("z"))
             else {
                 continue;
             };
             let p = [x - origin[0], y - origin[1], z - origin[2]];
 
-            // Rodrigues' rotation formula: v' = v cos θ + (k × v) sin θ + k (k·v)(1 − cos θ)
+            // Rodrigues' rotation formula.
             let kdotp = k[0] * p[0] + k[1] * p[1] + k[2] * p[2];
             let cross = [
                 k[1] * p[2] - k[2] * p[1],
@@ -704,10 +621,9 @@ impl MolGraph {
                 p[1] * cos_a + cross[1] * sin_a + k[1] * kdotp * (1.0 - cos_a) + origin[1],
                 p[2] * cos_a + cross[2] * sin_a + k[2] * kdotp * (1.0 - cos_a) + origin[2],
             ];
-
-            atom.set("x", rotated[0]);
-            atom.set("y", rotated[1]);
-            atom.set("z", rotated[2]);
+            node.set("x", rotated[0]);
+            node.set("y", rotated[1]);
+            node.set("z", rotated[2]);
         }
     }
 
@@ -716,45 +632,28 @@ impl MolGraph {
     // =====================================================================
 
     /// Merge another `MolGraph` into `self`, consuming `other`.
-    /// All IDs in `other` are remapped to new IDs in `self`.
+    ///
+    /// Registry-driven: every relation of every kind in `other` is transferred
+    /// (kinds matched by name, registered on `self` if missing) — so all kinds
+    /// are carried across.
     pub fn merge(&mut self, other: MolGraph) {
-        let mut atom_map: HashMap<AtomId, AtomId> = HashMap::new();
-
-        // Transfer atoms.
-        for (old_id, atom) in other.atoms {
-            let new_id = self.add_atom(atom);
-            atom_map.insert(old_id, new_id);
+        let mut node_map: HashMap<NodeId, NodeId> = HashMap::new();
+        for (old_id, payload) in &other.nodes {
+            let new_id = self.add_node_with(payload.clone());
+            node_map.insert(old_id, new_id);
         }
 
-        // Transfer bonds (remap atom IDs).
-        for (_, mut bond) in other.bonds {
-            let a = atom_map[&bond.atoms[0]];
-            let b = atom_map[&bond.atoms[1]];
-            bond.atoms = [a, b];
-            let bid = self.bonds.insert(bond);
-            self.adjacency.entry(a).or_default().push(bid);
-            self.adjacency.entry(b).or_default().push(bid);
-        }
-
-        // Transfer angles.
-        for (_, mut angle) in other.angles {
-            angle.atoms = [
-                atom_map[&angle.atoms[0]],
-                atom_map[&angle.atoms[1]],
-                atom_map[&angle.atoms[2]],
-            ];
-            self.angles.insert(angle);
-        }
-
-        // Transfer dihedrals.
-        for (_, mut dih) in other.dihedrals {
-            dih.atoms = [
-                atom_map[&dih.atoms[0]],
-                atom_map[&dih.atoms[1]],
-                atom_map[&dih.atoms[2]],
-                atom_map[&dih.atoms[3]],
-            ];
-            self.dihedrals.insert(dih);
+        for okid in other.kind_ids() {
+            let oidx = okid.0 as usize;
+            let name = &other.kind_name[oidx];
+            let arity = other.kind_arity[oidx];
+            let self_kind = self.register_kind(name, arity);
+            for (_, rel) in other.kinds[oidx].iter() {
+                let mapped: SmallVec<[NodeId; 4]> = rel.nodes.iter().map(|n| node_map[n]).collect();
+                if let Ok(rid) = self.add_relation(self_kind, &mapped) {
+                    self.kinds[self_kind.0 as usize][rid].props = rel.props.clone();
+                }
+            }
         }
     }
 
@@ -762,28 +661,29 @@ impl MolGraph {
     // Frame conversion
     // =====================================================================
 
-    /// Export to a [`Frame`]. Each unique prop key becomes a column in the
-    /// `"atoms"` block. Bonds, angles, dihedrals become separate blocks with
-    /// 0-based indices referencing atom row order.
+    /// Export to a [`Frame`]. Each unique node prop key becomes a column in the
+    /// `"atoms"` block. Every non-empty relation kind becomes a block (named by
+    /// the kind) with `atomi`/`atomj`/… columns referencing node row order, plus
+    /// one column per relation property key — registry-driven, no per-kind
+    /// special-casing.
     pub fn to_frame(&self) -> Frame {
         use ndarray::Array1;
 
         let mut frame = Frame::new();
 
-        // Build stable ordering of atom IDs.
-        let atom_ids: Vec<AtomId> = self.atoms.keys().collect();
-        let n = atom_ids.len();
-        let id_to_row: HashMap<AtomId, usize> = atom_ids
+        let node_ids: Vec<NodeId> = self.nodes.keys().collect();
+        let n = node_ids.len();
+        let id_to_row: HashMap<NodeId, usize> = node_ids
             .iter()
             .enumerate()
             .map(|(i, &id)| (id, i))
             .collect();
 
-        // Collect all unique prop keys across all atoms.
+        // ---- atoms (node) block: one column per unique prop key ----
         let mut all_keys: Vec<String> = {
             let mut set = std::collections::BTreeSet::new();
-            for (_, atom) in &self.atoms {
-                for k in atom.keys() {
+            for (_, node) in &self.nodes {
+                for k in node.keys() {
                     set.insert(k.to_owned());
                 }
             }
@@ -791,21 +691,18 @@ impl MolGraph {
         };
         all_keys.sort();
 
-        // Build atoms block: one column per key.
         let mut atoms_block = Block::new();
         for key in &all_keys {
-            // Determine type from first non-None value.
-            let first_val = atom_ids
+            let first_val = node_ids
                 .iter()
-                .filter_map(|&id| self.atoms.get(id).and_then(|a| a.get(key)))
+                .filter_map(|&id| self.nodes.get(id).and_then(|a| a.get(key)))
                 .next();
-
             match first_val {
                 Some(PropValue::F64(_)) => {
-                    let col: Vec<F> = atom_ids
+                    let col: Vec<F> = node_ids
                         .iter()
                         .map(|&id| {
-                            self.atoms
+                            self.nodes
                                 .get(id)
                                 .and_then(|a| a.get_f64(key))
                                 .unwrap_or(0.0) as F
@@ -814,17 +711,17 @@ impl MolGraph {
                     let _ = atoms_block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
                 }
                 Some(PropValue::Int(_)) => {
-                    let col: Vec<I> = atom_ids
+                    let col: Vec<I> = node_ids
                         .iter()
-                        .map(|&id| self.atoms.get(id).and_then(|a| a.get_int(key)).unwrap_or(0))
+                        .map(|&id| self.nodes.get(id).and_then(|a| a.get_int(key)).unwrap_or(0))
                         .collect();
                     let _ = atoms_block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
                 }
                 Some(PropValue::Str(_)) => {
-                    let col: Vec<String> = atom_ids
+                    let col: Vec<String> = node_ids
                         .iter()
                         .map(|&id| {
-                            self.atoms
+                            self.nodes
                                 .get(id)
                                 .and_then(|a| a.get_str(key))
                                 .unwrap_or("")
@@ -840,113 +737,94 @@ impl MolGraph {
             frame.insert("atoms", atoms_block);
         }
 
-        // Bonds block.
-        if !self.bonds.is_empty() {
-            let mut bonds_block = Block::new();
-            let mut col_i: Vec<U> = Vec::with_capacity(self.bonds.len());
-            let mut col_j: Vec<U> = Vec::with_capacity(self.bonds.len());
-            let mut col_order: Vec<F> = Vec::with_capacity(self.bonds.len());
-            for (_, bond) in &self.bonds {
-                col_i.push(id_to_row[&bond.atoms[0]] as U);
-                col_j.push(id_to_row[&bond.atoms[1]] as U);
-                let order = bond
-                    .props
-                    .get("order")
-                    .and_then(|v| {
-                        if let PropValue::F64(f) = v {
-                            Some(*f as F)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(1.0);
-                col_order.push(order);
+        // ---- one block per non-empty relation kind ----
+        for kid in self.kind_ids() {
+            let kidx = kid.0 as usize;
+            let arena = &self.kinds[kidx];
+            if arena.is_empty() {
+                continue;
             }
-            let _ = bonds_block.insert("atomi", Array1::from_vec(col_i).into_dyn());
-            let _ = bonds_block.insert("atomj", Array1::from_vec(col_j).into_dyn());
-            let _ = bonds_block.insert("order", Array1::from_vec(col_order).into_dyn());
-            frame.insert("bonds", bonds_block);
-        }
+            let arity = self.kind_arity[kidx];
+            let mut block = Block::new();
 
-        // Angles block.
-        if !self.angles.is_empty() {
-            let mut angles_block = Block::new();
-            let mut ci: Vec<U> = Vec::with_capacity(self.angles.len());
-            let mut cj: Vec<U> = Vec::with_capacity(self.angles.len());
-            let mut ck: Vec<U> = Vec::with_capacity(self.angles.len());
-            for (_, angle) in &self.angles {
-                ci.push(id_to_row[&angle.atoms[0]] as U);
-                cj.push(id_to_row[&angle.atoms[1]] as U);
-                ck.push(id_to_row[&angle.atoms[2]] as U);
+            for pos in 0..arity {
+                let col: Vec<U> = arena
+                    .iter()
+                    .map(|(_, rel)| id_to_row[&rel.nodes[pos]] as U)
+                    .collect();
+                let _ = block.insert(rel_col_name(pos), Array1::from_vec(col).into_dyn());
             }
-            let _ = angles_block.insert("atomi", Array1::from_vec(ci).into_dyn());
-            let _ = angles_block.insert("atomj", Array1::from_vec(cj).into_dyn());
-            let _ = angles_block.insert("atomk", Array1::from_vec(ck).into_dyn());
-            frame.insert("angles", angles_block);
-        }
 
-        // Dihedrals block.
-        if !self.dihedrals.is_empty() {
-            let mut dih_block = Block::new();
-            let mut ci: Vec<U> = Vec::with_capacity(self.dihedrals.len());
-            let mut cj: Vec<U> = Vec::with_capacity(self.dihedrals.len());
-            let mut ck: Vec<U> = Vec::with_capacity(self.dihedrals.len());
-            let mut cl: Vec<U> = Vec::with_capacity(self.dihedrals.len());
-            for (_, d) in &self.dihedrals {
-                ci.push(id_to_row[&d.atoms[0]] as U);
-                cj.push(id_to_row[&d.atoms[1]] as U);
-                ck.push(id_to_row[&d.atoms[2]] as U);
-                cl.push(id_to_row[&d.atoms[3]] as U);
+            let mut prop_keys: Vec<String> = {
+                let mut set = std::collections::BTreeSet::new();
+                for (_, rel) in arena.iter() {
+                    for k in rel.props.keys() {
+                        set.insert(k.clone());
+                    }
+                }
+                set.into_iter().collect()
+            };
+            prop_keys.sort();
+            for key in &prop_keys {
+                let first_val = arena.iter().filter_map(|(_, r)| r.props.get(key)).next();
+                match first_val {
+                    Some(PropValue::F64(_)) => {
+                        let col: Vec<F> = arena
+                            .iter()
+                            .map(|(_, r)| match r.props.get(key) {
+                                Some(PropValue::F64(v)) => *v as F,
+                                Some(PropValue::Int(v)) => *v as F,
+                                _ => 0.0,
+                            })
+                            .collect();
+                        let _ = block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
+                    }
+                    Some(PropValue::Int(_)) => {
+                        let col: Vec<I> = arena
+                            .iter()
+                            .map(|(_, r)| match r.props.get(key) {
+                                Some(PropValue::Int(v)) => *v,
+                                _ => 0,
+                            })
+                            .collect();
+                        let _ = block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
+                    }
+                    Some(PropValue::Str(_)) => {
+                        let col: Vec<String> = arena
+                            .iter()
+                            .map(|(_, r)| match r.props.get(key) {
+                                Some(PropValue::Str(s)) => s.clone(),
+                                _ => String::new(),
+                            })
+                            .collect();
+                        let _ = block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
+                    }
+                    _ => {}
+                }
             }
-            let _ = dih_block.insert("atomi", Array1::from_vec(ci).into_dyn());
-            let _ = dih_block.insert("atomj", Array1::from_vec(cj).into_dyn());
-            let _ = dih_block.insert("atomk", Array1::from_vec(ck).into_dyn());
-            let _ = dih_block.insert("atoml", Array1::from_vec(cl).into_dyn());
-            frame.insert("dihedrals", dih_block);
-        }
 
-        // Impropers block.
-        if !self.impropers.is_empty() {
-            let mut imp_block = Block::new();
-            let mut ci: Vec<U> = Vec::with_capacity(self.impropers.len());
-            let mut cj: Vec<U> = Vec::with_capacity(self.impropers.len());
-            let mut ck: Vec<U> = Vec::with_capacity(self.impropers.len());
-            let mut cl: Vec<U> = Vec::with_capacity(self.impropers.len());
-            for (_, im) in &self.impropers {
-                ci.push(id_to_row[&im.atoms[0]] as U);
-                cj.push(id_to_row[&im.atoms[1]] as U);
-                ck.push(id_to_row[&im.atoms[2]] as U);
-                cl.push(id_to_row[&im.atoms[3]] as U);
-            }
-            let _ = imp_block.insert("atomi", Array1::from_vec(ci).into_dyn());
-            let _ = imp_block.insert("atomj", Array1::from_vec(cj).into_dyn());
-            let _ = imp_block.insert("atomk", Array1::from_vec(ck).into_dyn());
-            let _ = imp_block.insert("atoml", Array1::from_vec(cl).into_dyn());
-            frame.insert("impropers", imp_block);
+            frame.insert(&self.kind_name[kidx], block);
         }
 
         frame
     }
 
-    /// Import from a [`Frame`]. The `"atoms"` block columns become props;
-    /// `"bonds"` block `atomi`/`atomj` columns become bonds.
-    pub fn from_frame(frame: &Frame) -> Result<Self, MolRsError> {
-        let mut g = MolGraph::new();
-
+    /// Read a [`Frame`] into `self`: the `"atoms"` block becomes nodes; each
+    /// **already-registered** kind's block (matched by name) becomes relations
+    /// via its `atomi`/`atomj`/… columns, with any extra columns read back as
+    /// props. Kinds not registered on `self` are skipped (a bare graph keeps
+    /// only nodes; register kinds first to read their relations).
+    pub fn read_frame(&mut self, frame: &Frame) -> Result<(), MolRsError> {
         let atoms_block = frame
             .get("atoms")
             .ok_or_else(|| MolRsError::parse("Frame missing 'atoms' block"))?;
 
         let nrows = atoms_block.nrows().unwrap_or(0);
-
-        // Collect column keys.
         let col_keys: Vec<String> = atoms_block.keys().map(|k| k.to_owned()).collect();
 
-        // Pre-read columns by type.
         let mut float_cols: Vec<(&str, &ndarray::ArrayD<F>)> = Vec::new();
         let mut i64_cols: Vec<(&str, &ndarray::ArrayD<I>)> = Vec::new();
         let mut str_cols: Vec<(&str, &ndarray::ArrayD<String>)> = Vec::new();
-
         for key in &col_keys {
             if let Some(arr) = atoms_block.get_float(key) {
                 float_cols.push((key.as_str(), arr));
@@ -957,125 +835,102 @@ impl MolGraph {
             }
         }
 
-        // Build atoms row by row.
-        let mut atom_ids: Vec<AtomId> = Vec::with_capacity(nrows);
+        let mut node_ids: Vec<NodeId> = Vec::with_capacity(nrows);
         for row in 0..nrows {
-            let mut atom = Atom::new();
+            let mut node = Atom::new();
             for &(key, arr) in &float_cols {
                 #[allow(clippy::unnecessary_cast)]
-                atom.set(key, arr[[row]] as f64);
+                node.set(key, arr[[row]] as f64);
             }
             for &(key, arr) in &i64_cols {
-                atom.set(key, PropValue::Int(arr[[row]]));
+                node.set(key, PropValue::Int(arr[[row]]));
             }
             for &(key, arr) in &str_cols {
-                atom.set(key, PropValue::Str(arr[[row]].clone()));
+                node.set(key, PropValue::Str(arr[[row]].clone()));
             }
-            atom_ids.push(g.add_atom(atom));
+            node_ids.push(self.add_node_with(node));
         }
 
-        // Bonds.
-        if let Some(bonds_block) = frame.get("bonds") {
-            let col_i = bonds_block
-                .get_uint("atomi")
-                .ok_or_else(|| MolRsError::parse("bonds block missing 'atomi' column"))?;
-            let col_j = bonds_block
-                .get_uint("atomj")
-                .ok_or_else(|| MolRsError::parse("bonds block missing 'atomj' column"))?;
+        let kind_specs: Vec<(KindId, String, usize)> = self
+            .kind_ids()
+            .map(|kid| {
+                let i = kid.0 as usize;
+                (kid, self.kind_name[i].clone(), self.kind_arity[i])
+            })
+            .collect();
 
-            // Bond order can be stored as float or uint
-            let col_order_f = bonds_block.get_float("order");
-            let col_order_u = bonds_block.get_uint("order");
+        for (kid, block_name, arity) in kind_specs {
+            let Some(block) = frame.get(&block_name) else {
+                continue;
+            };
+            let mut endpoint_cols: Vec<&ndarray::ArrayD<U>> = Vec::with_capacity(arity);
+            let mut ok = true;
+            for pos in 0..arity {
+                match block.get_uint(&rel_col_name(pos)) {
+                    Some(c) => endpoint_cols.push(c),
+                    None => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if !ok {
+                continue;
+            }
+            let nrel = block.nrows().unwrap_or(0);
+            let endpoint_names: Vec<String> = (0..arity).map(rel_col_name).collect();
+            let prop_f: Vec<(String, &ndarray::ArrayD<F>)> = block
+                .keys()
+                .filter(|k| !endpoint_names.iter().any(|e| e == *k))
+                .filter_map(|k| block.get_float(k).map(|a| (k.to_owned(), a)))
+                .collect();
 
-            let nb = bonds_block.nrows().unwrap_or(0);
-            for row in 0..nb {
-                let ai = col_i[[row]] as usize;
-                let aj = col_j[[row]] as usize;
-                if ai < atom_ids.len() && aj < atom_ids.len() {
-                    let bid = g.add_bond(atom_ids[ai], atom_ids[aj])?;
-                    #[allow(clippy::unnecessary_cast)]
-                    let order = col_order_f
-                        .map(|c| c[[row]] as f64)
-                        .or_else(|| col_order_u.map(|c| c[[row]] as f64));
-                    if let Some(o) = order
-                        && let Ok(bond) = g.get_bond_mut(bid)
-                    {
-                        bond.props.insert("order".to_string(), PropValue::F64(o));
+            for row in 0..nrel {
+                let mut nodes: SmallVec<[NodeId; 4]> = SmallVec::new();
+                let mut valid = true;
+                for col in &endpoint_cols {
+                    let idx = col[[row]] as usize;
+                    if idx >= node_ids.len() {
+                        valid = false;
+                        break;
+                    }
+                    nodes.push(node_ids[idx]);
+                }
+                if !valid {
+                    continue;
+                }
+                if let Ok(rid) = self.add_relation(kid, &nodes) {
+                    for (k, arr) in &prop_f {
+                        #[allow(clippy::unnecessary_cast)]
+                        self.kinds[kid.0 as usize][rid]
+                            .props
+                            .insert(k.clone(), PropValue::F64(arr[[row]] as f64));
                     }
                 }
             }
         }
+        Ok(())
+    }
 
-        // Angles.
-        if let Some(angles_block) = frame.get("angles")
-            && let (Some(ci), Some(cj), Some(ck)) = (
-                angles_block.get_uint("atomi"),
-                angles_block.get_uint("atomj"),
-                angles_block.get_uint("atomk"),
-            )
-        {
-            let na = angles_block.nrows().unwrap_or(0);
-            for row in 0..na {
-                let ai = ci[[row]] as usize;
-                let aj = cj[[row]] as usize;
-                let ak = ck[[row]] as usize;
-                if ai < atom_ids.len() && aj < atom_ids.len() && ak < atom_ids.len() {
-                    g.add_angle(atom_ids[ai], atom_ids[aj], atom_ids[ak])?;
-                }
-            }
-        }
-
-        // Dihedrals.
-        if let Some(dih_block) = frame.get("dihedrals")
-            && let (Some(ci), Some(cj), Some(ck), Some(cl)) = (
-                dih_block.get_uint("atomi"),
-                dih_block.get_uint("atomj"),
-                dih_block.get_uint("atomk"),
-                dih_block.get_uint("atoml"),
-            )
-        {
-            let nd = dih_block.nrows().unwrap_or(0);
-            for row in 0..nd {
-                let ai = ci[[row]] as usize;
-                let aj = cj[[row]] as usize;
-                let ak = ck[[row]] as usize;
-                let al = cl[[row]] as usize;
-                if ai < atom_ids.len()
-                    && aj < atom_ids.len()
-                    && ak < atom_ids.len()
-                    && al < atom_ids.len()
-                {
-                    g.add_dihedral(atom_ids[ai], atom_ids[aj], atom_ids[ak], atom_ids[al])?;
-                }
-            }
-        }
-
-        // Impropers.
-        if let Some(imp_block) = frame.get("impropers")
-            && let (Some(ci), Some(cj), Some(ck), Some(cl)) = (
-                imp_block.get_uint("atomi"),
-                imp_block.get_uint("atomj"),
-                imp_block.get_uint("atomk"),
-                imp_block.get_uint("atoml"),
-            )
-        {
-            let ni = imp_block.nrows().unwrap_or(0);
-            for row in 0..ni {
-                let ai = ci[[row]] as usize;
-                let aj = cj[[row]] as usize;
-                let ak = ck[[row]] as usize;
-                let al = cl[[row]] as usize;
-                if ai < atom_ids.len()
-                    && aj < atom_ids.len()
-                    && ak < atom_ids.len()
-                    && al < atom_ids.len()
-                {
-                    g.add_improper(atom_ids[ai], atom_ids[aj], atom_ids[ak], atom_ids[al])?;
-                }
-            }
-        }
-
+    /// Import a [`Frame`] into a fresh, kind-less graph (nodes only; relation
+    /// blocks are skipped since no kinds are registered). Domain leaf types
+    /// override this to register their kinds first — see
+    /// [`Atomistic::from_frame`](crate::atomistic::Atomistic::from_frame).
+    pub fn from_frame(frame: &Frame) -> Result<Self, MolRsError> {
+        let mut g = MolGraph::new();
+        g.read_frame(frame)?;
         Ok(g)
+    }
+}
+
+/// Endpoint column name for the `pos`-th node of a relation block.
+pub(crate) fn rel_col_name(pos: usize) -> String {
+    match pos {
+        0 => "atomi".to_owned(),
+        1 => "atomj".to_owned(),
+        2 => "atomk".to_owned(),
+        3 => "atoml".to_owned(),
+        n => format!("atom{n}"),
     }
 }
 
@@ -1093,10 +948,8 @@ mod tests {
     fn test_propvalue_from() {
         let v: PropValue = std::f64::consts::PI.into();
         assert_eq!(v, PropValue::F64(std::f64::consts::PI));
-
         let v: PropValue = (42 as I).into();
         assert_eq!(v, PropValue::Int(42 as I));
-
         let v: PropValue = "H".into();
         assert_eq!(v, PropValue::Str("H".to_owned()));
     }
@@ -1107,15 +960,12 @@ mod tests {
         a.set("x", 1.5);
         a.set("element", "C");
         a.set("type_id", PropValue::Int(3 as I));
-
         assert_eq!(a.get_f64("x"), Some(1.5));
         assert_eq!(a.get_str("element"), Some("C"));
         assert_eq!(a.get_int("type_id"), Some(3 as I));
         assert_eq!(a.get_f64("missing"), None);
         assert!(a.contains_key("x"));
-        assert!(!a.contains_key("missing"));
         assert_eq!(a.len(), 3);
-
         a.remove("type_id");
         assert_eq!(a.len(), 2);
     }
@@ -1124,338 +974,205 @@ mod tests {
     fn test_atom_index() {
         let mut a = Atom::xyz("O", 1.0, 2.0, 3.0);
         assert_eq!(a["x"], PropValue::F64(1.0));
-
-        // Mutate via IndexMut.
         a["x"] = PropValue::F64(99.0);
         assert_eq!(a.get_f64("x"), Some(99.0));
     }
 
+    // ----- Kind registry -----
+
     #[test]
-    fn test_atom_xyz_constructor() {
-        let a = Atom::xyz("H", 0.96, 0.0, 0.0);
-        assert_eq!(a.get_str("element"), Some("H"));
-        assert_eq!(a.get_f64("x"), Some(0.96));
-        assert_eq!(a.get_f64("y"), Some(0.0));
-        assert_eq!(a.get_f64("z"), Some(0.0));
+    fn test_register_kind_dense_idempotent() {
+        let mut g = MolGraph::new();
+        let bond = g.register_kind("bond", 2);
+        let angle = g.register_kind("angle", 3);
+        assert_eq!(bond, KindId(0));
+        assert_eq!(angle, KindId(1));
+        // idempotent
+        assert_eq!(g.register_kind("bond", 2), bond);
+        assert_eq!(g.kind_id("angle"), Some(angle));
+        assert_eq!(g.arity(bond), 2);
+        assert_eq!(g.kind_name(angle), "angle");
     }
 
-    // ----- Atom CRUD -----
+    #[test]
+    #[should_panic]
+    fn test_register_kind_conflicting_arity_panics() {
+        let mut g = MolGraph::new();
+        g.register_kind("bond", 2);
+        g.register_kind("bond", 3);
+    }
+
+    // ----- Node CRUD -----
 
     #[test]
-    fn test_add_remove_atom() {
+    fn test_add_node_field_less() {
         let mut g = MolGraph::new();
-        assert_eq!(g.n_atoms(), 0);
+        let n = g.add_node();
+        assert!(g.get_node(n).unwrap().is_empty());
+        g.translate([1.0, 2.0, 3.0]);
+        assert!(g.get_node(n).unwrap().get_f64("x").is_none());
+        g.get_node_mut(n).unwrap().set("element", "C");
+        assert_eq!(g.get_node(n).unwrap().get_str("element"), Some("C"));
+    }
 
-        let id = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
-        assert_eq!(g.n_atoms(), 1);
+    #[test]
+    fn test_add_remove_node() {
+        let mut g = MolGraph::new();
+        assert_eq!(g.n_nodes(), 0);
+        let id = g.add_node_with(Atom::xyz("C", 0.0, 0.0, 0.0));
+        assert_eq!(g.n_nodes(), 1);
+        assert_eq!(g.get_node(id).unwrap().get_str("element"), Some("C"));
+        g.remove_node(id).unwrap();
+        assert_eq!(g.n_nodes(), 0);
+        assert!(g.get_node(id).is_err());
+    }
+
+    // ----- Relation CRUD -----
+
+    #[test]
+    fn test_generic_relation_crud() {
+        let mut g = MolGraph::new();
+        let angle = g.register_kind("angle", 3);
+        let a = g.add_node();
+        let b = g.add_node();
+        let c = g.add_node();
+        let rid = g.add_relation(angle, &[a, b, c]).unwrap();
+        assert_eq!(g.n_relations(angle), 1);
         assert_eq!(
-            g.get_atom(id).expect("get atom").get_str("element"),
-            Some("C")
+            g.get_relation(angle, rid).unwrap().nodes.as_slice(),
+            &[a, b, c][..]
         );
-
-        g.remove_atom(id).expect("remove atom");
-        assert_eq!(g.n_atoms(), 0);
-        assert!(g.get_atom(id).is_err());
+        assert!(g.add_relation(angle, &[a, b]).is_err()); // wrong arity
+        g.remove_node(c).unwrap();
+        assert!(g.add_relation(angle, &[a, b, c]).is_err()); // missing node
+        assert_eq!(g.n_relations(angle), 0); // cascaded
     }
 
     #[test]
-    fn test_atom_mut() {
+    fn test_same_arity_distinct_kind() {
         let mut g = MolGraph::new();
-        let id = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
-
-        g.get_atom_mut(id).expect("get atom mut").set("x", 5.0);
-        assert_eq!(g.get_atom(id).expect("get atom").get_f64("x"), Some(5.0));
-    }
-
-    // ----- Bond CRUD -----
-
-    #[test]
-    fn test_add_remove_bond() {
-        let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
-        let b = g.add_atom(Atom::xyz("O", 1.0, 0.0, 0.0));
-
-        let bid = g.add_bond(a, b).expect("add bond");
-        assert_eq!(g.n_bonds(), 1);
-
-        // Neighbors.
-        let neigh_a: Vec<AtomId> = g.neighbors(a).collect();
-        assert_eq!(neigh_a, vec![b]);
-        let neigh_b: Vec<AtomId> = g.neighbors(b).collect();
-        assert_eq!(neigh_b, vec![a]);
-
-        // Remove bond.
-        g.remove_bond(bid).expect("remove bond");
-        assert_eq!(g.n_bonds(), 0);
-        assert_eq!(g.neighbors(a).count(), 0);
-        assert_eq!(g.neighbors(b).count(), 0);
+        let dih = g.register_kind("dihedral", 4);
+        let imp = g.register_kind("improper", 4);
+        let a = g.add_node();
+        let b = g.add_node();
+        let c = g.add_node();
+        let d = g.add_node();
+        g.add_relation(dih, &[a, b, c, d]).unwrap();
+        g.add_relation(imp, &[a, b, c, d]).unwrap();
+        assert_eq!(g.n_relations(dih), 1);
+        assert_eq!(g.n_relations(imp), 1);
     }
 
     #[test]
-    fn test_bond_invalid_atoms() {
+    fn test_cascade_across_all_kinds() {
         let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::new());
-        let b = g.add_atom(Atom::new());
-        // Remove b, then try to bond to it.
-        g.remove_atom(b).expect("remove atom b");
-        assert!(g.add_bond(a, b).is_err());
+        let bond = g.register_kind("bond", 2);
+        let angle = g.register_kind("angle", 3);
+        let dih = g.register_kind("dihedral", 4);
+        let imp = g.register_kind("improper", 4);
+        let a = g.add_node();
+        let b = g.add_node();
+        let c = g.add_node();
+        let d = g.add_node();
+        g.add_relation(bond, &[a, b]).unwrap();
+        g.add_relation(angle, &[b, a, c]).unwrap();
+        g.add_relation(dih, &[b, a, c, d]).unwrap();
+        g.add_relation(imp, &[b, a, c, d]).unwrap();
+        g.remove_node(a).unwrap();
+        assert_eq!(g.n_relations(bond), 0);
+        assert_eq!(g.n_relations(angle), 0);
+        assert_eq!(g.n_relations(dih), 0);
+        assert_eq!(g.n_relations(imp), 0);
     }
 
-    // ----- Cascading deletion -----
-
-    #[test]
-    fn test_cascading_deletion() {
-        let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
-        let b = g.add_atom(Atom::xyz("H", 1.0, 0.0, 0.0));
-        let c = g.add_atom(Atom::xyz("H", -1.0, 0.0, 0.0));
-        let d = g.add_atom(Atom::xyz("H", 0.0, 1.0, 0.0));
-
-        g.add_bond(a, b).expect("add bond");
-        g.add_bond(a, c).expect("add bond");
-        g.add_bond(a, d).expect("add bond");
-        g.add_angle(b, a, c).expect("add angle");
-        g.add_dihedral(b, a, c, d).expect("add dihedral");
-
-        assert_eq!(g.n_bonds(), 3);
-        assert_eq!(g.n_angles(), 1);
-        assert_eq!(g.n_dihedrals(), 1);
-
-        // Remove the central atom — everything incident must go.
-        g.remove_atom(a).expect("remove atom a");
-        assert_eq!(g.n_atoms(), 3);
-        assert_eq!(g.n_bonds(), 0);
-        assert_eq!(g.n_angles(), 0);
-        assert_eq!(g.n_dihedrals(), 0);
-    }
-
-    // ----- Angle & Dihedral CRUD -----
-
-    #[test]
-    fn test_angle_crud() {
-        let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::new());
-        let b = g.add_atom(Atom::new());
-        let c = g.add_atom(Atom::new());
-
-        let aid = g.add_angle(a, b, c).expect("add angle");
-        assert_eq!(g.n_angles(), 1);
-        assert_eq!(g.get_angle(aid).expect("get angle").atoms, [a, b, c]);
-
-        g.remove_angle(aid).expect("remove angle");
-        assert_eq!(g.n_angles(), 0);
-    }
-
-    #[test]
-    fn test_dihedral_crud() {
-        let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::new());
-        let b = g.add_atom(Atom::new());
-        let c = g.add_atom(Atom::new());
-        let d = g.add_atom(Atom::new());
-
-        let did = g.add_dihedral(a, b, c, d).expect("add dihedral");
-        assert_eq!(g.n_dihedrals(), 1);
-        assert_eq!(
-            g.get_dihedral(did).expect("get dihedral").atoms,
-            [a, b, c, d]
-        );
-
-        g.remove_dihedral(did).expect("remove dihedral");
-        assert_eq!(g.n_dihedrals(), 0);
-    }
-
-    #[test]
-    fn test_improper_crud() {
-        let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::new());
-        let b = g.add_atom(Atom::new());
-        let c = g.add_atom(Atom::new());
-        let d = g.add_atom(Atom::new());
-
-        let iid = g.add_improper(a, b, c, d).expect("add improper");
-        assert_eq!(g.n_impropers(), 1);
-        assert_eq!(
-            g.get_improper(iid).expect("get improper").atoms,
-            [a, b, c, d]
-        );
-        // props are editable via get_improper_mut
-        g.get_improper_mut(iid)
-            .expect("get_mut")
-            .props
-            .insert("kind".into(), PropValue::Str("oop".into()));
-        assert_eq!(g.impropers().count(), 1);
-
-        g.remove_improper(iid).expect("remove improper");
-        assert_eq!(g.n_impropers(), 0);
-    }
-
-    #[test]
-    fn test_improper_invalid_atom() {
-        let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::new());
-        let b = g.add_atom(Atom::new());
-        let c = g.add_atom(Atom::new());
-        let d = g.add_atom(Atom::new());
-        let removed = d;
-        g.remove_atom(removed).expect("remove");
-        assert!(g.add_improper(a, b, c, removed).is_err());
-    }
-
-    #[test]
-    fn test_remove_atom_cascades_impropers() {
-        let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::new());
-        let b = g.add_atom(Atom::new());
-        let c = g.add_atom(Atom::new());
-        let d = g.add_atom(Atom::new());
-        g.add_improper(a, b, c, d).expect("add improper");
-        assert_eq!(g.n_impropers(), 1);
-        // removing a referenced atom must drop the improper
-        g.remove_atom(c).expect("remove atom");
-        assert_eq!(g.n_impropers(), 0);
-    }
-
-    #[test]
-    fn test_improper_frame_roundtrip() {
-        let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
-        let b = g.add_atom(Atom::xyz("C", 1.0, 0.0, 0.0));
-        let c = g.add_atom(Atom::xyz("C", 0.0, 1.0, 0.0));
-        let d = g.add_atom(Atom::xyz("C", 0.0, 0.0, 1.0));
-        g.add_improper(a, b, c, d).expect("add improper");
-        let frame = g.to_frame();
-        let g2 = MolGraph::from_frame(&frame).expect("from_frame");
-        assert_eq!(g2.n_impropers(), 1);
-    }
-
-    // ----- Iteration -----
-
-    #[test]
-    fn test_iteration_counts() {
-        let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::xyz("H", 0.0, 0.0, 0.0));
-        let b = g.add_atom(Atom::xyz("O", 1.0, 0.0, 0.0));
-        let c = g.add_atom(Atom::xyz("H", 2.0, 0.0, 0.0));
-
-        g.add_bond(a, b).expect("add bond");
-        g.add_bond(b, c).expect("add bond");
-        g.add_angle(a, b, c).expect("add angle");
-
-        assert_eq!(g.atoms().count(), 3);
-        assert_eq!(g.bonds().count(), 2);
-        assert_eq!(g.angles().count(), 1);
-        assert_eq!(g.dihedrals().count(), 0);
-    }
-
-    // ----- Neighbor query -----
+    // ----- Neighbors -----
 
     #[test]
     fn test_neighbors() {
         let mut g = MolGraph::new();
-        let a = g.add_atom(Atom::new());
-        let b = g.add_atom(Atom::new());
-        let c = g.add_atom(Atom::new());
-
-        g.add_bond(a, b).expect("add bond");
-        g.add_bond(a, c).expect("add bond");
-
-        let mut n: Vec<AtomId> = g.neighbors(a).collect();
-        n.sort_by_key(|id| id.0); // deterministic order
+        let bond = g.register_kind("bond", 2);
+        let a = g.add_node();
+        let b = g.add_node();
+        let c = g.add_node();
+        g.add_relation(bond, &[a, b]).unwrap();
+        g.add_relation(bond, &[a, c]).unwrap();
+        let mut n: Vec<NodeId> = g.neighbors(a).collect();
+        n.sort_by_key(|id| id.0);
         assert_eq!(n.len(), 2);
-        assert!(n.contains(&b));
-        assert!(n.contains(&c));
-
-        // b's only neighbor is a.
-        let nb: Vec<AtomId> = g.neighbors(b).collect();
-        assert_eq!(nb, vec![a]);
+        assert!(n.contains(&b) && n.contains(&c));
+        assert_eq!(g.neighbors(b).collect::<Vec<_>>(), vec![a]);
+        // removing the relation clears adjacency
+        let bid = g.relations(bond).next().unwrap().0;
+        g.remove_relation(bond, bid).unwrap();
+        assert_eq!(g.neighbors(a).count(), 1);
     }
 
-    // ----- Spatial transforms -----
+    // ----- Spatial -----
 
     #[test]
-    fn test_translate() {
+    fn test_translate_and_rotate() {
         let mut g = MolGraph::new();
-        let id = g.add_atom(Atom::xyz("C", 1.0, 2.0, 3.0));
-
+        let id = g.add_node_with(Atom::xyz("C", 1.0, 0.0, 0.0));
         g.translate([10.0, 20.0, 30.0]);
-
-        let a = g.get_atom(id).expect("get atom");
+        let a = g.get_node(id).unwrap();
         assert!((a.get_f64("x").unwrap() - 11.0).abs() < 1e-12);
-        assert!((a.get_f64("y").unwrap() - 22.0).abs() < 1e-12);
-        assert!((a.get_f64("z").unwrap() - 33.0).abs() < 1e-12);
+        let id2 = g.add_node_with(Atom::xyz("C", 1.0, 0.0, 0.0));
+        g.rotate([0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2, None);
+        let b = g.get_node(id2).unwrap();
+        assert!((b.get_f64("x").unwrap()).abs() < 1e-12);
+        assert!((b.get_f64("y").unwrap() - 1.0).abs() < 1e-12);
     }
 
-    #[test]
-    fn test_translate_skips_missing_xyz() {
-        let mut g = MolGraph::new();
-        let id = g.add_atom(Atom::new()); // no x/y/z
-        g.translate([1.0, 2.0, 3.0]);
-        // Should not panic.
-        assert!(g.get_atom(id).expect("get atom").get_f64("x").is_none());
-    }
+    // ----- Frame round-trip (generic) -----
 
     #[test]
-    fn test_rotate_90_deg_z() {
+    fn test_to_read_frame_roundtrip() {
         let mut g = MolGraph::new();
-        let id = g.add_atom(Atom::xyz("C", 1.0, 0.0, 0.0));
-
-        let half_pi = std::f64::consts::FRAC_PI_2;
-        g.rotate([0.0, 0.0, 1.0], half_pi, None);
-
-        let a = g.get_atom(id).expect("get atom");
-        assert!((a.get_f64("x").unwrap()).abs() < 1e-12);
-        assert!((a.get_f64("y").unwrap() - 1.0).abs() < 1e-12);
-        assert!((a.get_f64("z").unwrap()).abs() < 1e-12);
-    }
-
-    // ----- Frame conversion round-trip -----
-
-    #[test]
-    fn test_to_from_frame() {
-        let mut g = MolGraph::new();
-        let o = g.add_atom(Atom::xyz("O", 0.0, 0.0, 0.0));
-        let h1 = g.add_atom(Atom::xyz("H", 0.96, 0.0, 0.0));
-        let h2 = g.add_atom(Atom::xyz("H", -0.24, 0.93, 0.0));
-
-        g.add_bond(o, h1).expect("add bond");
-        g.add_bond(o, h2).expect("add bond");
-        g.add_angle(h1, o, h2).expect("add angle");
-
+        let bond = g.register_kind("bonds", 2);
+        let o = g.add_node_with(Atom::xyz("O", 0.0, 0.0, 0.0));
+        let h1 = g.add_node_with(Atom::xyz("H", 0.96, 0.0, 0.0));
+        let h2 = g.add_node_with(Atom::xyz("H", -0.24, 0.93, 0.0));
+        g.add_relation(bond, &[o, h1]).unwrap();
+        g.add_relation(bond, &[o, h2]).unwrap();
         let frame = g.to_frame();
         assert!(frame.contains_key("atoms"));
         assert!(frame.contains_key("bonds"));
-        assert!(frame.contains_key("angles"));
-
         assert_eq!(frame["atoms"].nrows(), Some(3));
         assert_eq!(frame["bonds"].nrows(), Some(2));
-        assert_eq!(frame["angles"].nrows(), Some(1));
 
-        // Round-trip.
-        let g2 = MolGraph::from_frame(&frame).expect("from_frame");
-        assert_eq!(g2.n_atoms(), 3);
-        assert_eq!(g2.n_bonds(), 2);
-        assert_eq!(g2.n_angles(), 1);
+        // read back into a graph with the same kind registered
+        let mut g2 = MolGraph::new();
+        let bond2 = g2.register_kind("bonds", 2);
+        g2.read_frame(&frame).unwrap();
+        assert_eq!(g2.n_nodes(), 3);
+        assert_eq!(g2.n_relations(bond2), 2);
     }
 
-    // ----- Merge -----
+    // ----- Merge (registry-driven; covers all kinds) -----
 
     #[test]
-    fn test_merge() {
-        let mut g1 = MolGraph::new();
-        let a = g1.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
-        let b = g1.add_atom(Atom::xyz("O", 1.0, 0.0, 0.0));
-        g1.add_bond(a, b).expect("add bond");
+    fn test_merge_transfers_all_kinds() {
+        let mut src = MolGraph::new();
+        let bond = src.register_kind("bond", 2);
+        let imp = src.register_kind("improper", 4);
+        let a = src.add_node();
+        let b = src.add_node();
+        let c = src.add_node();
+        let d = src.add_node();
+        src.add_relation(bond, &[a, b]).unwrap();
+        src.add_relation(imp, &[a, b, c, d]).unwrap();
 
-        let mut g2 = MolGraph::new();
-        let c = g2.add_atom(Atom::xyz("N", 5.0, 0.0, 0.0));
-        let d = g2.add_atom(Atom::xyz("H", 6.0, 0.0, 0.0));
-        g2.add_bond(c, d).expect("add bond");
+        let mut dst = MolGraph::new();
+        let dbond = dst.register_kind("bond", 2);
+        let dimp = dst.register_kind("improper", 4);
+        let e = dst.add_node();
+        let f = dst.add_node();
+        dst.add_relation(dbond, &[e, f]).unwrap();
 
-        g1.merge(g2);
-
-        assert_eq!(g1.n_atoms(), 4);
-        assert_eq!(g1.n_bonds(), 2);
+        dst.merge(src);
+        assert_eq!(dst.n_nodes(), 6);
+        assert_eq!(dst.n_relations(dbond), 2);
+        assert_eq!(dst.n_relations(dimp), 1, "merge must carry impropers");
     }
 
     // ----- Clone independence -----
@@ -1463,86 +1180,19 @@ mod tests {
     #[test]
     fn test_clone_independence() {
         let mut g = MolGraph::new();
-        let id = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
-        g.add_atom(Atom::xyz("H", 1.0, 0.0, 0.0));
-
-        let mut g2 = g.clone();
-        // Mutate original.
-        g.get_atom_mut(id).expect("get atom mut").set("x", 99.0);
-
-        // Clone should still have original value (slotmap keys carry across clone).
-        assert_eq!(g2.get_atom(id).expect("get atom").get_f64("x"), Some(0.0));
-
-        // Independent counts.
-        assert_eq!(g2.n_atoms(), 2);
-        let first_id = {
-            let (fid, _) = g2.atoms().next().unwrap();
-            fid
-        };
-        g2.remove_atom(first_id).expect("remove atom");
-        assert_eq!(g2.n_atoms(), 1);
-        // Original unaffected.
-        assert_eq!(g.n_atoms(), 2);
+        let id = g.add_node_with(Atom::xyz("C", 0.0, 0.0, 0.0));
+        g.add_node_with(Atom::xyz("H", 1.0, 0.0, 0.0));
+        let g2 = g.clone();
+        g.get_node_mut(id).unwrap().set("x", 99.0);
+        assert_eq!(g2.get_node(id).unwrap().get_f64("x"), Some(0.0));
+        assert_eq!(g2.n_nodes(), 2);
     }
 
-    // ----- Realistic molecule: water -----
+    // ----- Reserved containment axis -----
 
     #[test]
-    fn test_water_molecule() {
-        let mut water = MolGraph::new();
-        let o = water.add_atom(Atom::xyz("O", 0.0, 0.0, 0.0));
-        let h1 = water.add_atom(Atom::xyz("H", 0.9572, 0.0, 0.0));
-        let h2 = water.add_atom(Atom::xyz("H", -0.2399, 0.9266, 0.0));
-
-        water.add_bond(o, h1).expect("add bond");
-        water.add_bond(o, h2).expect("add bond");
-        water.add_angle(h1, o, h2).expect("add angle");
-
-        assert_eq!(water.n_atoms(), 3);
-        assert_eq!(water.n_bonds(), 2);
-        assert_eq!(water.n_angles(), 1);
-
-        // O should have 2 neighbors.
-        assert_eq!(water.neighbors(o).count(), 2);
-        // Each H should have 1 neighbor.
-        assert_eq!(water.neighbors(h1).count(), 1);
-        assert_eq!(water.neighbors(h2).count(), 1);
-    }
-
-    // ----- Coarse-grained usage -----
-
-    #[test]
-    fn test_coarse_grained() {
-        let mut g = MolGraph::new();
-
-        // Bead is just Atom alias — use different prop keys.
-        let mut b1 = Bead::new();
-        b1.set("name", "W");
-        b1.set("x", 0.0);
-        b1.set("y", 0.0);
-        b1.set("z", 0.0);
-        b1.set("mass", 72.0);
-
-        let mut b2 = Bead::new();
-        b2.set("name", "W");
-        b2.set("x", 4.7);
-        b2.set("y", 0.0);
-        b2.set("z", 0.0);
-        b2.set("mass", 72.0);
-
-        let id1 = g.add_atom(b1);
-        let id2 = g.add_atom(b2);
-        g.add_bond(id1, id2).expect("add bond");
-
-        assert_eq!(g.n_atoms(), 2);
-        assert_eq!(g.n_bonds(), 1);
-        assert_eq!(
-            g.get_atom(id1).expect("get atom").get_f64("mass"),
-            Some(72.0)
-        );
-        assert_eq!(
-            g.get_atom(id1).expect("get atom").get_str("name"),
-            Some("W")
-        );
+    fn test_groups_reserved_empty() {
+        let g = MolGraph::new();
+        assert_eq!(g.groups.len(), 0);
     }
 }

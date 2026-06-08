@@ -14,9 +14,9 @@ use super::geom::{
     add, arbitrary_perpendicular, cross, dot, norm, normalize, random_unit, rotate_about_axis,
     scale, sub,
 };
+use molrs::atomistic::{AtomId, Atomistic};
 use molrs::element::Element;
 use molrs::error::MolRsError;
-use molrs::molgraph::{AtomId, MolGraph};
 use molrs::rings::find_rings;
 use molrs::rotatable::detect_rotatable_bonds;
 
@@ -29,7 +29,7 @@ pub(crate) struct BuildSummary {
 
 /// Embed initial 3D coordinates using a fragment/rule strategy.
 pub(crate) fn embed_fragment_rules(
-    mol: &mut MolGraph,
+    mol: &mut Atomistic,
     rng: &mut impl Rng,
 ) -> Result<BuildSummary, MolRsError> {
     let atom_ids: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
@@ -114,7 +114,7 @@ pub(crate) fn embed_fragment_rules(
 }
 
 fn build_rigid_fragments(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     id_to_idx: &HashMap<AtomId, usize>,
     rotatable: &HashSet<(usize, usize)>,
@@ -157,7 +157,7 @@ fn build_rigid_fragments(
     (fragments, frag_of)
 }
 
-fn ring_atom_indices(mol: &MolGraph, id_to_idx: &HashMap<AtomId, usize>) -> Vec<Vec<usize>> {
+fn ring_atom_indices(mol: &Atomistic, id_to_idx: &HashMap<AtomId, usize>) -> Vec<Vec<usize>> {
     find_rings(mol)
         .rings()
         .iter()
@@ -171,7 +171,7 @@ fn ring_atom_indices(mol: &MolGraph, id_to_idx: &HashMap<AtomId, usize>) -> Vec<
 
 #[allow(clippy::too_many_arguments)]
 fn embed_rigid_fragment_local(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     id_to_idx: &HashMap<AtomId, usize>,
     frag_atoms: &[usize],
@@ -288,7 +288,7 @@ fn embed_rigid_fragment_local(
 }
 
 fn place_regular_ring_template(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     ring: &[usize],
     coords: &mut [[f64; 3]],
@@ -385,7 +385,7 @@ fn ring_symbol_matches(template_symbol: &str, ring_symbol: &str) -> bool {
 }
 
 fn try_embed_rigid_template(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     id_to_idx: &HashMap<AtomId, usize>,
     frag_atoms: &[usize],
@@ -446,7 +446,7 @@ struct FragmentSignature {
 }
 
 fn build_fragment_signature(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     id_to_idx: &HashMap<AtomId, usize>,
     frag_atoms: &[usize],
@@ -616,7 +616,7 @@ fn find_isomorphism(
 
 #[allow(clippy::too_many_arguments)]
 fn place_template_on_fragment(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     frag_atoms: &[usize],
     frag_edges: &[(usize, usize)],
@@ -700,7 +700,7 @@ fn average_template_bond_length(coords: &[[f64; 3]], edges: &[(usize, usize)]) -
 }
 
 fn average_fragment_target_bond_length(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     frag_atoms: &[usize],
     edges: &[(usize, usize)],
@@ -737,7 +737,7 @@ fn multiset_equal_usize(a: &[usize], b: &[usize]) -> bool {
     aa == bb
 }
 
-fn average_ring_bond_length(mol: &MolGraph, atom_ids: &[AtomId], ring: &[usize]) -> f64 {
+fn average_ring_bond_length(mol: &Atomistic, atom_ids: &[AtomId], ring: &[usize]) -> f64 {
     if ring.is_empty() {
         return 1.4;
     }
@@ -773,7 +773,7 @@ fn centroid(coords: &[[f64; 3]]) -> [f64; 3] {
 }
 
 fn assemble_fragments(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     id_to_idx: &HashMap<AtomId, usize>,
     fragments: &[Vec<usize>],
@@ -784,10 +784,10 @@ fn assemble_fragments(
     let n = atom_ids.len();
     let mut frag_edges: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); fragments.len()];
     for (_, bond) in mol.bonds() {
-        let Some(i) = id_to_idx.get(&bond.atoms[0]).copied() else {
+        let Some(i) = id_to_idx.get(&bond.nodes[0]).copied() else {
             continue;
         };
-        let Some(j) = id_to_idx.get(&bond.atoms[1]).copied() else {
+        let Some(j) = id_to_idx.get(&bond.nodes[1]).copied() else {
             continue;
         };
         let fi = frag_of[i];
@@ -978,7 +978,7 @@ fn rotate_from_to(v: [f64; 3], from: [f64; 3], to: [f64; 3]) -> [f64; 3] {
 
 #[allow(clippy::too_many_arguments)]
 fn propose_child_position_fragment(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     id_to_idx: &HashMap<AtomId, usize>,
     in_fragment: &[bool],
@@ -1063,7 +1063,7 @@ fn recenter_subset(coords: &mut [[f64; 3]], subset: &[usize]) {
 }
 
 fn relax_bond_lengths(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     id_to_idx: &HashMap<AtomId, usize>,
     coords: &mut [[f64; 3]],
@@ -1071,10 +1071,10 @@ fn relax_bond_lengths(
 ) {
     for _ in 0..iterations {
         for (_, bond) in mol.bonds() {
-            let Some(i) = id_to_idx.get(&bond.atoms[0]).copied() else {
+            let Some(i) = id_to_idx.get(&bond.nodes[0]).copied() else {
                 continue;
             };
-            let Some(j) = id_to_idx.get(&bond.atoms[1]).copied() else {
+            let Some(j) = id_to_idx.get(&bond.nodes[1]).copied() else {
                 continue;
             };
             let target = ideal_bond_length(mol, atom_ids[i], atom_ids[j]);
@@ -1091,7 +1091,7 @@ fn relax_bond_lengths(
     }
 }
 
-fn ideal_angle_for_center(mol: &MolGraph, center: AtomId) -> f64 {
+fn ideal_angle_for_center(mol: &Atomistic, center: AtomId) -> f64 {
     let degree = mol.neighbors(center).count();
     let max_order = mol
         .neighbor_bonds(center)
@@ -1107,7 +1107,7 @@ fn ideal_angle_for_center(mol: &MolGraph, center: AtomId) -> f64 {
     }
 }
 
-fn ideal_bond_length(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
+fn ideal_bond_length(mol: &Atomistic, a: AtomId, b: AtomId) -> f64 {
     let sym_a = mol.get_atom(a).ok().and_then(|x| x.get_str("element"));
     let sym_b = mol.get_atom(b).ok().and_then(|x| x.get_str("element"));
     let r_a = sym_a
@@ -1129,7 +1129,7 @@ fn ideal_bond_length(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
     length.clamp(0.9, 2.2)
 }
 
-fn bond_order_between(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
+fn bond_order_between(mol: &Atomistic, a: AtomId, b: AtomId) -> f64 {
     mol.neighbor_bonds(a)
         .find_map(|(nbr, order)| (nbr == b).then_some(order))
         .unwrap_or(1.0)

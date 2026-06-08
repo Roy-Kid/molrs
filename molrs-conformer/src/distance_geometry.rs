@@ -13,9 +13,9 @@ use rand::Rng;
 
 use super::builder::BuildSummary;
 use super::geom::{add, dot, norm, random_unit, scale, sub};
+use molrs::atomistic::{AtomId, Atomistic};
 use molrs::element::Element;
 use molrs::error::MolRsError;
-use molrs::molgraph::{AtomId, MolGraph};
 use molrs::rings::find_rings;
 
 /// Bond-length tolerance (Å) already used for 1-2 bounds; propagated into
@@ -24,7 +24,7 @@ const BOND_TOL: f64 = 0.06;
 
 /// Embed initial 3D coordinates with an improved distance-geometry workflow.
 pub(crate) fn embed_distance_geometry(
-    mol: &mut MolGraph,
+    mol: &mut Atomistic,
     rng: &mut impl Rng,
 ) -> Result<BuildSummary, MolRsError> {
     let atom_ids: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
@@ -96,7 +96,7 @@ pub(crate) fn embed_distance_geometry(
 // ───────────────────── adjacency / topology ─────────────────────
 
 fn build_adjacency(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     id_to_idx: &HashMap<AtomId, usize>,
 ) -> Vec<Vec<usize>> {
@@ -137,7 +137,7 @@ fn topological_distances(adjacency: &[Vec<usize>]) -> Vec<Vec<usize>> {
 
 #[allow(clippy::needless_range_loop)]
 fn build_geometric_bounds(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     _id_to_idx: &HashMap<AtomId, usize>,
     adjacency: &[Vec<usize>],
@@ -193,7 +193,7 @@ fn build_geometric_bounds(
 
 /// Compute 1-3 distance bounds using the VSEPR ideal angle at the bridging atom.
 fn bounds_13_pair(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     adjacency: &[Vec<usize>],
     i: usize,
@@ -264,7 +264,7 @@ fn angle_flexibility(theta: f64) -> f64 {
 ///
 /// Minimum at τ = 0 (cis), maximum at τ = π (anti).
 fn bounds_14_pair(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     adjacency: &[Vec<usize>],
     topo_dist: &[Vec<usize>],
@@ -331,7 +331,7 @@ fn exact_14_bounds(r1: f64, r2: f64, r3: f64, theta1: f64, theta2: f64) -> (f64,
 // ───────────────────── ring closure constraints ─────────────────────
 
 fn apply_ring_constraints(
-    mol: &MolGraph,
+    mol: &Atomistic,
     _atom_ids: &[AtomId],
     id_to_idx: &HashMap<AtomId, usize>,
     lower: &mut [Vec<f64>],
@@ -833,7 +833,7 @@ fn recenter(coords: &mut [[f64; 3]]) {
 
 // ───────────────────── element helpers ─────────────────────
 
-fn covalent_radius(mol: &MolGraph, atom_id: AtomId) -> f64 {
+fn covalent_radius(mol: &Atomistic, atom_id: AtomId) -> f64 {
     mol.get_atom(atom_id)
         .ok()
         .and_then(|a| a.get_str("element"))
@@ -842,7 +842,7 @@ fn covalent_radius(mol: &MolGraph, atom_id: AtomId) -> f64 {
         .unwrap_or(0.77)
 }
 
-fn vdw_radius(mol: &MolGraph, atom_id: AtomId) -> f64 {
+fn vdw_radius(mol: &Atomistic, atom_id: AtomId) -> f64 {
     mol.get_atom(atom_id)
         .ok()
         .and_then(|a| a.get_str("element"))
@@ -851,7 +851,7 @@ fn vdw_radius(mol: &MolGraph, atom_id: AtomId) -> f64 {
         .unwrap_or(1.8)
 }
 
-fn ideal_bond_length(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
+fn ideal_bond_length(mol: &Atomistic, a: AtomId, b: AtomId) -> f64 {
     let r_a = covalent_radius(mol, a);
     let r_b = covalent_radius(mol, b);
     let order = bond_order_between(mol, a, b);
@@ -865,7 +865,7 @@ fn ideal_bond_length(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
     length.clamp(0.9, 2.2)
 }
 
-fn bond_order_between(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
+fn bond_order_between(mol: &Atomistic, a: AtomId, b: AtomId) -> f64 {
     mol.neighbor_bonds(a)
         .find_map(|(nbr, order)| (nbr == b).then_some(order))
         .unwrap_or(0.0)
@@ -873,7 +873,7 @@ fn bond_order_between(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
 
 /// VSEPR ideal angle at a center atom based on coordination number and
 /// maximum bond order among its neighbours.
-fn hybridization_angle(mol: &MolGraph, center: AtomId) -> f64 {
+fn hybridization_angle(mol: &Atomistic, center: AtomId) -> f64 {
     let degree = mol.neighbors(center).count();
     let max_order = mol
         .neighbor_bonds(center)

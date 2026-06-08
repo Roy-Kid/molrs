@@ -402,18 +402,8 @@ def write_dcd(path: str, frames: Sequence[Frame]) -> None: ...
 # 3D coordinate generation (embed)
 # ---------------------------------------------------------------------------
 
-class EmbedOptions:
-    """Options controlling 3D coordinate generation."""
-
-    def __init__(
-        self,
-        speed: str = "medium",
-        add_hydrogens: bool = True,
-        seed: Optional[int] = None,
-    ) -> None: ...
-
-class StageReport:
-    """Per-stage report from the 3D generation pipeline."""
+class ConformerStageReport:
+    """Per-stage report from the conformer generation pipeline."""
 
     @property
     def stage(self) -> str: ...
@@ -428,31 +418,30 @@ class StageReport:
     @property
     def elapsed_ms(self) -> int: ...
 
-class EmbedReport:
-    """Aggregate report from a 3D generation run."""
+class ConformerReport:
+    """Aggregate report from a conformer generation run."""
 
     @property
     def final_energy(self) -> Optional[float]: ...
     @property
     def warnings(self) -> list[str]: ...
     @property
-    def stages(self) -> list[StageReport]: ...
+    def stages(self) -> list[ConformerStageReport]: ...
 
-class EmbedResult:
-    """Result of a 3D generation run.
+class Conformer:
+    """3D conformer generator.
 
-    `mol` and `report` are **move-once** accessors: the first read transfers
-    ownership out; subsequent reads raise ``RuntimeError``.
+    Construct with the desired generation parameters, then call
+    :meth:`generate` to produce coordinates. Subclassable.
     """
 
-    @property
-    def mol(self) -> Atomistic: ...
-    @property
-    def report(self) -> EmbedReport: ...
-
-def generate_3d(
-    mol: Atomistic, options: Optional[EmbedOptions] = None
-) -> EmbedResult: ...
+    def __init__(
+        self,
+        speed: str = "medium",
+        add_hydrogens: bool = True,
+        seed: Optional[int] = None,
+    ) -> None: ...
+    def generate(self, mol: Atomistic) -> tuple[Atomistic, ConformerReport]: ...
 
 # ---------------------------------------------------------------------------
 # Force field

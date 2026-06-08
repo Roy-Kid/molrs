@@ -10,7 +10,7 @@ those pages instead of copying signatures or rustdoc text.
 | I/O | [`molcrafts-molrs-io`](https://docs.rs/molcrafts-molrs-io) |
 | Compute | [`molcrafts-molrs-compute`](https://docs.rs/molcrafts-molrs-compute) |
 | Force fields | [`molcrafts-molrs-ff`](https://docs.rs/molcrafts-molrs-ff) |
-| 3D embedding | [`molcrafts-molrs-embed`](https://docs.rs/molcrafts-molrs-embed) |
+| 3D conformer generation | [`molcrafts-molrs-conformer`](https://docs.rs/molcrafts-molrs-conformer) |
 
 The Packmol-aligned packing workflow lives in the separate
 [`molpack`](https://github.com/MolCrafts/molpack) repository.

@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use super::molgraph::{AtomId, MolGraph};
+use super::atomistic::{AtomId, Atomistic};
 use crate::element::Element;
 use crate::hydrogens::implicit_h_count;
 
@@ -91,7 +91,7 @@ fn gasteiger_params(elem: &str, mode: &str) -> [f64; 3] {
 ///
 /// Corresponds to `switch (hybridization)` in `GasteigerCharges.cpp`, but
 /// inferred from bond orders rather than a stored hybridization flag.
-fn hybridization_mode(mol: &MolGraph, id: AtomId) -> &'static str {
+fn hybridization_mode(mol: &Atomistic, id: AtomId) -> &'static str {
     let atom = match mol.get_atom(id) {
         Ok(a) => a,
         Err(_) => return "*",
@@ -152,7 +152,7 @@ fn hybridization_mode(mol: &MolGraph, id: AtomId) -> &'static str {
 /// Mirrors RDKit's `setConjugation()` logic:
 /// - Double / triple / aromatic bonds are intrinsically conjugated.
 /// - Single bonds are conjugated when *both* endpoints are sp or sp2.
-fn is_bond_conjugated(mol: &MolGraph, a: AtomId, b: AtomId) -> bool {
+fn is_bond_conjugated(mol: &Atomistic, a: AtomId, b: AtomId) -> bool {
     let order = mol
         .neighbor_bonds(a)
         .find(|&(nbr, _)| nbr == b)
@@ -180,7 +180,7 @@ fn is_bond_conjugated(mol: &MolGraph, a: AtomId, b: AtomId) -> bool {
 /// function performs a 2-hop search through conjugated bonds to find atoms of
 /// the same element, then divides the formal charge uniformly among them.
 fn split_charge_conjugated(
-    mol: &MolGraph,
+    mol: &Atomistic,
     atom_ids: &[AtomId],
     charges: &mut [f64],
     atom_idx: &HashMap<AtomId, usize>,
@@ -264,7 +264,10 @@ pub struct GasteigerCharges {
 ///
 /// # Returns
 /// One `(AtomId, GasteigerCharges)` entry per heavy atom (explicit H skipped).
-pub fn compute_gasteiger_charges(mol: &MolGraph, n_iter: usize) -> Vec<(AtomId, GasteigerCharges)> {
+pub fn compute_gasteiger_charges(
+    mol: &Atomistic,
+    n_iter: usize,
+) -> Vec<(AtomId, GasteigerCharges)> {
     // Collect heavy-atom IDs (skip explicit H)
     let atom_ids: Vec<AtomId> = mol
         .atoms()
@@ -401,7 +404,7 @@ pub fn compute_gasteiger_charges(mol: &MolGraph, n_iter: usize) -> Vec<(AtomId, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::molgraph::{Atom, MolGraph, PropValue};
+    use crate::molgraph::{Atom, PropValue};
 
     fn atom(sym: &str) -> Atom {
         let mut a = Atom::new();
@@ -415,7 +418,7 @@ mod tests {
         a
     }
 
-    fn bond_order(mol: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
+    fn bond_order(mol: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
         if let Ok(bid) = mol.add_bond(a, b)
             && let Ok(bond) = mol.get_bond_mut(bid)
         {
@@ -438,7 +441,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_water() {
-        let mut mol = MolGraph::new();
+        let mut mol = Atomistic::new();
         let o = mol.add_atom(atom("O"));
         // No explicit H — they are implicit.
 
@@ -481,7 +484,7 @@ mod tests {
     #[test]
     fn test_ethanol_oxygen() {
         // CH3-CH2-OH: just the O connected to a C with a single bond
-        let mut mol = MolGraph::new();
+        let mut mol = Atomistic::new();
         let c1 = mol.add_atom(atom("C")); // methyl C
         let c2 = mol.add_atom(atom("C")); // alpha C
         let o = mol.add_atom(atom("O"));
@@ -508,7 +511,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_benzene() {
-        let mut mol = MolGraph::new();
+        let mut mol = Atomistic::new();
         let ids: Vec<AtomId> = (0..6).map(|_| mol.add_atom(atom("C"))).collect();
         for i in 0..6 {
             bond_order(&mut mol, ids[i], ids[(i + 1) % 6], 1.5);
@@ -547,7 +550,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_nh4_plus() {
-        let mut mol = MolGraph::new();
+        let mut mol = Atomistic::new();
         let n = mol.add_atom(atom_fc("N", 1.0));
         // 4 implicit H from normal valence (N valence=3) + formal_charge=+1
         // → implicit_h_count returns 4
@@ -588,7 +591,7 @@ mod tests {
     fn test_benzamidine_amidine_nitrogen_symmetry() {
         // Build the amidine group: C(=N1)N2 with aromatic bond order for C
         // This is the C(=NH)NH2 part; we ignore the phenyl ring for simplicity.
-        let mut mol = MolGraph::new();
+        let mut mol = Atomistic::new();
         let c = mol.add_atom(atom("C")); // amidine carbon (sp2)
         let n1 = mol.add_atom(atom("N")); // =N (imine N, sp2)
         let n2 = mol.add_atom(atom("N")); // -N (amine N, sp2 due to conjugation)
@@ -630,7 +633,7 @@ mod tests {
     #[test]
     fn test_amidine_protonated_split_charge() {
         // C(=N1H)N2H2 with formal_charge=+1 on N1
-        let mut mol = MolGraph::new();
+        let mut mol = Atomistic::new();
         let c = mol.add_atom(atom("C"));
         let n1 = mol.add_atom(atom_fc("N", 1.0)); // protonated imine N
         let n2 = mol.add_atom(atom("N"));

@@ -85,7 +85,13 @@ fn py_none(py: Python<'_>) -> Py<PyAny> {
 /// g.set_bond_order(c, o, 2.0)
 /// print(g)  # Graph(atoms=2, bonds=1, angles=0, dihedrals=0, impropers=0)
 /// ```
-#[pyclass(name = "Graph", subclass, unsendable)]
+// `MolGraph` is pure Rust data (`SlotMap` / `HashMap` / `Vec` of `PropValue`,
+// itself `f64 | String | i32`) — it is `Send`. We deliberately omit
+// `unsendable`: with it, PyO3 pins the object to its creating thread and panics
+// ("PyGraph is unsendable, but is being dropped on another thread") whenever
+// Python's GC finalizes the object on a different thread (common under `rich`,
+// thread pools, or interpreter shutdown).
+#[pyclass(name = "Graph", subclass)]
 pub struct PyGraph {
     pub(crate) inner: MolGraph,
 }
@@ -833,7 +839,7 @@ fn atom_prop_to_py(py: Python<'_>, atom: &Atom, key: &str) -> PyResult<Py<PyAny>
 ///
 /// A marker subclass of :class:`Graph`; it inherits the full method surface.
 /// The ``"element"`` invariant is established by :meth:`Graph.add_atom`.
-#[pyclass(name = "Atomistic", extends = PyGraph, unsendable)]
+#[pyclass(name = "Atomistic", extends = PyGraph)]
 pub struct PyAtomistic;
 
 #[pymethods]
@@ -859,7 +865,7 @@ impl PyAtomistic {
 ///
 /// A marker subclass of :class:`Graph`; it inherits the full method surface.
 /// The ``"bead_type"`` invariant is established by :meth:`Graph.add_bead`.
-#[pyclass(name = "CoarseGrain", extends = PyGraph, unsendable)]
+#[pyclass(name = "CoarseGrain", extends = PyGraph)]
 pub struct PyCoarseGrain;
 
 #[pymethods]

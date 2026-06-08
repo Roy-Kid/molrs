@@ -15,7 +15,7 @@
 //! embedder constrains. When the molecule has no coordinates the sign is left
 //! `Unknown` and only the volume magnitude bounds are emitted.
 
-use molrs::molgraph::{AtomId, MolGraph};
+use molrs::atomistic::{AtomId, Atomistic};
 
 use super::perceive::{Hybridization, Perceived};
 
@@ -58,7 +58,7 @@ pub struct ImproperConstraint {
     pub bound_to_sp2_o: bool,
 }
 
-fn coord(mol: &MolGraph, id: AtomId) -> Option<[f64; 3]> {
+fn coord(mol: &Atomistic, id: AtomId) -> Option<[f64; 3]> {
     let a = mol.get_atom(id).ok()?;
     Some([a.get_f64("x")?, a.get_f64("y")?, a.get_f64("z")?])
 }
@@ -78,7 +78,7 @@ fn signed_volume(p0: [f64; 3], p1: [f64; 3], p2: [f64; 3], p3: [f64; 3]) -> f64 
 
 /// Build chiral constraints (RDKit `findChiralSets`, restricted to tetrahedral
 /// C/N centres) using the input 3D coordinates to fix the volume sign.
-pub fn build_chiral(mol: &MolGraph, p: &Perceived) -> Vec<ChiralConstraint> {
+pub fn build_chiral(mol: &Atomistic, p: &Perceived) -> Vec<ChiralConstraint> {
     let mut out = Vec::new();
     for (i, atom) in p.atoms.iter().enumerate() {
         let z = atom.element.z();

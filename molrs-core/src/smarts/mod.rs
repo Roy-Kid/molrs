@@ -14,7 +14,7 @@
 //!
 //! # Aromaticity convention
 //!
-//! `MolGraph` carries no aromatic model. Aromatic atoms are perceived as those
+//! `Atomistic` carries no aromatic model. Aromatic atoms are perceived as those
 //! incident to a bond of order `1.5` (the project convention), unless an
 //! explicit `is_aromatic` atom/bond prop is present, which takes precedence.
 //! This lets callers transplant a reference perception (e.g. RDKit's) so that
@@ -37,10 +37,10 @@
 //!
 //! ```
 //! use molrs_core::smarts::SmartsPattern;
-//! use molrs_core::{Atom, MolGraph, PropValue};
+//! use molrs_core::{Atom, Atomistic, PropValue};
 //!
 //! // Acetamide skeleton C-C(=O)-N (no Hs needed for this query).
-//! let mut g = MolGraph::new();
+//! let mut g = Atomistic::new();
 //! let c0 = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
 //! let c1 = g.add_atom(Atom::xyz("C", 1.0, 0.0, 0.0));
 //! let o = g.add_atom(Atom::xyz("O", 2.0, 0.0, 0.0));
@@ -59,8 +59,8 @@ mod ast;
 mod matcher;
 mod parser;
 
+use crate::atomistic::{AtomId, Atomistic};
 use crate::error::MolRsError;
-use crate::molgraph::{AtomId, MolGraph};
 
 use parser::QueryGraph;
 
@@ -80,12 +80,12 @@ impl SmartsPattern {
     /// All matches (non-uniquified). Each match is a vector indexed by
     /// query-atom order: element `i` is the [`AtomId`] matched by query atom
     /// `i`. Use [`map_label`](Self::map_label) to recover `:n` atom-map labels.
-    pub fn find_matches(&self, mol: &MolGraph) -> Vec<Vec<AtomId>> {
+    pub fn find_matches(&self, mol: &Atomistic) -> Vec<Vec<AtomId>> {
         matcher::find_matches(&self.graph, mol)
     }
 
     /// Whether at least one match exists.
-    pub fn has_match(&self, mol: &MolGraph) -> bool {
+    pub fn has_match(&self, mol: &Atomistic) -> bool {
         matcher::has_match(&self.graph, mol)
     }
 

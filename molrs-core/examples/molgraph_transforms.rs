@@ -5,7 +5,7 @@
 //!
 //! Run with: `cargo run -p molrs-core --example molgraph_transforms`
 
-use molrs_core::{Atom, MolGraph};
+use molrs_core::{Atom, Atomistic};
 
 fn main() {
     let mol = build_methane();
@@ -16,8 +16,8 @@ fn main() {
 }
 
 /// Build a methane molecule (CH4) with tetrahedral geometry.
-fn build_methane() -> MolGraph {
-    let mut mol = MolGraph::new();
+fn build_methane() -> Atomistic {
+    let mut mol = Atomistic::new();
 
     // Central carbon
     let c = mol.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
@@ -44,7 +44,7 @@ fn build_methane() -> MolGraph {
 }
 
 /// Print all atom coordinates.
-fn print_coords(mol: &MolGraph, label: &str) {
+fn print_coords(mol: &Atomistic, label: &str) {
     println!("  {}:", label);
     for (_id, atom) in mol.atoms() {
         println!(
@@ -59,7 +59,7 @@ fn print_coords(mol: &MolGraph, label: &str) {
 
 // ─── Translation ────────────────────────────────────────────────────────────
 
-fn translation(original: &MolGraph) {
+fn translation(original: &Atomistic) {
     println!("=== Translation ===\n");
 
     let mut mol = original.clone();
@@ -76,7 +76,7 @@ fn translation(original: &MolGraph) {
 
 // ─── Rotation ───────────────────────────────────────────────────────────────
 
-fn rotation(original: &MolGraph) {
+fn rotation(original: &Atomistic) {
     println!("=== Rotation ===\n");
 
     // --- Rotate 90 degrees around z-axis (about origin) ---
@@ -109,7 +109,7 @@ fn rotation(original: &MolGraph) {
 
 // ─── Clone independence ────────────────────────────────────────────────────
 
-fn clone_independence(original: &MolGraph) {
+fn clone_independence(original: &Atomistic) {
     println!("=== Clone Independence ===\n");
 
     let mut a = original.clone();
@@ -140,7 +140,7 @@ fn clone_independence(original: &MolGraph) {
 
 // ─── Merge ──────────────────────────────────────────────────────────────────
 
-fn merge_molecules(original: &MolGraph) {
+fn merge_molecules(original: &Atomistic) {
     println!("=== Merge ===\n");
 
     // Create two copies, translate one
@@ -156,7 +156,7 @@ fn merge_molecules(original: &MolGraph) {
     );
 
     // Merge mol2 into mol1 (consumes mol2, IDs are remapped)
-    mol1.merge(mol2);
+    mol1.merge(mol2.into_inner());
 
     println!("\n  After merge:");
     println!(

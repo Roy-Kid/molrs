@@ -2,6 +2,8 @@
 
 One row per spec produced by `/molrs-spec`. Newest on top.
 
+| 2026-06-08 | [molgraph-abstract-01-core](molgraph-abstract-01-core.md) | code-complete | molrs-core | 反转 MolGraph 为领域无关 interned kind 标签 n 元关系存储（SmallVec nodes/Option props/KindId 数组索引）；领域词下沉 Atomistic/CoarseGrain 叶子；dihedral/improper→4 元+kind；修 merge 漏 impropers bug；预留 containment 轴（chain molgraph-abstract 1/2，refines molgraph-pybind-01 D2） |
+| 2026-06-08 | [molgraph-abstract-02-pybind](molgraph-abstract-02-pybind.md) | approved | molrs-python | Python 暴露反转层级：PyGraph 仅通用关系 API + 无字段 add_node，领域方法移到 PyAtomistic/PyCoarseGrain 叶子；向后兼容 molpy to_molrs/embed 不回归（chain molgraph-abstract 2/2，依赖 01） |
 | 2026-06-01 | [molgraph-pybind-01-hierarchy](molgraph-pybind-01-hierarchy.md) | code-complete | molrs-core, molrs-python | 暴露 MolGraph 层级到 Python（Graph ← Atomistic/CoarseGrain）+ 角/二面角/impropers/属性/extend 绑定扩面；molpy 子类化后端的先决项 P0（5/5 acceptance verified） |
 | 2026-06-01 | [core-perception-01-aromaticity](core-perception-01-aromaticity.md) | approved | molrs-core | Atomistic::perceive_aromaticity()，对齐 RDKit 默认芳香性模型（chain core-perception 1/2） |
 | 2026-06-01 | [core-perception-02-smarts-rings](core-perception-02-smarts-rings.md) | approved | molrs-core | SMARTS r{lo-hi} 区间 + x<n> 环连接度，去掉 torsion_prefs shim（chain core-perception 2/2） |

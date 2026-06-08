@@ -14,8 +14,8 @@ use std::collections::HashMap;
 
 use crate::smiles::chem::ast::*;
 use crate::smiles::error::{SmilesError, SmilesErrorKind};
-use molrs::atomistic::Atomistic;
-use molrs::molgraph::{AtomId, PropValue};
+use molrs::atomistic::{AtomId, Atomistic};
+use molrs::molgraph::PropValue;
 
 /// Convert a parsed SMILES IR into an [`Atomistic`] molecular graph.
 ///

@@ -233,8 +233,14 @@ impl PyBlock {
                         Ok(arr.into_any().unbind())
                     }
                     Column::String(a) => {
+                        // Return an ndarray (not a list) so string columns match
+                        // numeric columns and molpy's convention — callers can
+                        // rely on ``.dtype`` uniformly across every column.
                         let list: Vec<String> = a.iter().cloned().collect();
-                        Ok(pyo3::types::PyList::new(py, &list)?.into_any().unbind())
+                        let arr = py
+                            .import("numpy")?
+                            .call_method1("asarray", (pyo3::types::PyList::new(py, &list)?,))?;
+                        Ok(arr.unbind())
                     }
                 }
             })
@@ -317,6 +323,31 @@ impl PyBlock {
             Ok(())
         } else {
             Err(PyKeyError::new_err(key.to_string()))
+        }
+    }
+
+    /// Rename a column in place, preserving its data and position.
+    ///
+    /// Parameters
+    /// ----------
+    /// old_key : str
+    ///     Existing column name.
+    /// new_key : str
+    ///     New column name.
+    ///
+    /// Raises
+    /// ------
+    /// KeyError
+    ///     If ``old_key`` does not exist.
+    fn rename(&mut self, old_key: &str, new_key: &str) -> PyResult<()> {
+        let renamed = self
+            .inner
+            .with_mut(|b| b.rename_column(old_key, new_key))
+            .map_err(ffi_error_to_pyerr)?;
+        if renamed {
+            Ok(())
+        } else {
+            Err(PyKeyError::new_err(old_key.to_string()))
         }
     }
 

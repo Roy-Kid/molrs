@@ -13,7 +13,7 @@
 //!
 //! ```no_run
 //! use molrs_ff::mmff::{MmffMolProperties, MmffVariant};
-//! # fn run(mol: &molrs::molgraph::MolGraph) -> Result<(), molrs::error::MolRsError> {
+//! # fn run(mol: &molrs::Atomistic) -> Result<(), molrs::error::MolRsError> {
 //! let props = MmffMolProperties::compute(mol, MmffVariant::Mmff94)?;
 //! let t = props.atom_type(0);
 //! let q = props.partial_charge(0);
@@ -31,8 +31,8 @@ mod topo;
 
 pub use energy::{MmffEnergyBreakdown, MmffForceField};
 
+use molrs::Atomistic;
 use molrs::error::MolRsError;
-use molrs::molgraph::MolGraph;
 
 use topo::Topo;
 
@@ -65,7 +65,7 @@ impl MmffMolProperties {
     ///
     /// Returns `Err` if any atom could not be assigned an MMFF type
     /// (e.g. an unsupported element / transition metal with no MMFF type).
-    pub fn compute(mol: &MolGraph, variant: MmffVariant) -> Result<Self, MolRsError> {
+    pub fn compute(mol: &Atomistic, variant: MmffVariant) -> Result<Self, MolRsError> {
         let base = Topo::build(mol).map_err(|sym| {
             MolRsError::validation(format!("MMFF: unsupported element symbol '{sym}'"))
         })?;

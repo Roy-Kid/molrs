@@ -39,8 +39,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::atomistic::{AtomId, Atomistic, BondId};
 use crate::element::Element;
-use crate::molgraph::{AtomId, BondId, MolGraph, PropValue};
+use crate::molgraph::PropValue;
 use crate::rings::find_rings;
 
 /// Maximum number of fused rings combined when checking the Hückel rule
@@ -166,7 +167,7 @@ fn more_electronegative(za: u8, zb: u8) -> bool {
 /// is overwritten with `1.5`), falling back to `"order"`. This keeps
 /// perception idempotent — re-running it sees the original integer orders, not
 /// the aromatic `1.5` written by a prior call.
-fn bond_order(mol: &MolGraph, bid: BondId) -> f64 {
+fn bond_order(mol: &Atomistic, bid: BondId) -> f64 {
     let props = match mol.get_bond(bid) {
         Ok(b) => &b.props,
         Err(_) => return 1.0,
@@ -179,7 +180,7 @@ fn bond_order(mol: &MolGraph, bid: BondId) -> f64 {
 }
 
 /// Atomic number of an atom (from its `"element"` symbol). `0` if unknown.
-fn atomic_num(mol: &MolGraph, id: AtomId) -> u8 {
+fn atomic_num(mol: &Atomistic, id: AtomId) -> u8 {
     mol.get_atom(id)
         .ok()
         .and_then(|a| a.get_str("element"))
@@ -189,7 +190,7 @@ fn atomic_num(mol: &MolGraph, id: AtomId) -> u8 {
 }
 
 /// Formal charge (`"formal_charge"` prop, default 0).
-fn formal_charge(mol: &MolGraph, id: AtomId) -> i32 {
+fn formal_charge(mol: &Atomistic, id: AtomId) -> i32 {
     match mol.get_atom(id).ok().and_then(|a| a.get("formal_charge")) {
         Some(PropValue::Int(v)) => *v,
         Some(PropValue::F64(v)) => *v as i32,
@@ -199,20 +200,20 @@ fn formal_charge(mol: &MolGraph, id: AtomId) -> i32 {
 
 /// Heavy-atom + H degree (RDKit `getDegree() + getTotalNumHs()`); here all H
 /// are explicit so this is simply the neighbour count.
-fn total_degree(mol: &MolGraph, id: AtomId) -> i32 {
+fn total_degree(mol: &Atomistic, id: AtomId) -> i32 {
     mol.neighbors(id).count() as i32
 }
 
 /// Iterate incident `(BondId, other_atom, kekule_order)` for an atom.
 fn incident_bonds<'a>(
-    mol: &'a MolGraph,
+    mol: &'a Atomistic,
     id: AtomId,
 ) -> impl Iterator<Item = (BondId, AtomId, f64)> + 'a {
     mol.bonds().filter_map(move |(bid, b)| {
-        if b.atoms[0] == id {
-            Some((bid, b.atoms[1], bond_order(mol, bid)))
-        } else if b.atoms[1] == id {
-            Some((bid, b.atoms[0], bond_order(mol, bid)))
+        if b.nodes[0] == id {
+            Some((bid, b.nodes[1], bond_order(mol, bid)))
+        } else if b.nodes[1] == id {
+            Some((bid, b.nodes[0], bond_order(mol, bid)))
         } else {
             None
         }
@@ -221,7 +222,7 @@ fn incident_bonds<'a>(
 
 /// Explicit valence = sum of incident **Kekulé** bond orders (RDKit
 /// `getValence(EXPLICIT)`), rounded to nearest integer.
-fn explicit_valence(mol: &MolGraph, id: AtomId) -> i32 {
+fn explicit_valence(mol: &Atomistic, id: AtomId) -> i32 {
     let sum: f64 = incident_bonds(mol, id).map(|(_, _, o)| o).sum();
     sum.round() as i32
 }
@@ -229,7 +230,7 @@ fn explicit_valence(mol: &MolGraph, id: AtomId) -> i32 {
 /// RDKit `incidentNonCyclicMultipleBond`: a multiple bond (order ≥ 2) to a
 /// non-ring bond. Returns the partner atom if found.
 fn incident_noncyclic_multiple_bond(
-    mol: &MolGraph,
+    mol: &Atomistic,
     rings: &crate::rings::RingInfo,
     id: AtomId,
 ) -> Option<AtomId> {
@@ -244,7 +245,7 @@ fn incident_noncyclic_multiple_bond(
 /// RDKit `incidentCyclicMultipleBond`: a multiple bond (order ≥ 2) that is in a
 /// ring.
 fn incident_cyclic_multiple_bond(
-    mol: &MolGraph,
+    mol: &Atomistic,
     rings: &crate::rings::RingInfo,
     id: AtomId,
 ) -> bool {
@@ -253,7 +254,7 @@ fn incident_cyclic_multiple_bond(
 
 /// RDKit `incidentMultipleBond`: explicit valence differs from σ-degree, i.e.
 /// the atom carries at least one π bond.
-fn incident_multiple_bond(mol: &MolGraph, id: AtomId) -> bool {
+fn incident_multiple_bond(mol: &Atomistic, id: AtomId) -> bool {
     explicit_valence(mol, id) != total_degree(mol, id)
 }
 
@@ -263,7 +264,7 @@ fn incident_multiple_bond(mol: &MolGraph, id: AtomId) -> bool {
 
 /// RDKit `MolOps::countAtomElec` — number of electrons the atom can donate to
 /// the π system, or `-1` if it cannot be aromatic / conjugated.
-fn count_atom_elec(mol: &MolGraph, id: AtomId) -> i32 {
+fn count_atom_elec(mol: &Atomistic, id: AtomId) -> i32 {
     let z = atomic_num(mol, id);
     let dv = default_valence(z);
     if dv <= 1 {
@@ -299,7 +300,7 @@ fn count_atom_elec(mol: &MolGraph, id: AtomId) -> i32 {
 
 /// RDKit `getAtomDonorTypeArom` with `exocyclicBondsStealElectrons = true`
 /// (the default-model setting).
-fn atom_donor_type(mol: &MolGraph, rings: &crate::rings::RingInfo, id: AtomId) -> ElectronDonor {
+fn atom_donor_type(mol: &Atomistic, rings: &crate::rings::RingInfo, id: AtomId) -> ElectronDonor {
     let z = atomic_num(mol, id);
     if z == 0 {
         // dummy atom
@@ -356,7 +357,7 @@ fn atom_donor_type(mol: &MolGraph, rings: &crate::rings::RingInfo, id: AtomId) -
 }
 
 /// RDKit `isAtomCandForArom` with the default-model flag set (all permissive).
-fn is_atom_candidate(mol: &MolGraph, id: AtomId, edon: ElectronDonor) -> bool {
+fn is_atom_candidate(mol: &Atomistic, id: AtomId, edon: ElectronDonor) -> bool {
     let z = atomic_num(mol, id);
 
     // first two rows + Se / Te
@@ -437,7 +438,7 @@ fn apply_huckel(ring_atoms: &[AtomId], edon: &HashMap<AtomId, ElectronDonor>) ->
 // ---------------------------------------------------------------------------
 
 /// Bond-id set for a ring (consecutive atom pairs).
-fn ring_bonds(mol: &MolGraph, ring: &[AtomId]) -> Vec<BondId> {
+fn ring_bonds(mol: &Atomistic, ring: &[AtomId]) -> Vec<BondId> {
     let n = ring.len();
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
@@ -451,10 +452,10 @@ fn ring_bonds(mol: &MolGraph, ring: &[AtomId]) -> Vec<BondId> {
 }
 
 /// Find the bond connecting `a` and `b`, if any.
-fn find_bond(mol: &MolGraph, a: AtomId, b: AtomId) -> Option<BondId> {
+fn find_bond(mol: &Atomistic, a: AtomId, b: AtomId) -> Option<BondId> {
     mol.bonds()
         .find(|(_, bond)| {
-            (bond.atoms[0] == a && bond.atoms[1] == b) || (bond.atoms[0] == b && bond.atoms[1] == a)
+            (bond.nodes[0] == a && bond.nodes[1] == b) || (bond.nodes[0] == b && bond.nodes[1] == a)
         })
         .map(|(bid, _)| bid)
 }
@@ -530,7 +531,7 @@ fn apply_huckel_to_fused(
     edon: &HashMap<AtomId, ElectronDonor>,
     aromatic_bonds: &mut HashSet<BondId>,
     aromatic_atoms: &mut HashSet<AtomId>,
-    mol: &MolGraph,
+    mol: &Atomistic,
 ) {
     let nrings = fused.len();
     let max_size = nrings.min(MAX_FUSED);
@@ -571,8 +572,8 @@ fn apply_huckel_to_fused(
                     if cnt == 1 {
                         if let Ok(bond) = mol.get_bond(bid) {
                             aromatic_bonds.insert(bid);
-                            aromatic_atoms.insert(bond.atoms[0]);
-                            aromatic_atoms.insert(bond.atoms[1]);
+                            aromatic_atoms.insert(bond.nodes[0]);
+                            aromatic_atoms.insert(bond.nodes[1]);
                         }
                     }
                 }
@@ -622,7 +623,7 @@ fn is_connected_subset(subset: &[usize], ring_bond_sets: &[HashSet<BondId>]) -> 
 /// Port of RDKit `setAromaticity(mol, AROMATICITY_RDKIT)` →
 /// `aromaticityHelper(mol, srings, 0, 0, /*includeFused=*/true)`.
 /// `Code/GraphMol/Aromaticity.cpp`, BSD 3-Clause, © RDKit contributors.
-pub fn perceive_aromaticity(mol: &mut MolGraph) -> usize {
+pub fn perceive_aromaticity(mol: &mut Atomistic) -> usize {
     // Snapshot Kekulé bond orders before we overwrite any with 1.5, so that
     // repeated calls perceive from the original structure (idempotency).
     let snapshot: Vec<(BondId, f64)> = mol
@@ -721,8 +722,8 @@ mod tests {
     use crate::molgraph::Atom;
 
     /// Build a Kekulé benzene ring of 6 carbons (alternating single/double).
-    fn benzene() -> MolGraph {
-        let mut g = MolGraph::new();
+    fn benzene() -> Atomistic {
+        let mut g = Atomistic::new();
         let c: Vec<AtomId> = (0..6)
             .map(|_| g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0)))
             .collect();
@@ -751,7 +752,7 @@ mod tests {
 
     #[test]
     fn test_cyclohexane_not_aromatic() {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c: Vec<AtomId> = (0..6)
             .map(|_| g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0)))
             .collect();

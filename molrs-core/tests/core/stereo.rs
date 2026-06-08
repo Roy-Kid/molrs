@@ -1,7 +1,7 @@
 //! Integration tests for stereochemistry (src/core/stereo.rs).
 
 use molrs_core::{
-    Atom, AtomId, BondStereo, MolGraph, PropValue, TetrahedralStereo, assign_bond_stereo_from_3d,
+    Atom, AtomId, Atomistic, BondStereo, PropValue, TetrahedralStereo, assign_bond_stereo_from_3d,
     assign_stereo_from_3d, chiral_volume, find_chiral_centers,
 };
 
@@ -9,7 +9,7 @@ fn atom_at(sym: &str, x: f64, y: f64, z: f64) -> Atom {
     Atom::xyz(sym, x, y, z)
 }
 
-fn add_double_bond(g: &mut MolGraph, a: AtomId, b: AtomId) {
+fn add_double_bond(g: &mut Atomistic, a: AtomId, b: AtomId) {
     if let Ok(bid) = g.add_bond(a, b)
         && let Ok(bnd) = g.get_bond_mut(bid)
     {
@@ -23,7 +23,7 @@ fn add_double_bond(g: &mut MolGraph, a: AtomId, b: AtomId) {
 fn test_chiral_volume_right_handed_positive() {
     // Right-handed tetrahedron: v1=(1,0,0), v2=(0,1,0), v3=(0,0,1)
     // Triple product = 1 > 0
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     let n1 = g.add_atom(atom_at("H", 1.0, 0.0, 0.0));
     let n2 = g.add_atom(atom_at("H", 0.0, 1.0, 0.0));
@@ -38,7 +38,7 @@ fn test_chiral_volume_right_handed_positive() {
 
 #[test]
 fn test_chiral_volume_swap_flips_sign() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     let n1 = g.add_atom(atom_at("H", 1.0, 0.0, 0.0));
     let n2 = g.add_atom(atom_at("H", 0.0, 1.0, 0.0));
@@ -57,7 +57,7 @@ fn test_chiral_volume_swap_flips_sign() {
 
 #[test]
 fn test_chiral_volume_missing_coords_returns_zero() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     // atoms without coordinates
     let c = g.add_atom(Atom::new());
     let n1 = g.add_atom(Atom::new());
@@ -75,7 +75,7 @@ fn test_chiral_volume_missing_coords_returns_zero() {
 
 #[test]
 fn test_no_centers_in_ethane() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c1 = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     let c2 = g.add_atom(atom_at("C", 1.5, 0.0, 0.0));
     g.add_bond(c1, c2).expect("add bond");
@@ -85,7 +85,7 @@ fn test_no_centers_in_ethane() {
 #[test]
 fn test_no_centers_for_3_neighbors() {
     // Carbon with only 3 neighbours (e.g., sp2)
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     for i in 0..3 {
         let h = g.add_atom(atom_at("H", i as f64, 0.0, 0.0));
@@ -96,7 +96,7 @@ fn test_no_centers_for_3_neighbors() {
 
 #[test]
 fn test_4_neighbor_atom_is_center() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     for i in 0..4_usize {
         // Give each neighbour a unique position so they are distinct IDs
@@ -112,7 +112,7 @@ fn test_4_neighbor_atom_is_center() {
 
 #[test]
 fn test_stereo_assigned_for_tetrahedral_center() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     let n1 = g.add_atom(atom_at("F", 1.0, 0.0, 0.0));
     let n2 = g.add_atom(atom_at("Cl", 0.0, 1.0, 0.0));
@@ -132,7 +132,7 @@ fn test_stereo_assigned_for_tetrahedral_center() {
 
 #[test]
 fn test_achiral_molecule_no_centers() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c1 = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     let c2 = g.add_atom(atom_at("C", 1.5, 0.0, 0.0));
     g.add_bond(c1, c2).expect("add bond");
@@ -144,7 +144,7 @@ fn test_achiral_molecule_no_centers() {
 fn test_stereo_cw_vs_ccw_differ() {
     // Two mirror-image tetrahedra should give opposite chirality labels.
     let make = |sign: f64| {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
         let n1 = g.add_atom(atom_at("F", 1.0 * sign, 0.0, 0.0));
         let n2 = g.add_atom(atom_at("Cl", 0.0, 1.0, 0.0));
@@ -173,7 +173,7 @@ fn test_stereo_cw_vs_ccw_differ() {
 #[test]
 fn test_cis_2_butene_z() {
     // cis-2-butene: both methyl groups on the same side (+y).
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c1 = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     let c2 = g.add_atom(atom_at("C", 1.34, 0.0, 0.0));
     let s1 = g.add_atom(atom_at("C", -0.5, 1.0, 0.0)); // +y
@@ -194,7 +194,7 @@ fn test_cis_2_butene_z() {
 #[test]
 fn test_trans_2_butene_e() {
     // trans-2-butene: methyl groups on opposite sides.
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c1 = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     let c2 = g.add_atom(atom_at("C", 1.34, 0.0, 0.0));
     let s1 = g.add_atom(atom_at("C", -0.5, 1.0, 0.0)); // +y
@@ -214,7 +214,7 @@ fn test_trans_2_butene_e() {
 
 #[test]
 fn test_single_bond_is_none() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let a = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     let b = g.add_atom(atom_at("C", 1.5, 0.0, 0.0));
     g.add_bond(a, b).expect("add bond");
@@ -226,7 +226,7 @@ fn test_single_bond_is_none() {
 #[test]
 fn test_double_bond_no_substituents_is_none() {
     // C=C with no other substituents → BondStereo::None
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let c1 = g.add_atom(atom_at("C", 0.0, 0.0, 0.0));
     let c2 = g.add_atom(atom_at("C", 1.34, 0.0, 0.0));
     add_double_bond(&mut g, c1, c2);

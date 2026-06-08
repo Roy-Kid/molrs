@@ -12,9 +12,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::geom::{add, cross, dot, norm, normalize, scale, sub};
+use molrs::atomistic::{AtomId, Atomistic};
 use molrs::element::Element;
 use molrs::error::MolRsError;
-use molrs::molgraph::{AtomId, MolGraph};
 use molrs::stereo::{TetrahedralStereo, assign_stereo_from_3d, find_chiral_centers};
 
 // ───────────────────── energy term structs ─────────────────────
@@ -79,7 +79,7 @@ pub(crate) struct MinResult {
 
 impl EnergyModel {
     /// Build an optimization model from molecular topology and elements.
-    pub(crate) fn from_mol(mol: &MolGraph) -> Self {
+    pub(crate) fn from_mol(mol: &Atomistic) -> Self {
         let atom_ids: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
         let id_to_idx: HashMap<AtomId, usize> = atom_ids
             .iter()
@@ -103,8 +103,8 @@ impl EnergyModel {
         }
 
         for (_, bond) in mol.bonds() {
-            let ai = bond.atoms[0];
-            let aj = bond.atoms[1];
+            let ai = bond.nodes[0];
+            let aj = bond.nodes[1];
             let Some(&i) = id_to_idx.get(&ai) else {
                 continue;
             };
@@ -207,7 +207,7 @@ impl EnergyModel {
 
     /// Add chiral-volume constraints inferred from the molecule's 3D geometry
     /// or explicit stereo annotations.
-    pub(crate) fn with_chiral_constraints(mut self, mol: &MolGraph) -> Self {
+    pub(crate) fn with_chiral_constraints(mut self, mol: &Atomistic) -> Self {
         let id_to_idx: HashMap<AtomId, usize> = self
             .atom_ids
             .iter()
@@ -250,7 +250,7 @@ impl EnergyModel {
         self
     }
 
-    pub(crate) fn read_coords_from_mol(&self, mol: &MolGraph) -> Vec<[f64; 3]> {
+    pub(crate) fn read_coords_from_mol(&self, mol: &Atomistic) -> Vec<[f64; 3]> {
         let mut coords = vec![[0.0; 3]; self.atom_ids.len()];
         for (i, atom_id) in self.atom_ids.iter().copied().enumerate() {
             if let Ok(atom) = mol.get_atom(atom_id) {
@@ -266,7 +266,7 @@ impl EnergyModel {
 
     pub(crate) fn write_coords_to_mol(
         &self,
-        mol: &mut MolGraph,
+        mol: &mut Atomistic,
         coords: &[[f64; 3]],
     ) -> Result<(), MolRsError> {
         for (i, atom_id) in self.atom_ids.iter().copied().enumerate() {
@@ -800,7 +800,7 @@ fn minmax(i: usize, j: usize) -> (usize, usize) {
     if i < j { (i, j) } else { (j, i) }
 }
 
-fn ideal_angle_for_center(mol: &MolGraph, center: AtomId) -> f64 {
+fn ideal_angle_for_center(mol: &Atomistic, center: AtomId) -> f64 {
     let degree = mol.neighbors(center).count();
     let max_order = mol
         .neighbor_bonds(center)
@@ -816,7 +816,7 @@ fn ideal_angle_for_center(mol: &MolGraph, center: AtomId) -> f64 {
     }
 }
 
-fn ideal_bond_length(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
+fn ideal_bond_length(mol: &Atomistic, a: AtomId, b: AtomId) -> f64 {
     let sym_a = mol.get_atom(a).ok().and_then(|x| x.get_str("element"));
     let sym_b = mol.get_atom(b).ok().and_then(|x| x.get_str("element"));
     let r_a = sym_a
@@ -838,7 +838,7 @@ fn ideal_bond_length(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
     length.clamp(0.9, 2.2)
 }
 
-fn bond_order_between(mol: &MolGraph, a: AtomId, b: AtomId) -> f64 {
+fn bond_order_between(mol: &Atomistic, a: AtomId, b: AtomId) -> f64 {
     mol.neighbor_bonds(a)
         .find_map(|(nbr, order)| (nbr == b).then_some(order))
         .unwrap_or(1.0)

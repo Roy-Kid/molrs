@@ -64,7 +64,7 @@ pub mod neighbors;
 
 // Public re-exports for common types
 pub use aromaticity::perceive_aromaticity;
-pub use atomistic::Atomistic;
+pub use atomistic::{AngleId, AtomId, Atomistic, Bond, BondId, DihedralId, ImproperId};
 pub use block::Block;
 pub use coarsegrain::CoarseGrain;
 pub use element::Element;
@@ -75,7 +75,7 @@ pub use frame_view::FrameView;
 pub use gasteiger::{GasteigerCharges, compute_gasteiger_charges};
 pub use hydrogens::{add_hydrogens, implicit_h_count, remove_hydrogens};
 pub use mapping::{CGMapping, WeightScheme};
-pub use molgraph::{Atom, AtomId, Bead, Bond, BondId, MolGraph, PropValue};
+pub use molgraph::{Atom, Bead, KindId, MolGraph, NodeId, PropValue, Relation};
 pub use rings::{RingInfo, find_rings};
 pub use smarts::SmartsPattern;
 pub use stereo::{

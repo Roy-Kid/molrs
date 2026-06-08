@@ -16,22 +16,23 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use molrs::molgraph::{Atom, MolGraph, PropValue};
-use molrs_embed::distgeom::{TorsionTable, experimental_torsions_with_provenance};
+use molrs::Atomistic;
+use molrs::molgraph::{Atom, PropValue};
+use molrs_conformer::distgeom::{TorsionTable, experimental_torsions_with_provenance};
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/embed/fixtures")
 }
 
 /// V2000 SDF loader preserving atom order + bond orders (coords ignored).
-fn load_sdf(path: &Path) -> MolGraph {
+fn load_sdf(path: &Path) -> Atomistic {
     let text = std::fs::read_to_string(path).expect("read sdf");
     let lines: Vec<&str> = text.lines().collect();
     let counts = lines[3];
     let n_atoms: usize = counts[0..3].trim().parse().expect("n_atoms");
     let n_bonds: usize = counts[3..6].trim().parse().expect("n_bonds");
 
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let mut ids = Vec::with_capacity(n_atoms);
     for k in 0..n_atoms {
         let line = lines[4 + k];
@@ -207,7 +208,7 @@ fn ac001_ac002_per_bond_matches_rdkit() {
         let assigned = experimental_torsions_with_provenance(&mol);
 
         // Index molrs assignments by central bond.
-        let mut by_bond: HashMap<(usize, usize), &molrs_embed::distgeom::AssignedTorsion> =
+        let mut by_bond: HashMap<(usize, usize), &molrs_conformer::distgeom::AssignedTorsion> =
             HashMap::new();
         for a in &assigned {
             let [_, j, k, _] = a.constraint.atoms;

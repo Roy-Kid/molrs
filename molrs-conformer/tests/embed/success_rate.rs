@@ -25,8 +25,8 @@ use std::panic;
 use std::path::{Path, PathBuf};
 
 use molrs::Atomistic;
-use molrs::molgraph::{Atom, MolGraph, PropValue};
-use molrs_embed::{EmbedOptions, generate_3d};
+use molrs::molgraph::{Atom, PropValue};
+use molrs_conformer::{Conformer, ConformerOptions};
 
 fn problems_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/embed/fixtures/problems")
@@ -128,14 +128,14 @@ fn json_bool(obj: &str, key: &str) -> bool {
 /// Topology-only V2000 SDF loader: reads elements + bond orders, ignores the
 /// (all-zero) coordinate columns. Mirrors `etkdg.rs::load_sdf` but does not
 /// require a real conformer.
-fn load_topology_sdf(path: &Path) -> MolGraph {
+fn load_topology_sdf(path: &Path) -> Atomistic {
     let text = std::fs::read_to_string(path).expect("read sdf");
     let lines: Vec<&str> = text.lines().collect();
     let counts = lines[3];
     let n_atoms: usize = counts[0..3].trim().parse().expect("n_atoms");
     let n_bonds: usize = counts[3..6].trim().parse().expect("n_bonds");
 
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let mut ids = Vec::with_capacity(n_atoms);
     for k in 0..n_atoms {
         let line = lines[4 + k];
@@ -158,7 +158,7 @@ fn load_topology_sdf(path: &Path) -> MolGraph {
     g
 }
 
-fn coords_of(g: &MolGraph) -> Vec<[f64; 3]> {
+fn coords_of(g: &Atomistic) -> Vec<[f64; 3]> {
     g.atoms()
         .map(|(_, atom)| {
             [
@@ -219,13 +219,13 @@ fn run_molrs(path: &Path) -> MolrsOutcome {
     panic::set_hook(Box::new(|_| {}));
     let result = panic::catch_unwind(|| {
         let g = load_topology_sdf(path);
-        let atomistic = Atomistic::try_from_molgraph(g).map_err(|e| e.to_string())?;
-        let opts = EmbedOptions {
+        let atomistic = g;
+        let opts = ConformerOptions {
             add_hydrogens: false, // fixtures already carry explicit H
             rng_seed: Some(42),
             ..Default::default()
         };
-        match generate_3d(&atomistic, &opts) {
+        match Conformer::new(opts.clone()).generate(&atomistic) {
             Ok((out, _report)) => Ok(coords_of(&out)),
             Err(e) => Err(e.to_string()),
         }

@@ -20,7 +20,7 @@ needs columnar coordinates or file output.
 
 Implicit hydrogens are not the same thing as explicit graph nodes. The Python
 SMILES conversion leaves implicit hydrogens implicit; the embedding pipeline
-can add hydrogens when `EmbedOptions` asks it to. That keeps parsing faithful
+can add hydrogens when `Conformer` is asked to. That keeps parsing faithful
 to the input while letting coordinate generation construct the atomistic model
 it needs for force-field refinement.
 
@@ -49,11 +49,7 @@ Those three atoms are the heavy atoms from the SMILES string. Hydrogens can be
 made explicit by the embedding pipeline:
 
 ```python
-result = molrs.generate_3d(
-    mol,
-    molrs.EmbedOptions(speed="fast", add_hydrogens=True, seed=7),
-)
-mol3d = result.mol
+mol3d, _report = molrs.Conformer(speed="fast", add_hydrogens=True, seed=7).generate(mol)
 print("explicit atoms:", mol3d.n_atoms)
 ```
 
@@ -80,7 +76,7 @@ print("bonds:", mol.n_bonds)
 ```
 
 This graph has no coordinates unless you passed `x`, `y`, and `z` to
-`add_atom`. That is valid input for `generate_3d`, which is designed to assign
+`add_atom`. That is valid input for `Conformer.generate`, which is designed to assign
 coordinates from topology.
 
 ## When to Use Frame Instead
@@ -94,7 +90,7 @@ Crossing between the two should be visible in code:
 
 ```python
 mol = molrs.parse_smiles("c1ccccc1").to_atomistic()
-mol3d = molrs.generate_3d(mol).mol
+mol3d, _report = molrs.Conformer().generate(mol)
 frame = mol3d.to_frame()
 ```
 

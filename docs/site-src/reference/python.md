@@ -63,17 +63,13 @@ tools and the docs build.
 
 ::: molrs.NeighborList
 
-## 3D Embedding
+## 3D Conformer Generation
 
-::: molrs.EmbedOptions
+::: molrs.Conformer
 
-::: molrs.StageReport
+::: molrs.ConformerStageReport
 
-::: molrs.EmbedReport
-
-::: molrs.EmbedResult
-
-::: molrs.generate_3d
+::: molrs.ConformerReport
 
 ## Force Fields
 

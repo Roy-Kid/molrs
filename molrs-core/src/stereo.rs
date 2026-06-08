@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 
-use super::molgraph::{AtomId, BondId, MolGraph};
+use super::atomistic::{AtomId, Atomistic, BondId};
 
 // ---------------------------------------------------------------------------
 // Public enums
@@ -64,7 +64,7 @@ pub enum BondStereo {
 /// * Zero → the four atoms are coplanar (degenerate).
 ///
 /// Returns `0.0` if any atom lacks `x`/`y`/`z` coordinates.
-pub fn chiral_volume(mol: &MolGraph, center: AtomId, neighbor_order: &[AtomId; 4]) -> f64 {
+pub fn chiral_volume(mol: &Atomistic, center: AtomId, neighbor_order: &[AtomId; 4]) -> f64 {
     let pos = |id: AtomId| -> Option<[f64; 3]> {
         let a = mol.get_atom(id).ok()?;
         Some([a.get_f64("x")?, a.get_f64("y")?, a.get_f64("z")?])
@@ -98,7 +98,7 @@ pub fn chiral_volume(mol: &MolGraph, center: AtomId, neighbor_order: &[AtomId; 4
 /// Note: this is a *topological* screen only.  Two neighbours may be
 /// constitutionally identical.  CIP rank comparison is outside the scope
 /// of this module.
-pub fn find_chiral_centers(mol: &MolGraph) -> Vec<AtomId> {
+pub fn find_chiral_centers(mol: &Atomistic) -> Vec<AtomId> {
     let mut centers = Vec::new();
     for (id, _atom) in mol.atoms() {
         let nbrs: Vec<AtomId> = mol.neighbors(id).collect();
@@ -130,7 +130,7 @@ pub fn find_chiral_centers(mol: &MolGraph) -> Vec<AtomId> {
 ///
 /// Returns a map `AtomId → TetrahedralStereo`.  Atoms without 3-D coordinates
 /// receive `Unspecified`.
-pub fn assign_stereo_from_3d(mol: &MolGraph) -> HashMap<AtomId, TetrahedralStereo> {
+pub fn assign_stereo_from_3d(mol: &Atomistic) -> HashMap<AtomId, TetrahedralStereo> {
     let mut result = HashMap::new();
     for center in find_chiral_centers(mol) {
         let nbrs: Vec<AtomId> = mol.neighbors(center).collect();
@@ -165,7 +165,7 @@ pub fn assign_stereo_from_3d(mol: &MolGraph) -> HashMap<AtomId, TetrahedralStere
 /// * |cos φ| > 0 (φ < 90°) → E (opposite sides, trans).
 ///
 /// Returns a map `BondId → BondStereo`.
-pub fn assign_bond_stereo_from_3d(mol: &MolGraph) -> HashMap<BondId, BondStereo> {
+pub fn assign_bond_stereo_from_3d(mol: &Atomistic) -> HashMap<BondId, BondStereo> {
     let mut result = HashMap::new();
 
     for (bid, bond) in mol.bonds() {
@@ -180,7 +180,7 @@ pub fn assign_bond_stereo_from_3d(mol: &MolGraph) -> HashMap<BondId, BondStereo>
             continue;
         }
 
-        let [a, b] = bond.atoms;
+        let (a, b) = (bond.nodes[0], bond.nodes[1]);
 
         // Substituents on A (excluding B) and on B (excluding A)
         let subs_a: Vec<AtomId> = mol.neighbors(a).filter(|&x| x != b).collect();
@@ -289,13 +289,13 @@ fn vec_len(a: [f64; 3]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::molgraph::{Atom, MolGraph, PropValue};
+    use crate::molgraph::{Atom, PropValue};
 
     fn atom_xyz(sym: &str, x: f64, y: f64, z: f64) -> Atom {
         Atom::xyz(sym, x, y, z)
     }
 
-    fn add_double_bond(mol: &mut MolGraph, a: AtomId, b: AtomId) {
+    fn add_double_bond(mol: &mut Atomistic, a: AtomId, b: AtomId) {
         if let Ok(bid) = mol.add_bond(a, b)
             && let Ok(bond) = mol.get_bond_mut(bid)
         {
@@ -309,7 +309,7 @@ mod tests {
     fn test_chiral_volume_sign() {
         // Four atoms at known positions forming a right-handed tetrahedron.
         // center at origin, neighbours along +x, +y, +z, and -x-y-z.
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let n1 = g.add_atom(atom_xyz("H", 1.0, 0.0, 0.0));
         let n2 = g.add_atom(atom_xyz("H", 0.0, 1.0, 0.0));
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_chiral_volume_opposite_sign() {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let n1 = g.add_atom(atom_xyz("H", 1.0, 0.0, 0.0));
         let n2 = g.add_atom(atom_xyz("H", 0.0, 1.0, 0.0));
@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_no_chiral_centers_in_ethane() {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let c2 = g.add_atom(atom_xyz("C", 1.5, 0.0, 0.0));
         g.add_bond(c1, c2).expect("add bond");
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_4_neighbor_atom_detected_as_center() {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         for i in 0..4_usize {
             let h = g.add_atom(atom_xyz("H", i as f64, 0.0, 0.0));
@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_assign_stereo_returns_entry_for_center() {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let n1 = g.add_atom(atom_xyz("F", 1.0, 0.0, 0.0));
         let n2 = g.add_atom(atom_xyz("Cl", 0.0, 1.0, 0.0));
@@ -391,7 +391,7 @@ mod tests {
         //       C=C
         // Place C1 at origin, C2 at (1.34, 0, 0).
         // Sub on C1 in +y direction, sub on C2 also in +y direction → Z.
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let c2 = g.add_atom(atom_xyz("C", 1.34, 0.0, 0.0));
         let sub1 = g.add_atom(atom_xyz("C", -0.5, 1.0, 0.0)); // +y side
@@ -412,7 +412,7 @@ mod tests {
     #[test]
     fn test_trans_2_butene_is_e() {
         // trans: sub on C1 in +y, sub on C2 in -y direction.
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let c1 = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let c2 = g.add_atom(atom_xyz("C", 1.34, 0.0, 0.0));
         let sub1 = g.add_atom(atom_xyz("C", -0.5, 1.0, 0.0)); // +y side
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_single_bond_has_no_stereo() {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let a = g.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let b = g.add_atom(atom_xyz("C", 1.5, 0.0, 0.0));
         g.add_bond(a, b).expect("add bond"); // default single bond

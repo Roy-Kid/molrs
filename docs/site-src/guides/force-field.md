@@ -29,11 +29,7 @@ import numpy as np
 import molrs
 
 mol = molrs.parse_smiles("CCO").to_atomistic()
-result = molrs.generate_3d(
-    mol,
-    molrs.EmbedOptions(speed="fast", seed=42),
-)
-mol3d = result.mol
+mol3d, _report = molrs.Conformer(speed="fast", seed=42).generate(mol)
 frame = mol3d.to_frame()
 
 typifier = molrs.MMFFTypifier()

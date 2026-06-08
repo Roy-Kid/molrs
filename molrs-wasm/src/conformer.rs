@@ -23,7 +23,7 @@ use wasm_bindgen::prelude::*;
 
 use molrs::atomistic::Atomistic;
 use molrs::molgraph::MolGraph;
-use molrs_embed::{EmbedOptions, EmbedSpeed, generate_3d};
+use molrs_conformer::{Conformer, ConformerOptions, ConformerSpeed};
 
 use crate::core::frame::Frame;
 
@@ -87,25 +87,27 @@ pub fn generate_3d_wasm(
     })?;
 
     let (result, _report) =
-        generate_3d(&atomistic, &opts).map_err(|e| JsValue::from_str(&format!("embed: {e}")))?;
+        Conformer::new(opts)
+        .generate(&atomistic)
+        .map_err(|e| JsValue::from_str(&format!("conformer: {e}")))?;
 
     Frame::from_rs(result.to_frame())
 }
 
-fn parse_opts(speed: Option<&str>, seed: Option<u32>) -> Result<EmbedOptions, JsValue> {
+fn parse_opts(speed: Option<&str>, seed: Option<u32>) -> Result<ConformerOptions, JsValue> {
     let sp = match speed.unwrap_or("medium") {
-        "fast" => EmbedSpeed::Fast,
-        "medium" => EmbedSpeed::Medium,
-        "better" => EmbedSpeed::Better,
+        "fast" => ConformerSpeed::Fast,
+        "medium" => ConformerSpeed::Medium,
+        "better" => ConformerSpeed::Better,
         other => {
             return Err(JsValue::from_str(&format!(
                 "unknown speed '{other}', expected 'fast', 'medium', or 'better'"
             )));
         }
     };
-    Ok(EmbedOptions {
+    Ok(ConformerOptions {
         speed: sp,
         rng_seed: seed.map(u64::from),
-        ..EmbedOptions::default()
+        ..ConformerOptions::default()
     })
 }

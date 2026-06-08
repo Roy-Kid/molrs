@@ -65,7 +65,7 @@ foundation; everything else depends on it (plus, in a few cases, on each other a
 molrs-core ── molrs-io ── molrs-cxxapi
             ── molrs-signal ── molrs-compute
             ── molrs-ff (may also depend on molrs-io for parameter files)
-            ── molrs-embed
+            ── molrs-conformer
             └─ molrs (umbrella façade re-exporting all sub-crates)
 ```
 
@@ -76,9 +76,9 @@ molrs-core ── molrs-io ── molrs-cxxapi
 | `molrs-signal` | `molcrafts-molrs-signal` | Signal processing: FFT-based autocorrelation, window functions, frequency grids |
 | `molrs-compute` | `molcrafts-molrs-compute` | Trajectory analysis: RDF, MSD, clustering, gyration/inertia tensors (depends on `molrs-signal`) |
 | `molrs-ff` | `molcrafts-molrs-ff` | Force fields, potentials (KernelRegistry), atom typifier |
-| `molrs-embed` | `molcrafts-molrs-embed` | 3D coordinate generation: distance geometry, fragment assembly, optimizer, rotor search |
+| `molrs-conformer` | `molcrafts-molrs-conformer` | 3D conformer generation: distance geometry, fragment assembly, optimizer, rotor search |
 | `molrs-cxxapi` | `molcrafts-molrs-cxxapi` | CXX bridge to Atomiverse C++ (zero-copy I/O via `FrameView`) |
-| `molrs` | `molcrafts-molrs` | Umbrella façade crate re-exporting the sub-crates behind feature flags (`io`, `compute`, `smiles`, `ff`, `embed`, `signal`, `full`) |
+| `molrs` | `molcrafts-molrs` | Umbrella façade crate re-exporting the sub-crates behind feature flags (`io`, `compute`, `smiles`, `ff`, `conformer`, `signal`, `full`) |
 
 Molecular packing (Packmol port) used to live here as `molrs-pack`; it now lives in the
 standalone repo `MolCrafts/molpack` (crates.io: `molcrafts-molpack`, PyPI:
@@ -101,7 +101,7 @@ workspace members; treat as inactive / future work.
 - `zarr` / `filesystem` — Zarr V3 trajectory I/O
 
 The `molrs` umbrella crate gates each sub-crate behind a feature (`io`, `compute`,
-`smiles`, `ff`, `embed`, `signal`) with `full` enabling all of them.
+`smiles`, `ff`, `conformer`, `signal`) with `full` enabling all of them.
 
 ## Core Data Model
 
@@ -150,9 +150,9 @@ in the standalone `molcrafts-molpack` crate.
 
 `SimBox::free(points, padding)` creates a non-periodic bounding box from atom positions. `NeighborQuery::free(points, cutoff)` auto-generates this box when no SimBox is present. RDF normalization (`molrs-compute`) falls back to bounding-box volume for free-boundary systems.
 
-### Embed Pipeline (molrs-embed/)
+### Conformer Pipeline (molrs-conformer/)
 
-Multi-stage 3D coordinate generation: distance geometry → fragment assembly → coarse minimization → rotor search → final minimization → stereo guards. Public API: `generate_3d(mol, opts) -> Result<(MolGraph, EmbedReport)>`.
+Multi-stage 3D coordinate generation: distance geometry → fragment assembly → coarse minimization → rotor search → final minimization → stereo guards. Public API: `Conformer::new(opts).generate(mol) -> Result<(Atomistic, ConformerReport)>`.
 
 ### Packing
 

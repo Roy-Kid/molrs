@@ -25,15 +25,14 @@
 //!     WeightScheme::GeometricCenter,
 //! );
 //! let cg = mapping.coarsen(&aa).unwrap();
-//! assert_eq!(cg.n_atoms(), 1);
+//! assert_eq!(cg.n_beads(), 1);
 //! ```
 
 use std::collections::HashMap;
 
-use crate::atomistic::Atomistic;
+use crate::atomistic::{AtomId, Atomistic};
 use crate::coarsegrain::CoarseGrain;
 use crate::error::MolRsError;
-use crate::molgraph::AtomId;
 
 /// How bead positions are computed from constituent atoms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,8 +137,8 @@ impl CGMapping {
         // Infer CG bonds: AA bonds that cross bead boundaries.
         let mut cg_bond_set: Vec<(usize, usize)> = Vec::new();
         for (_, bond) in aa.bonds() {
-            let a_idx = atom_ids.iter().position(|&id| id == bond.atoms[0]).unwrap();
-            let b_idx = atom_ids.iter().position(|&id| id == bond.atoms[1]).unwrap();
+            let a_idx = atom_ids.iter().position(|&id| id == bond.nodes[0]).unwrap();
+            let b_idx = atom_ids.iter().position(|&id| id == bond.nodes[1]).unwrap();
             let ba = self.bead_mask[a_idx];
             let bb = self.bead_mask[b_idx];
             if ba != bb {
@@ -179,20 +178,20 @@ impl CGMapping {
                 "no templates available; call coarsen_with_templates first",
             ));
         }
-        if cg.n_atoms() != self.templates.len() {
+        if cg.n_beads() != self.templates.len() {
             return Err(MolRsError::validation(format!(
                 "CG has {} beads but mapping has {} templates",
-                cg.n_atoms(),
+                cg.n_beads(),
                 self.templates.len()
             )));
         }
 
-        let bead_ids: Vec<AtomId> = cg.atoms().map(|(id, _)| id).collect();
+        let bead_ids: Vec<AtomId> = cg.beads().map(|(id, _)| id).collect();
         let mut result = Atomistic::new();
 
         // Per-bead: translate template to bead position, merge into result.
         for (bead_idx, &bead_id) in bead_ids.iter().enumerate() {
-            let bead = cg.get_atom(bead_id)?;
+            let bead = cg.get_bead(bead_id)?;
             let bx = bead.get_f64("x").unwrap_or(0.0);
             let by = bead.get_f64("y").unwrap_or(0.0);
             let bz = bead.get_f64("z").unwrap_or(0.0);
@@ -283,14 +282,14 @@ impl CGMapping {
             for &atom_idx in group {
                 let old_id = atom_ids[atom_idx];
                 let atom = aa.get_atom(old_id)?.clone();
-                let new_id = template.as_molgraph_mut().add_atom(atom);
+                let new_id = template.add_atom(atom);
                 id_map.insert(old_id, new_id);
             }
 
             // Copy intra-group bonds.
             for (_, bond) in aa.bonds() {
                 if let (Some(&new_a), Some(&new_b)) =
-                    (id_map.get(&bond.atoms[0]), id_map.get(&bond.atoms[1]))
+                    (id_map.get(&bond.nodes[0]), id_map.get(&bond.nodes[1]))
                 {
                     let bid = template.add_bond(new_a, new_b)?;
                     // Copy bond properties (e.g. order).
@@ -352,10 +351,10 @@ mod tests {
         );
         let cg = mapping.coarsen(&aa).unwrap();
 
-        assert_eq!(cg.n_atoms(), 1);
+        assert_eq!(cg.n_beads(), 1);
         assert_eq!(cg.n_bonds(), 0);
 
-        let bead = cg.atoms().next().unwrap().1;
+        let bead = cg.beads().next().unwrap().1;
         assert_eq!(bead.get_str("bead_type"), Some("W"));
 
         // Geometric center of (0,0,0), (0.96,0,0), (-0.24,0.93,0)
@@ -384,7 +383,7 @@ mod tests {
         );
         let cg = mapping.coarsen(&aa).unwrap();
 
-        assert_eq!(cg.n_atoms(), 2);
+        assert_eq!(cg.n_beads(), 2);
         assert_eq!(cg.n_bonds(), 1); // C1-C2 bond crosses boundary
     }
 
@@ -408,7 +407,7 @@ mod tests {
             WeightScheme::GeometricCenter,
         );
         let cg = mapping.coarsen_with_templates(&aa).unwrap();
-        assert_eq!(cg.n_atoms(), 1);
+        assert_eq!(cg.n_beads(), 1);
 
         let reconstructed = mapping.backmap(&cg).unwrap();
         assert_eq!(reconstructed.n_atoms(), 3);
@@ -445,7 +444,7 @@ mod tests {
             WeightScheme::CenterOfMass,
         );
         let cg = mapping.coarsen(&aa).unwrap();
-        let bead = cg.atoms().next().unwrap().1;
+        let bead = cg.beads().next().unwrap().1;
 
         // COM should be much closer to O (0,0,0) than geometric center
         let cx = bead.get_f64("x").unwrap();

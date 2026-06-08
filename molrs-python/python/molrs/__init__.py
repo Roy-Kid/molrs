@@ -1,6 +1,6 @@
 """molrs — Rust-backed molecular simulation primitives.
 
-Top-level re-exports cover core data structures, I/O, regions, embedding,
+Top-level re-exports cover core data structures, I/O, regions, conformer generation,
 force fields, and the SMILES front-end. Analysis classes live under the
 :mod:`molrs.compute` package, namespaced by domain:
 
@@ -58,12 +58,10 @@ from .molrs import (
     Graph,
     Atomistic,
     CoarseGrain,
-    # Embed
-    EmbedOptions,
-    EmbedReport,
-    EmbedResult,
-    StageReport,
-    generate_3d,
+    # Conformer generation
+    Conformer,
+    ConformerReport,
+    ConformerStageReport,
     # Force field
     MMFFTypifier,
     ForceField,
@@ -124,11 +122,9 @@ __all__ = [
     "Graph",
     "Atomistic",
     "CoarseGrain",
-    "EmbedOptions",
-    "EmbedReport",
-    "EmbedResult",
-    "StageReport",
-    "generate_3d",
+    "Conformer",
+    "ConformerReport",
+    "ConformerStageReport",
     "MMFFTypifier",
     "ForceField",
     "Potentials",

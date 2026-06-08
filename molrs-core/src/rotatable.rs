@@ -1,11 +1,11 @@
 //! Rotatable bond detection and downstream atom BFS.
 //!
-//! Provides utilities to identify rotatable bonds in a [`MolGraph`] and
+//! Provides utilities to identify rotatable bonds in an [`Atomistic`] and
 //! compute the set of atoms downstream of a given bond (for torsion rotation).
 
 use std::collections::{HashSet, VecDeque};
 
-use super::molgraph::{AtomId, MolGraph};
+use super::atomistic::{AtomId, Atomistic};
 
 /// A rotatable bond between atoms `j` and `k`, with the set of downstream
 /// atom indices (0-based positional indices, not `AtomId`s) on the `k`-side.
@@ -27,14 +27,14 @@ pub struct RotatableBond {
 /// - Both endpoints have degree > 1 (non-terminal)
 ///
 /// Returns a list of `(AtomId, AtomId)` pairs representing rotatable bonds.
-pub fn detect_rotatable_bonds(graph: &MolGraph) -> Vec<(AtomId, AtomId)> {
+pub fn detect_rotatable_bonds(graph: &Atomistic) -> Vec<(AtomId, AtomId)> {
     let ring_bonds = find_ring_bonds(graph);
 
     graph
         .bonds()
         .filter_map(|(bid, bond)| {
-            let a = bond.atoms[0];
-            let b = bond.atoms[1];
+            let a = bond.nodes[0];
+            let b = bond.nodes[1];
 
             // Single bond only (order defaults to 1.0 if unset). Accept order
             // stored as either F64 or Int via PropValue::as_f64.
@@ -69,7 +69,7 @@ pub fn detect_rotatable_bonds(graph: &MolGraph) -> Vec<(AtomId, AtomId)> {
 pub fn downstream_atoms(
     j: AtomId,
     k: AtomId,
-    graph: &MolGraph,
+    graph: &Atomistic,
     id_to_idx: &std::collections::HashMap<AtomId, usize>,
 ) -> Vec<usize> {
     let mut visited = HashSet::new();
@@ -94,7 +94,7 @@ pub fn downstream_atoms(
 }
 
 /// Build a positional index map from AtomId to 0-based index.
-pub fn atom_id_to_index(graph: &MolGraph) -> std::collections::HashMap<AtomId, usize> {
+pub fn atom_id_to_index(graph: &Atomistic) -> std::collections::HashMap<AtomId, usize> {
     graph
         .atoms()
         .enumerate()
@@ -104,7 +104,7 @@ pub fn atom_id_to_index(graph: &MolGraph) -> std::collections::HashMap<AtomId, u
 
 /// Detect rotatable bonds and return them as [`RotatableBond`] structs
 /// with positional indices and downstream atom sets.
-pub fn detect_rotatable_bonds_with_downstream(graph: &MolGraph) -> Vec<RotatableBond> {
+pub fn detect_rotatable_bonds_with_downstream(graph: &Atomistic) -> Vec<RotatableBond> {
     let id_to_idx = atom_id_to_index(graph);
     let bond_pairs = detect_rotatable_bonds(graph);
 
@@ -123,10 +123,10 @@ pub fn detect_rotatable_bonds_with_downstream(graph: &MolGraph) -> Vec<Rotatable
 
 // --- Ring detection (simple DFS-based) ---
 
-use super::molgraph::BondId;
+use super::atomistic::BondId;
 
 /// Find all bonds that are part of a ring (cycle) in the graph.
-fn find_ring_bonds(graph: &MolGraph) -> HashSet<BondId> {
+fn find_ring_bonds(graph: &Atomistic) -> HashSet<BondId> {
     let mut ring_bonds = HashSet::new();
 
     // Union-Find approach: for each bond, if both endpoints are already
@@ -156,8 +156,8 @@ fn find_ring_bonds(graph: &MolGraph) -> HashSet<BondId> {
     // First pass: identify ring bonds
     let mut ring_bond_endpoints: Vec<(AtomId, AtomId)> = Vec::new();
     for (bid, bond) in graph.bonds() {
-        let a = bond.atoms[0];
-        let b = bond.atoms[1];
+        let a = bond.nodes[0];
+        let b = bond.nodes[1];
         let ra = find(&mut parent, a);
         let rb = find(&mut parent, b);
         if ra == rb {
@@ -182,7 +182,7 @@ fn find_ring_bonds(graph: &MolGraph) -> HashSet<BondId> {
 
 /// BFS from `a` to `b` avoiding the direct a-b bond, marking all bonds
 /// on the shortest path as ring bonds.
-fn mark_ring_path(graph: &MolGraph, a: AtomId, b: AtomId, ring_bonds: &mut HashSet<BondId>) {
+fn mark_ring_path(graph: &Atomistic, a: AtomId, b: AtomId, ring_bonds: &mut HashSet<BondId>) {
     let mut visited = HashSet::new();
     visited.insert(a);
     let mut queue: VecDeque<(AtomId, Vec<AtomId>)> = VecDeque::new();
@@ -204,8 +204,8 @@ fn mark_ring_path(graph: &MolGraph, a: AtomId, b: AtomId, ring_bonds: &mut HashS
                         let v = window[1];
                         // Find the bond between u and v
                         for (bid, bond) in graph.bonds() {
-                            if (bond.atoms[0] == u && bond.atoms[1] == v)
-                                || (bond.atoms[0] == v && bond.atoms[1] == u)
+                            if (bond.nodes[0] == u && bond.nodes[1] == v)
+                                || (bond.nodes[0] == v && bond.nodes[1] == u)
                             {
                                 ring_bonds.insert(bid);
                             }
@@ -225,8 +225,8 @@ mod tests {
     use crate::molgraph::Atom;
 
     /// Build a chain graph (topology only, coords irrelevant for detection).
-    fn chain(n: usize) -> MolGraph {
-        let mut g = MolGraph::new();
+    fn chain(n: usize) -> Atomistic {
+        let mut g = Atomistic::new();
         let mut ids = Vec::new();
         for _ in 0..n {
             ids.push(g.add_atom(Atom::new()));
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn test_ring_no_rotatable_bonds() {
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let a = g.add_atom(Atom::new());
         let b = g.add_atom(Atom::new());
         let c = g.add_atom(Atom::new());
@@ -292,7 +292,7 @@ mod tests {
         //   B0' - B0 - C - B1 - B1'
         //              |
         //              B2 - B2'
-        let mut g = MolGraph::new();
+        let mut g = Atomistic::new();
         let center = g.add_atom(Atom::new());
         let b0 = g.add_atom(Atom::new());
         let b0p = g.add_atom(Atom::new());

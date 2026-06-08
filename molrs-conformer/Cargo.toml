@@ -1,16 +1,16 @@
 [package]
-name = "molcrafts-molrs-embed"
+name = "molcrafts-molrs-conformer"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "3D coordinate generation for MolCrafts molecular modeling"
+description = "3D conformer generation for MolCrafts molecular modeling"
 repository.workspace = true
 homepage.workspace = true
 
 [lib]
-name = "molrs_embed"
+name = "molrs_conformer"
 
 [dependencies]
 molrs = { workspace = true }

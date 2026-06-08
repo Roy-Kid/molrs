@@ -14,8 +14,8 @@
 
 use std::collections::HashMap;
 
+use molrs::atomistic::{AtomId, Atomistic};
 use molrs::element::Element;
-use molrs::molgraph::{AtomId, MolGraph};
 use molrs::rings::{RingInfo, find_rings};
 
 /// Coarse hybridization label (subset of RDKit's `Atom::HybridizationType`).
@@ -73,7 +73,7 @@ impl Perceived {
     }
 }
 
-fn element_of(mol: &MolGraph, id: AtomId) -> Element {
+fn element_of(mol: &Atomistic, id: AtomId) -> Element {
     mol.get_atom(id)
         .ok()
         .and_then(|a| a.get_str("element"))
@@ -82,7 +82,7 @@ fn element_of(mol: &MolGraph, id: AtomId) -> Element {
 }
 
 /// Perceive hybridization, aromaticity and conjugation for `mol`.
-pub fn perceive(mol: &MolGraph) -> Perceived {
+pub fn perceive(mol: &Atomistic) -> Perceived {
     let atom_ids: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
     let id_to_idx: HashMap<AtomId, usize> = atom_ids
         .iter()

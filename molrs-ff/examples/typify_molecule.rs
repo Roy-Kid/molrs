@@ -63,8 +63,8 @@
 //!
 //! MMFF94 parameters are embedded in the binary — no external data files needed.
 
-use molrs::atomistic::Atomistic;
-use molrs::molgraph::{Atom, MolGraph, PropValue};
+use molrs::Atomistic;
+use molrs::molgraph::{Atom, PropValue};
 use molrs::rings::find_rings;
 use molrs::types::F;
 use molrs_ff::potential::extract_coords;
@@ -257,8 +257,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== Part 7: Build & Evaluate ===\n");
 
-    let ethane_aa = Atomistic::try_from_molgraph(ethane.clone()).expect("ethane is atomistic");
-    match typifier.build(&ethane_aa) {
+    match typifier.build(&ethane) {
         Ok(potentials) => {
             println!("Built {} potential kernel(s)", potentials.len());
 
@@ -321,8 +320,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // Molecule builders
 // =============================================================================
 
-fn build_ethane() -> MolGraph {
-    let mut mol = MolGraph::new();
+fn build_ethane() -> Atomistic {
+    let mut mol = Atomistic::new();
     let c1 = mol.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
     let c2 = mol.add_atom(Atom::xyz("C", 1.54, 0.0, 0.0));
     mol.add_bond(c1, c2).unwrap();
@@ -342,10 +341,10 @@ fn build_ethane() -> MolGraph {
     mol
 }
 
-fn build_benzene() -> MolGraph {
+fn build_benzene() -> Atomistic {
     use std::f64::consts::PI;
 
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
     let r = 1.40;
 
     let mut carbons = Vec::new();
@@ -377,8 +376,8 @@ fn build_benzene() -> MolGraph {
     mol
 }
 
-fn build_acetic_acid() -> MolGraph {
-    let mut mol = MolGraph::new();
+fn build_acetic_acid() -> Atomistic {
+    let mut mol = Atomistic::new();
 
     let c_me = mol.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
     let h1 = mol.add_atom(Atom::xyz("H", -0.5, 0.9, 0.0));
@@ -411,7 +410,7 @@ fn build_acetic_acid() -> MolGraph {
 // Utilities
 // =============================================================================
 
-fn count(mol: &MolGraph) -> (usize, usize) {
+fn count(mol: &Atomistic) -> (usize, usize) {
     (mol.atoms().count(), mol.bonds().count())
 }
 

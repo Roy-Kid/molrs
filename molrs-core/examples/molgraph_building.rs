@@ -6,7 +6,8 @@
 //!
 //! Run with: `cargo run -p molrs-core --example molgraph_building`
 
-use molrs_core::{Atom, Bead, MolGraph, PropValue, add_hydrogens, remove_hydrogens};
+use molrs_core::coarsegrain::CoarseGrain;
+use molrs_core::{Atom, Atomistic, PropValue, add_hydrogens, remove_hydrogens};
 
 fn main() {
     water();
@@ -21,7 +22,7 @@ fn water() {
     println!("=== Water (H2O) ===\n");
 
     // --- 1. Create atoms with Atom::xyz(symbol, x, y, z) ---
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
 
     let o = mol.add_atom(Atom::xyz("O", 0.0, 0.0, 0.0));
     let h1 = mol.add_atom(Atom::xyz("H", 0.9572, 0.0, 0.0));
@@ -138,7 +139,7 @@ fn water() {
 fn ethane() {
     println!("=== Ethane (C2H6) ===\n");
 
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
 
     // Two carbons along x-axis (C-C bond ~1.54 A)
     let c1 = mol.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
@@ -220,37 +221,26 @@ fn ethane() {
 fn coarse_grained() {
     println!("=== Coarse-grained Beads ===\n");
 
-    let mut mol = MolGraph::new();
+    // CoarseGrain owns the bead / CG-bond vocabulary atop the generic MolGraph.
+    let mut cg = CoarseGrain::new();
 
-    // Bead is a type alias for Atom — same API, different convention
-    let mut w1 = Bead::new();
-    w1.set("name", "W");
-    w1.set("x", 0.0);
-    w1.set("y", 0.0);
-    w1.set("z", 0.0);
-    w1.set("mass", 72.0);
+    let id1 = cg.add_bead("W", 0.0, 0.0, 0.0);
+    let id2 = cg.add_bead("W", 4.7, 0.0, 0.0);
+    cg.add_bond(id1, id2).expect("add CG bond");
 
-    let mut w2 = Bead::new();
-    w2.set("name", "W");
-    w2.set("x", 4.7);
-    w2.set("y", 0.0);
-    w2.set("z", 0.0);
-    w2.set("mass", 72.0);
+    // Annotate a bead with extra properties via the generic node accessor.
+    cg.get_node_mut(id1).expect("bead 1").set("mass", 72.0);
 
-    let id1 = mol.add_atom(w1);
-    let id2 = mol.add_atom(w2);
-    mol.add_bond(id1, id2).expect("add CG bond");
+    println!("CG model: {} beads, {} bonds", cg.n_beads(), cg.n_bonds());
 
-    println!("CG model: {} beads, {} bonds", mol.n_atoms(), mol.n_bonds());
-
-    let bead = mol.get_atom(id1).expect("bead 1");
+    let bead = cg.get_bead(id1).expect("bead 1");
     println!(
-        "Bead 1: name={:?}, mass={}, x={}",
-        bead.get_str("name").unwrap(),
+        "Bead 1: bead_type={:?}, mass={}, x={}",
+        bead.get_str("bead_type").unwrap(),
         bead.get_f64("mass").unwrap(),
         bead.get_f64("x").unwrap(),
     );
-    println!("(Bead is just a type alias for Atom — same API, different property conventions)");
+    println!("(CoarseGrain wraps MolGraph; every node is a bead with a 'bead_type' prop)");
 }
 
 // ─── Hydrogen add / remove roundtrip ───────────────────────────────────────
@@ -259,7 +249,7 @@ fn hydrogen_roundtrip() {
     println!("=== Hydrogen Add / Remove Roundtrip ===\n");
 
     // Build ethanol skeleton: C-C-O
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
     let c1 = mol.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
     let c2 = mol.add_atom(Atom::xyz("C", 1.54, 0.0, 0.0));
     let o = mol.add_atom(Atom::xyz("O", 2.40, 0.94, 0.0));

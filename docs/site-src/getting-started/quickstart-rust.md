@@ -18,14 +18,14 @@ with a narrower feature list.
 ## 2. Parse Topology and Generate Coordinates
 
 ```rust
-use molrs::embed::{generate_3d, EmbedOptions};
+use molrs::conformer::{Conformer, ConformerOptions};
 use molrs::smiles::{parse_smiles, to_atomistic};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ir = parse_smiles("c1ccccc1")?;
     let mol = to_atomistic(&ir)?;
 
-    let (mol3d, report) = generate_3d(&mol, &EmbedOptions::default())?;
+    let (mol3d, report) = Conformer::new(ConformerOptions::default()).generate(&mol)?;
     let frame = mol3d.to_frame();
 
     println!("atoms: {}", frame.get("atoms").map_or(0, |block| block.nrows()));

@@ -22,8 +22,8 @@ use std::collections::HashMap;
 use crate::forcefield::ForceField;
 use crate::potential::Potentials;
 use molrs::frame::Frame;
-use molrs::molgraph::{AtomId, MolGraph};
 use molrs::rings::RingInfo;
+use molrs::{AtomId, Atomistic};
 
 use super::Typifier;
 
@@ -85,14 +85,13 @@ impl MMFFTypifier {
     ///
     /// Requires [`Atomistic`](molrs::atomistic::Atomistic) because MMFF94
     /// typing depends on element symbols, bond orders, and ring membership.
-    pub fn build(&self, mol: &molrs::atomistic::Atomistic) -> Result<Potentials, String> {
-        // Deref: &Atomistic → &MolGraph for the Typifier trait call.
+    pub fn build(&self, mol: &Atomistic) -> Result<Potentials, String> {
         let frame = self.typify(mol)?;
         self.ff.compile(&frame)
     }
 
     /// Assign MMFF94 atom types to all atoms.
-    pub fn assign_atom_types(&self, mol: &MolGraph, ring_info: &RingInfo) -> HashMap<AtomId, u32> {
+    pub fn assign_atom_types(&self, mol: &Atomistic, ring_info: &RingInfo) -> HashMap<AtomId, u32> {
         atom_typing::assign_atom_types(mol, ring_info, &self.params)
     }
 
@@ -113,7 +112,7 @@ impl MMFFTypifier {
 }
 
 impl Typifier for MMFFTypifier {
-    fn typify(&self, mol: &MolGraph) -> Result<Frame, String> {
+    fn typify(&self, mol: &Atomistic) -> Result<Frame, String> {
         frame_builder::build_mmff_frame(mol, &self.params)
     }
 }

@@ -1,6 +1,6 @@
 //! Integration tests for ring detection (src/core/rings.rs).
 
-use molrs_core::{Atom, AtomId, MolGraph, find_rings};
+use molrs_core::{Atom, AtomId, Atomistic, find_rings};
 
 fn carbon() -> Atom {
     let mut a = Atom::new();
@@ -8,13 +8,13 @@ fn carbon() -> Atom {
     a
 }
 
-fn bond(g: &mut MolGraph, a: AtomId, b: AtomId) {
+fn bond(g: &mut Atomistic, a: AtomId, b: AtomId) {
     g.add_bond(a, b).expect("add bond");
 }
 
 /// Build a simple cycle graph (n atoms in a ring).
-fn cycle(n: usize) -> MolGraph {
-    let mut g = MolGraph::new();
+fn cycle(n: usize) -> Atomistic {
+    let mut g = Atomistic::new();
     let ids: Vec<AtomId> = (0..n).map(|_| g.add_atom(carbon())).collect();
     for i in 0..n {
         bond(&mut g, ids[i], ids[(i + 1) % n]);
@@ -69,7 +69,7 @@ fn test_benzene_smallest_ring_size() {
 
 #[test]
 fn test_hexane_no_rings() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let ids: Vec<AtomId> = (0..6).map(|_| g.add_atom(carbon())).collect();
     for i in 0..5 {
         bond(&mut g, ids[i], ids[i + 1]);
@@ -89,7 +89,7 @@ fn test_hexane_no_rings() {
 
 #[test]
 fn test_naphthalene_two_rings() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     // 10 atoms (0-9)
     let ids: Vec<AtomId> = (0..10).map(|_| g.add_atom(carbon())).collect();
 
@@ -115,7 +115,7 @@ fn test_naphthalene_two_rings() {
 
 #[test]
 fn test_naphthalene_shared_bond_in_two_rings() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let ids: Vec<AtomId> = (0..10).map(|_| g.add_atom(carbon())).collect();
     for i in 0..5 {
         bond(&mut g, ids[i], ids[i + 1]);
@@ -133,8 +133,8 @@ fn test_naphthalene_shared_bond_in_two_rings() {
     let shared_bond = g
         .bonds()
         .find(|(_, b)| {
-            (b.atoms[0] == ids[2] && b.atoms[1] == ids[3])
-                || (b.atoms[0] == ids[3] && b.atoms[1] == ids[2])
+            (b.nodes[0] == ids[2] && b.nodes[1] == ids[3])
+                || (b.nodes[0] == ids[3] && b.nodes[1] == ids[2])
         })
         .map(|(bid, _)| bid);
 
@@ -149,7 +149,7 @@ fn test_naphthalene_shared_bond_in_two_rings() {
 
 #[test]
 fn test_spiro_two_rings_one_shared_atom() {
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let ids: Vec<AtomId> = (0..9).map(|_| g.add_atom(carbon())).collect();
 
     // Ring A

@@ -5,8 +5,9 @@
 mod tests {
     use crate::typifier::Typifier;
     use crate::typifier::mmff::MMFFTypifier;
-    use molrs::molgraph::{Atom, AtomId, MolGraph, PropValue};
+    use molrs::molgraph::{Atom, PropValue};
     use molrs::rings::find_rings;
+    use molrs::{AtomId, Atomistic};
 
     fn atom(sym: &str) -> Atom {
         let mut a = Atom::new();
@@ -18,7 +19,7 @@ mod tests {
         Atom::xyz(sym, x, y, z)
     }
 
-    fn bond_order(mol: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
+    fn bond_order(mol: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
         if let Ok(bid) = mol.add_bond(a, b)
             && let Ok(bond) = mol.get_bond_mut(bid)
         {
@@ -65,7 +66,7 @@ mod tests {
     fn test_ethane_atom_types() {
         // CH3-CH3: both C should be type 1 (CR), all H should be type 5 (HC)
         let typifier = test_typifier();
-        let mut mol = MolGraph::new();
+        let mut mol = Atomistic::new();
         let c1 = mol.add_atom(atom("C"));
         let c2 = mol.add_atom(atom("C"));
         bond_order(&mut mol, c1, c2, 1.0);
@@ -96,7 +97,7 @@ mod tests {
     fn test_benzene_atom_types() {
         // Benzene: 6 aromatic C should be type 37 (CB), H should be type 5
         let typifier = test_typifier();
-        let mut mol = MolGraph::new();
+        let mut mol = Atomistic::new();
         let cs: Vec<AtomId> = (0..6).map(|_| mol.add_atom(atom("C"))).collect();
         for i in 0..6 {
             bond_order(&mut mol, cs[i], cs[(i + 1) % 6], 1.5);
@@ -184,7 +185,7 @@ mod tests {
     fn test_build_ethane_frame() {
         let typifier = test_typifier();
 
-        let mut mol = MolGraph::new();
+        let mut mol = Atomistic::new();
         let c1 = mol.add_atom(atom_xyz("C", 0.0, 0.0, 0.0));
         let c2 = mol.add_atom(atom_xyz("C", 1.54, 0.0, 0.0));
         bond_order(&mut mol, c1, c2, 1.0);

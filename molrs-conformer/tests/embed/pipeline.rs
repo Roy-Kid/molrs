@@ -4,8 +4,8 @@
 //! reproducibility, force-field auto-fallback warnings, empty-input error,
 //! the distance-geometry algorithm, and ring-template fragment assembly.
 
-use molrs::{AtomId, Atomistic, MolGraph, PropValue};
-use molrs_embed::{EmbedAlgorithm, EmbedOptions, ForceFieldKind, StageKind, generate_3d};
+use molrs::{AtomId, Atomistic, PropValue};
+use molrs_conformer::{Conformer, ConformerAlgorithm, ConformerOptions, ForceFieldKind, StageKind};
 
 fn bond(g: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
     let bid = g.add_bond(a, b).expect("add bond");
@@ -13,7 +13,7 @@ fn bond(g: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
     bnd.props.insert("order".to_string(), PropValue::F64(order));
 }
 
-fn coords_of(g: &MolGraph) -> Vec<[f64; 3]> {
+fn coords_of(g: &Atomistic) -> Vec<[f64; 3]> {
     g.atoms()
         .map(|(_, atom)| {
             [
@@ -25,7 +25,7 @@ fn coords_of(g: &MolGraph) -> Vec<[f64; 3]> {
         .collect()
 }
 
-fn all_have_coords(g: &MolGraph) -> bool {
+fn all_have_coords(g: &Atomistic) -> bool {
     g.atoms().all(|(_, atom)| {
         atom.get_f64("x").is_some() && atom.get_f64("y").is_some() && atom.get_f64("z").is_some()
     })
@@ -60,11 +60,11 @@ fn test_generate_3d_ethanol_assigns_coordinates() {
     bond(&mut g, c1, c2, 1.0);
     bond(&mut g, c2, o, 1.0);
 
-    let opts = EmbedOptions {
+    let opts = ConformerOptions {
         rng_seed: Some(42),
         ..Default::default()
     };
-    let (out, report) = generate_3d(&g, &opts).expect("embed");
+    let (out, report) = Conformer::new(opts.clone()).generate(&g).expect("embed");
 
     assert!(
         out.n_atoms() > g.n_atoms(),
@@ -73,7 +73,10 @@ fn test_generate_3d_ethanol_assigns_coordinates() {
     assert!(all_have_coords(&out), "all atoms must have x/y/z");
     assert!(report.final_energy.is_some());
     assert!(report.final_energy.unwrap().is_finite());
-    assert_eq!(report.embed_algorithm_used, EmbedAlgorithm::FragmentRules);
+    assert_eq!(
+        report.embed_algorithm_used,
+        ConformerAlgorithm::FragmentRules
+    );
     assert!(
         report
             .stages
@@ -106,14 +109,18 @@ fn test_generate_3d_seed_reproducible() {
     bond(&mut g, b, c, 1.0);
     bond(&mut g, c, d, 1.0);
 
-    let opts = EmbedOptions {
+    let opts = ConformerOptions {
         add_hydrogens: false,
         rng_seed: Some(7),
         ..Default::default()
     };
 
-    let (g1, _) = generate_3d(&g, &opts).expect("first embed");
-    let (g2, _) = generate_3d(&g, &opts).expect("second embed");
+    let (g1, _) = Conformer::new(opts.clone())
+        .generate(&g)
+        .expect("first embed");
+    let (g2, _) = Conformer::new(opts.clone())
+        .generate(&g)
+        .expect("second embed");
 
     let c1 = coords_of(&g1);
     let c2 = coords_of(&g2);
@@ -140,14 +147,14 @@ fn test_generate_3d_auto_forcefield_reports_fallback_warning() {
     let c2 = g.add_atom_bare("C");
     bond(&mut g, c1, c2, 1.0);
 
-    let opts = EmbedOptions {
+    let opts = ConformerOptions {
         add_hydrogens: false,
         forcefield: ForceFieldKind::Auto,
         rng_seed: Some(11),
         ..Default::default()
     };
 
-    let (_out, report) = generate_3d(&g, &opts).expect("embed");
+    let (_out, report) = Conformer::new(opts.clone()).generate(&g).expect("embed");
     assert_eq!(report.forcefield_used, ForceFieldKind::Uff);
     assert!(
         report
@@ -161,7 +168,9 @@ fn test_generate_3d_auto_forcefield_reports_fallback_warning() {
 #[test]
 fn test_generate_3d_empty_molecule_returns_error() {
     let g = Atomistic::new();
-    let err = generate_3d(&g, &EmbedOptions::default()).expect_err("empty must error");
+    let err = Conformer::new(ConformerOptions::default().clone())
+        .generate(&g)
+        .expect_err("empty must error");
     assert!(
         err.to_string().contains("empty molecule"),
         "error should explain empty input"
@@ -169,9 +178,9 @@ fn test_generate_3d_empty_molecule_returns_error() {
 }
 
 // IGNORED (mmff94-etkdg-04-embed): asserts the retired
-// `embed_algorithm == DistanceGeometry` selector path. ETKDG ignores the
+// `algorithm == DistanceGeometry` selector path. ETKDG ignores the
 // selector field; coordinate-assignment coverage now lives in etkdg.rs.
-#[ignore = "retired EmbedAlgorithm selector; ETKDG is the only algorithm"]
+#[ignore = "retired ConformerAlgorithm selector; ETKDG is the only algorithm"]
 #[test]
 fn test_generate_3d_distance_geometry_assigns_coordinates() {
     let mut g = Atomistic::new();
@@ -179,15 +188,17 @@ fn test_generate_3d_distance_geometry_assigns_coordinates() {
     let c2 = g.add_atom_bare("C");
     bond(&mut g, c1, c2, 1.0);
 
-    let opts = EmbedOptions {
-        embed_algorithm: EmbedAlgorithm::DistanceGeometry,
+    let opts = ConformerOptions {
+        algorithm: ConformerAlgorithm::DistanceGeometry,
         ..Default::default()
     };
 
-    let (out, report) = generate_3d(&g, &opts).expect("distance geometry embed");
+    let (out, report) = Conformer::new(opts.clone())
+        .generate(&g)
+        .expect("distance geometry embed");
     assert_eq!(
         report.embed_algorithm_used,
-        EmbedAlgorithm::DistanceGeometry
+        ConformerAlgorithm::DistanceGeometry
     );
     assert!(all_have_coords(&out), "distance geometry must assign x/y/z");
     let coords = coords_of(&out);
@@ -209,13 +220,15 @@ fn test_fragment_rules_uses_ring_template_on_benzene() {
         bond(&mut g, ids[i], ids[(i + 1) % 6], 1.5);
     }
 
-    let opts = EmbedOptions {
-        embed_algorithm: EmbedAlgorithm::FragmentRules,
+    let opts = ConformerOptions {
+        algorithm: ConformerAlgorithm::FragmentRules,
         add_hydrogens: false,
         rng_seed: Some(13),
         ..Default::default()
     };
-    let (out, report) = generate_3d(&g, &opts).expect("benzene embed");
+    let (out, report) = Conformer::new(opts.clone())
+        .generate(&g)
+        .expect("benzene embed");
     assert!(all_have_coords(&out));
     assert!(
         report.warnings.iter().any(|w| w.contains("ring template")),

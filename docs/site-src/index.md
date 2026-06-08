@@ -24,11 +24,7 @@ the hosted site reserves `/reference/wasm/` for that generated reference.
     ir = molrs.parse_smiles("CCO")
     mol = ir.to_atomistic()
 
-    result = molrs.generate_3d(
-        mol,
-        molrs.EmbedOptions(speed="fast", seed=42),
-    )
-    mol3d = result.mol
+    mol3d, _report = molrs.Conformer(speed="fast", seed=42).generate(mol)
     frame = mol3d.to_frame()
 
     atoms = frame["atoms"]
@@ -39,7 +35,7 @@ the hosted site reserves `/reference/wasm/` for that generated reference.
 
     Expected shape of the result: the input graph has three heavy atoms, while
     the embedded molecule usually includes explicit hydrogens because
-    `EmbedOptions(add_hydrogens=True)` is the default.
+    `Conformer(add_hydrogens=True)` is the default.
 
 === "Rust"
 
@@ -47,13 +43,13 @@ the hosted site reserves `/reference/wasm/` for that generated reference.
     features when an application has a stable dependency boundary.
 
     ```rust
-    use molrs::embed::{generate_3d, EmbedOptions};
+    use molrs::conformer::{Conformer, ConformerOptions};
     use molrs::smiles::{parse_smiles, to_atomistic};
 
     fn main() -> Result<(), Box<dyn std::error::Error>> {
         let ir = parse_smiles("c1ccccc1")?;
         let mol = to_atomistic(&ir)?;
-        let (mol3d, report) = generate_3d(&mol, &EmbedOptions::default())?;
+        let (mol3d, report) = Conformer::new(ConformerOptions::default()).generate(&mol)?;
 
         println!("atoms: {}", mol3d.n_atoms());
         println!("final energy: {:?}", report.final_energy);

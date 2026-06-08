@@ -42,20 +42,15 @@ Embedding converts topology into coordinates. Use a seed in examples so that
 the result is reproducible across runs.
 
 ```python
-opts = molrs.EmbedOptions(speed="fast", seed=42)
-result = molrs.generate_3d(mol, opts)
-
-mol3d = result.mol
-report = result.report
+mol3d, report = molrs.Conformer(speed="fast", seed=42).generate(mol)
 
 print("atoms after embedding:", mol3d.n_atoms)
 print("final energy:", report.final_energy)
 print("stages:", [stage.stage for stage in report.stages])
 ```
 
-`EmbedResult.mol` and `EmbedResult.report` are move-once accessors. Store them
-in variables the first time you read them. A second read raises `RuntimeError`
-because ownership has already moved out of the wrapper.
+`Conformer.generate` returns a plain `(mol, report)` tuple: construct the
+generator once with your parameters, then call `generate` for each molecule.
 
 ## 3. Convert to a Frame
 
@@ -183,7 +178,7 @@ MolRec/Zarr when a workflow needs trajectory data and observables.
 This quickstart crossed the main molrs boundaries:
 
 - SMILES text became a graph-like `Atomistic`.
-- `generate_3d` produced coordinates and diagnostics.
+- `Conformer.generate` produced coordinates and diagnostics.
 - `to_frame` produced the columnar representation used by I/O and analysis.
 - `Box` supplied the boundary model for neighbor search.
 - `RDF` consumed an explicit neighbor list.

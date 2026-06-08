@@ -4,8 +4,8 @@ use rand::Rng;
 
 use super::geom::{add, norm, rotate_about_axis, scale, sub};
 use super::optimizer::{EnergyModel, steepest_descent};
-use super::options::EmbedOptions;
-use molrs::molgraph::MolGraph;
+use super::options::ConformerOptions;
+use molrs::atomistic::Atomistic;
 use molrs::rotatable::detect_rotatable_bonds_with_downstream;
 
 /// Rotor-search stage summary.
@@ -18,10 +18,10 @@ pub(crate) struct RotorSearchResult {
 }
 
 pub(crate) fn run(
-    mol: &MolGraph,
+    mol: &Atomistic,
     model: &EnergyModel,
     coords: &mut [[f64; 3]],
-    opts: &EmbedOptions,
+    opts: &ConformerOptions,
     rng: &mut impl Rng,
 ) -> RotorSearchResult {
     let rot_bonds = detect_rotatable_bonds_with_downstream(mol);
@@ -38,9 +38,9 @@ pub(crate) fn run(
 
     let max_delta = opts.rotor_max_delta();
     let local_steps = match opts.speed {
-        super::options::EmbedSpeed::Fast => 6,
-        super::options::EmbedSpeed::Medium => 10,
-        super::options::EmbedSpeed::Better => 16,
+        super::options::ConformerSpeed::Fast => 6,
+        super::options::ConformerSpeed::Medium => 10,
+        super::options::ConformerSpeed::Better => 16,
     };
 
     let mut best = coords.to_vec();

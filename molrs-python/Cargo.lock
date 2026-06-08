@@ -624,6 +624,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "molcrafts-molrs-conformer"
+version = "0.0.17"
+dependencies = [
+ "molcrafts-molrs-core",
+ "molcrafts-molrs-ff",
+ "ndarray",
+ "once_cell",
+ "rand",
+]
+
+[[package]]
 name = "molcrafts-molrs-core"
 version = "0.0.17"
 dependencies = [
@@ -634,18 +645,8 @@ dependencies = [
  "serde",
  "serde_json",
  "slotmap",
+ "smallvec",
  "zarrs",
-]
-
-[[package]]
-name = "molcrafts-molrs-embed"
-version = "0.0.17"
-dependencies = [
- "molcrafts-molrs-core",
- "molcrafts-molrs-ff",
- "ndarray",
- "once_cell",
- "rand",
 ]
 
 [[package]]
@@ -694,8 +695,8 @@ name = "molrs-python"
 version = "0.0.17"
 dependencies = [
  "molcrafts-molrs-compute",
+ "molcrafts-molrs-conformer",
  "molcrafts-molrs-core",
- "molcrafts-molrs-embed",
  "molcrafts-molrs-ff",
  "molcrafts-molrs-ffi",
  "molcrafts-molrs-io",

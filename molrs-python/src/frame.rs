@@ -293,6 +293,19 @@ impl PyFrame {
         self.with_frame(|f| f.validate().map_err(molrs_error_to_pyerr))?
     }
 
+    /// Return a deep copy of this frame.
+    ///
+    /// All blocks, the simulation box, and the string metadata are cloned into
+    /// a new, independent frame backed by its own store.
+    ///
+    /// Returns
+    /// -------
+    /// Frame
+    ///     An independent copy.
+    fn copy(&self) -> PyResult<Self> {
+        Self::from_core_frame(self.clone_core_frame()?)
+    }
+
     fn __repr__(&self) -> PyResult<String> {
         self.with_frame(|f| {
             let keys: Vec<&str> = f.keys().collect();

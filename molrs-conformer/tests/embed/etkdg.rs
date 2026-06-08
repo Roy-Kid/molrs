@@ -23,9 +23,9 @@
 
 use std::path::{Path, PathBuf};
 
-use molrs::molgraph::{Atom, MolGraph, PropValue};
+use molrs::molgraph::{Atom, PropValue};
 use molrs::{AtomId, Atomistic};
-use molrs_embed::{EmbedOptions, generate_3d};
+use molrs_conformer::{Conformer, ConformerOptions};
 use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
 use molrs_ff::potential::Potential;
 
@@ -35,14 +35,14 @@ fn fixtures_dir() -> PathBuf {
 
 /// Minimal V2000 SDF loader preserving atom order, bond orders, and the
 /// conformer coordinates (matching the loader in `distgeom.rs`).
-fn load_sdf(path: &Path) -> MolGraph {
+fn load_sdf(path: &Path) -> Atomistic {
     let text = std::fs::read_to_string(path).expect("read sdf");
     let lines: Vec<&str> = text.lines().collect();
     let counts = lines[3];
     let n_atoms: usize = counts[0..3].trim().parse().expect("n_atoms");
     let n_bonds: usize = counts[3..6].trim().parse().expect("n_bonds");
 
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let mut ids = Vec::with_capacity(n_atoms);
     for k in 0..n_atoms {
         let line = lines[4 + k];
@@ -66,7 +66,7 @@ fn load_sdf(path: &Path) -> MolGraph {
     g
 }
 
-fn coords_of(g: &MolGraph) -> Vec<[f64; 3]> {
+fn coords_of(g: &Atomistic) -> Vec<[f64; 3]> {
     g.atoms()
         .map(|(_, atom)| {
             [
@@ -78,7 +78,7 @@ fn coords_of(g: &MolGraph) -> Vec<[f64; 3]> {
         .collect()
 }
 
-fn elements_of(g: &MolGraph) -> Vec<String> {
+fn elements_of(g: &Atomistic) -> Vec<String> {
     g.atoms()
         .map(|(_, a)| a.get_str("element").unwrap_or_default().to_string())
         .collect()
@@ -208,15 +208,15 @@ fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 
 /// MMFF94 energy of a conformer (flat coords) for a graph, or `None` if the
 /// molecule has no MMFF typing.
-fn mmff_energy(mol: &MolGraph, coords: &[[f64; 3]]) -> Option<f64> {
+fn mmff_energy(mol: &Atomistic, coords: &[[f64; 3]]) -> Option<f64> {
     let props = MmffMolProperties::compute(mol, MmffVariant::Mmff94).ok()?;
     let ff = MmffForceField::build(mol, &props).ok()?;
     let flat: Vec<f64> = coords.iter().flat_map(|c| [c[0], c[1], c[2]]).collect();
     Some(ff.eval(&flat).0)
 }
 
-fn opts_seeded() -> EmbedOptions {
-    EmbedOptions {
+fn opts_seeded() -> ConformerOptions {
+    ConformerOptions {
         add_hydrogens: false,
         rng_seed: Some(42),
         ..Default::default()
@@ -248,8 +248,10 @@ fn ac001_ac002_rmsd_and_energy_vs_rdkit() {
 
         // The pipeline overwrites coordinates during embedding; the input
         // conformer only seeds chiral-volume signs (harmless / helpful here).
-        let atomistic = Atomistic::try_from_molgraph(sdf.clone()).expect("atomistic");
-        let (out, _report) = generate_3d(&atomistic, &opts_seeded()).expect("embed");
+        let atomistic = sdf.clone();
+        let (out, _report) = Conformer::new(opts_seeded().clone())
+            .generate(&atomistic)
+            .expect("embed");
         let got = coords_of(&out);
 
         // No NaNs.
@@ -324,15 +326,19 @@ fn extract_json_f64(json: &str, name: &str, key: &str) -> Option<f64> {
 #[test]
 fn ac004_fixed_seed_is_reproducible() {
     let sdf = load_sdf(&fixtures_dir().join("embed_butane_e.sdf"));
-    let query = Atomistic::try_from_molgraph(sdf).expect("atomistic");
+    let query = sdf;
 
-    let opts = EmbedOptions {
+    let opts = ConformerOptions {
         add_hydrogens: false,
         rng_seed: Some(42),
         ..Default::default()
     };
-    let (g1, _) = generate_3d(&query, &opts).expect("first embed");
-    let (g2, _) = generate_3d(&query, &opts).expect("second embed");
+    let (g1, _) = Conformer::new(opts.clone())
+        .generate(&query)
+        .expect("first embed");
+    let (g2, _) = Conformer::new(opts.clone())
+        .generate(&query)
+        .expect("second embed");
     let c1 = coords_of(&g1);
     let c2 = coords_of(&g2);
     assert_eq!(c1.len(), c2.len());
@@ -359,13 +365,15 @@ fn ac005_chirality_no_inversion_and_mirror() {
     for name in ["alanine_r", "alanine_s"] {
         let sdf = load_sdf(&fixtures_dir().join(format!("embed_{name}.sdf")));
         // Keep the input coordinates so the chiral sign is captured.
-        let atomistic = Atomistic::try_from_molgraph(sdf).expect("atomistic");
-        let opts = EmbedOptions {
+        let atomistic = sdf;
+        let opts = ConformerOptions {
             add_hydrogens: false,
             rng_seed: Some(42),
             ..Default::default()
         };
-        let (_out, report) = generate_3d(&atomistic, &opts).expect("embed");
+        let (_out, report) = Conformer::new(opts.clone())
+            .generate(&atomistic)
+            .expect("embed");
         let inversion = report
             .warnings
             .iter()
@@ -383,7 +391,9 @@ fn ac005_chirality_no_inversion_and_mirror() {
 #[test]
 fn ac007_empty_molecule_errs() {
     let g = Atomistic::new();
-    let err = generate_3d(&g, &EmbedOptions::default()).expect_err("empty must error");
+    let err = Conformer::new(ConformerOptions::default().clone())
+        .generate(&g)
+        .expect_err("empty must error");
     assert!(
         err.to_string().contains("empty molecule"),
         "error should explain empty input, got: {err}"
@@ -394,12 +404,14 @@ fn ac007_empty_molecule_errs() {
 fn ac007_single_atom_ok() {
     let mut g = Atomistic::new();
     g.add_atom_bare("C");
-    let opts = EmbedOptions {
+    let opts = ConformerOptions {
         add_hydrogens: false,
         rng_seed: Some(42),
         ..Default::default()
     };
-    let (out, _report) = generate_3d(&g, &opts).expect("single atom must succeed");
+    let (out, _report) = Conformer::new(opts.clone())
+        .generate(&g)
+        .expect("single atom must succeed");
     let c = coords_of(&out);
     assert_eq!(c.len(), 1);
     assert!(
@@ -415,12 +427,14 @@ fn ac007_disconnected_two_components_ok() {
     let _a: AtomId = g.add_atom_bare("C");
     let _b: AtomId = g.add_atom_bare("C");
     // no bond between them: disconnected
-    let opts = EmbedOptions {
+    let opts = ConformerOptions {
         add_hydrogens: true,
         rng_seed: Some(42),
         ..Default::default()
     };
-    let (out, _report) = generate_3d(&g, &opts).expect("disconnected must succeed");
+    let (out, _report) = Conformer::new(opts.clone())
+        .generate(&g)
+        .expect("disconnected must succeed");
     let c = coords_of(&out);
     assert!(
         c.iter().all(|x| x.iter().all(|v| v.is_finite())),

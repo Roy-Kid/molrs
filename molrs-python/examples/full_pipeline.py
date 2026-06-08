@@ -7,9 +7,8 @@ structures, and evaluating MMFF94 energies.
 import numpy as np
 from molrs import (
     Atomistic,
-    EmbedOptions,
+    Conformer,
     MMFFTypifier,
-    generate_3d,
     extract_coords,
 )
 
@@ -64,17 +63,14 @@ molecules = {
 }
 
 typifier = MMFFTypifier()
-opts = EmbedOptions(speed="medium", seed=123)
 
 for name, mol in molecules.items():
     print(f"=== {name} ===")
     print(f"  input: atoms={mol.n_atoms}, bonds={mol.n_bonds}")
 
     # Generate 3D
-    result = generate_3d(mol, opts)
-    mol3d = result.mol
-    report = result.report
-    print(f"  embed: atoms={mol3d.n_atoms}, energy={report.final_energy:.2f}")
+    mol3d, report = Conformer(speed="medium", seed=123).generate(mol)
+    print(f"  conformer: atoms={mol3d.n_atoms}, energy={report.final_energy:.2f}")
 
     # Evaluate MMFF94
     try:

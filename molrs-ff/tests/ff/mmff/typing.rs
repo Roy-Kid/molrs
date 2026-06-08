@@ -14,7 +14,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use molrs::molgraph::{Atom, MolGraph, PropValue};
+use molrs::molgraph::{Atom, PropValue};
+use molrs::{AtomId, Atomistic};
 use molrs_ff::mmff::{MmffMolProperties, MmffVariant};
 use serde_json::Value;
 
@@ -39,7 +40,7 @@ fn fixtures_dir() -> PathBuf {
 
 /// Minimal V2000 SDF loader that preserves atom order, reads bond orders, and
 /// parses `M  CHG` property lines (the bundled reader ignores formal charges).
-fn load_sdf(path: &Path) -> MolGraph {
+fn load_sdf(path: &Path) -> Atomistic {
     let text = std::fs::read_to_string(path).expect("read sdf");
     let lines: Vec<&str> = text.lines().collect();
     // header is 3 lines, then counts line at index 3.
@@ -47,7 +48,7 @@ fn load_sdf(path: &Path) -> MolGraph {
     let n_atoms: usize = counts[0..3].trim().parse().expect("n_atoms");
     let n_bonds: usize = counts[3..6].trim().parse().expect("n_bonds");
 
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let mut ids = Vec::with_capacity(n_atoms);
     for k in 0..n_atoms {
         let line = lines[4 + k];
@@ -219,12 +220,7 @@ fn atom_with_charge(sym: &str, charge: i32) -> Atom {
     a
 }
 
-fn add_bond_order(
-    g: &mut MolGraph,
-    i: molrs::molgraph::AtomId,
-    j: molrs::molgraph::AtomId,
-    order: f64,
-) {
+fn add_bond_order(g: &mut Atomistic, i: AtomId, j: AtomId, order: f64) {
     let bid = g.add_bond(i, j).expect("add bond");
     g.get_bond_mut(bid)
         .expect("bond")
@@ -235,7 +231,7 @@ fn add_bond_order(
 #[test]
 fn unsupported_atom_fails() {
     // A bare transition metal (Fe) has no MMFF type → compute must Err.
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     g.add_atom(atom_with_charge("Fe", 0));
     let res = MmffMolProperties::compute(&g, MmffVariant::Mmff94);
     assert!(res.is_err(), "Fe should be unsupported by MMFF94");
@@ -244,7 +240,7 @@ fn unsupported_atom_fails() {
 #[test]
 fn charge_sum_equals_net_charge() {
     // Ammonium NH4+ : N(+1) bonded to 4 H, all single bonds → sum == +1.
-    let mut nh4 = MolGraph::new();
+    let mut nh4 = Atomistic::new();
     let n = nh4.add_atom(atom_with_charge("N", 1));
     for _ in 0..4 {
         let h = nh4.add_atom(atom_with_charge("H", 0));
@@ -255,7 +251,7 @@ fn charge_sum_equals_net_charge() {
     assert!((sum - 1.0).abs() < 1.0e-6, "NH4+ charge sum {sum} != +1");
 
     // Acetate CC(=O)[O-] : carboxylate O(-1) → sum == -1.
-    let mut ac = MolGraph::new();
+    let mut ac = Atomistic::new();
     let c_me = ac.add_atom(atom_with_charge("C", 0));
     let c_co = ac.add_atom(atom_with_charge("C", 0));
     let o_dbl = ac.add_atom(atom_with_charge("O", 0));

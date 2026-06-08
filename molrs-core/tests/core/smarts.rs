@@ -5,7 +5,7 @@
 //!   * `matches.json` carrying, per molecule, the per-atom / per-bond aromatic
 //!     flags RDKit perceived, plus the reference match tuples per pattern.
 //!
-//! Aromaticity is the key correctness lever: `MolGraph` has no aromatic model,
+//! Aromaticity is the key correctness lever: `Atomistic` has no aromatic model,
 //! so we *transplant* RDKit's perception into the graph — aromatic bonds get
 //! order `1.5` and every atom carries an explicit `is_aromatic` prop. The
 //! engine then sees exactly the aromaticity RDKit used, so `a` / `c` / `:`
@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-use molrs_core::{Atom, AtomId, MolGraph, PropValue, SmartsPattern};
+use molrs_core::{Atom, AtomId, Atomistic, PropValue, SmartsPattern};
 use serde_json::Value;
 
 fn fixtures_dir() -> PathBuf {
@@ -28,7 +28,7 @@ fn fixtures_dir() -> PathBuf {
 
 /// Minimal V2000 molfile loader: reads element + connectivity + bond order.
 /// Coordinates are parsed but unused by SMARTS.
-fn load_sdf(path: &PathBuf) -> (MolGraph, Vec<AtomId>) {
+fn load_sdf(path: &PathBuf) -> (Atomistic, Vec<AtomId>) {
     let text = fs::read_to_string(path).expect("read sdf");
     let lines: Vec<&str> = text.lines().collect();
     // Line 3 (index 3) is the counts line: "aaabbb...".
@@ -36,7 +36,7 @@ fn load_sdf(path: &PathBuf) -> (MolGraph, Vec<AtomId>) {
     let n_atoms: usize = counts[0..3].trim().parse().expect("atom count");
     let n_bonds: usize = counts[3..6].trim().parse().expect("bond count");
 
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let mut ids = Vec::with_capacity(n_atoms);
     for i in 0..n_atoms {
         let l = lines[4 + i];
@@ -62,7 +62,7 @@ fn load_sdf(path: &PathBuf) -> (MolGraph, Vec<AtomId>) {
 }
 
 /// Transplant RDKit's aromaticity + formal charge into the graph.
-fn apply_flags(g: &mut MolGraph, ids: &[AtomId], meta: &Value) {
+fn apply_flags(g: &mut Atomistic, ids: &[AtomId], meta: &Value) {
     let atom_arom = meta["atom_aromatic"].as_array().unwrap();
     let charges = meta["formal_charge"].as_array().unwrap();
     for (k, &id) in ids.iter().enumerate() {
@@ -85,7 +85,7 @@ fn apply_flags(g: &mut MolGraph, ids: &[AtomId], meta: &Value) {
         let bid = g
             .bonds()
             .find(|(_, b)| {
-                (b.atoms[0] == ai && b.atoms[1] == aj) || (b.atoms[0] == aj && b.atoms[1] == ai)
+                (b.nodes[0] == ai && b.nodes[1] == aj) || (b.nodes[0] == aj && b.nodes[1] == ai)
             })
             .map(|(bid, _)| bid)
             .expect("aromatic bond present");
@@ -110,7 +110,10 @@ fn load_fixtures() -> Value {
 }
 
 /// Build one molecule graph + RDKit-order row map.
-fn build_mol(name: &str, fixtures: &Value) -> (MolGraph, std::collections::HashMap<AtomId, usize>) {
+fn build_mol(
+    name: &str,
+    fixtures: &Value,
+) -> (Atomistic, std::collections::HashMap<AtomId, usize>) {
     let (mut g, ids) = load_sdf(&fixtures_dir().join(format!("{name}.sdf")));
     apply_flags(&mut g, &ids, &fixtures["molecules"][name]);
     let id_to_row = ids.iter().enumerate().map(|(row, &id)| (id, row)).collect();

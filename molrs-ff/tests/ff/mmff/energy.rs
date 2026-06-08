@@ -14,7 +14,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use molrs::molgraph::{Atom, MolGraph, PropValue};
+use molrs::Atomistic;
+use molrs::molgraph::{Atom, PropValue};
 use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
 use molrs_ff::potential::Potential;
 use serde_json::Value;
@@ -27,14 +28,14 @@ fn fixtures_dir() -> PathBuf {
 
 /// Minimal V2000 SDF loader preserving atom order and bond orders, parsing
 /// `M  CHG` (same as typing.rs).
-fn load_sdf(path: &Path) -> MolGraph {
+fn load_sdf(path: &Path) -> Atomistic {
     let text = std::fs::read_to_string(path).expect("read sdf");
     let lines: Vec<&str> = text.lines().collect();
     let counts = lines[3];
     let n_atoms: usize = counts[0..3].trim().parse().expect("n_atoms");
     let n_bonds: usize = counts[3..6].trim().parse().expect("n_bonds");
 
-    let mut g = MolGraph::new();
+    let mut g = Atomistic::new();
     let mut ids = Vec::with_capacity(n_atoms);
     for k in 0..n_atoms {
         let line = lines[4 + k];

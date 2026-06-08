@@ -45,7 +45,7 @@ By becoming the dependable core the rest of the MolCrafts ecosystem builds on, m
 | `molcrafts-molrs-io` | Readers / writers for PDB, XYZ, mol2, SDF, CIF, GRO, POSCAR, CHGCAR, Cube, LAMMPS data/dump, DCD, Zarr V3 trajectories — plus a SMILES/SMARTS parser |
 | `molcrafts-molrs-compute` | Trajectory analysis: RDF, MSD, clustering, gyration / inertia tensors, PCA, k-means, density, diffraction, PMFT, order parameters, dielectric, environment matching |
 | `molcrafts-molrs-ff` | Force fields and potentials — MMFF94 bond/angle/torsion/oop/vdW/electrostatics, LJ, PME — with an atom typifier |
-| `molcrafts-molrs-embed` | 3D coordinate generation: distance geometry, fragment assembly, optimization, rotor search, stereo guards |
+| `molcrafts-molrs-conformer` | 3D conformer generation: distance geometry, fragment assembly, optimization, rotor search, stereo guards |
 | `molcrafts-molrs-signal` | Signal processing — FFT-based autocorrelation, window functions, frequency grids |
 | `molcrafts-molrs-cxxapi` | CXX bridge for zero-copy integration with Atomiverse C++ |
 
@@ -58,7 +58,7 @@ cargo add molcrafts-molrs
 Opt into sub-systems via feature flags; `full` enables everything:
 
 ```toml
-molcrafts-molrs = { version = "0.0.16", features = ["io", "smiles", "embed"] }
+molcrafts-molrs = { version = "0.0.16", features = ["io", "smiles", "conformer"] }
 ```
 
 Python: `pip install molcrafts-molrs` (import as `molrs`). Browser: `npm install @molcrafts/molrs`.
@@ -111,12 +111,12 @@ documentation loop.
 ## Quick start
 
 ```rust
-use molrs::embed::{generate_3d, EmbedOptions};
+use molrs::conformer::{Conformer, ConformerOptions};
 use molrs::smiles::{parse_smiles, to_atomistic};
 
 let ir = parse_smiles("c1ccccc1").unwrap();          // benzene
 let mol = to_atomistic(&ir).unwrap();
-let (mol3d, _report) = generate_3d(&mol, EmbedOptions::default()).unwrap();
+let (mol3d, _report) = Conformer::new(ConformerOptions::default()).generate(&mol).unwrap();
 ```
 
 Python and JavaScript/TypeScript quickstarts live in the documentation.

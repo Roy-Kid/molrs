@@ -23,7 +23,7 @@ molrs = { path = "../molrs-core", package = "molcrafts-molrs-core", version = "0
 molrs-io = { path = "../molrs-io", package = "molcrafts-molrs-io", version = "0.0.17", default-features = false, features = ["filesystem", "smiles"] }
 molrs-ff = { path = "../molrs-ff", package = "molcrafts-molrs-ff", version = "0.0.17" }
 molrs-compute = { path = "../molrs-compute", package = "molcrafts-molrs-compute", version = "0.0.17", default-features = false }
-molrs-embed = { path = "../molrs-embed", package = "molcrafts-molrs-embed", version = "0.0.17" }
+molrs-conformer = { path = "../molrs-conformer", package = "molcrafts-molrs-conformer", version = "0.0.17" }
 molrs-signal = { path = "../molrs-signal", package = "molcrafts-molrs-signal", version = "0.0.17" }
 
 [workspace]

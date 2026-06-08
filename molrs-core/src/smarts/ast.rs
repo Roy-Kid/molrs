@@ -1,4 +1,4 @@
-//! SMARTS query AST and primitive evaluation against a [`MolGraph`].
+//! SMARTS query AST and primitive evaluation against a [`Atomistic`].
 //!
 //! Ported (semantics only) from RDKit's query primitives under BSD-3:
 //! - `Code/GraphMol/QueryAtom.h`, `Code/GraphMol/QueryBond.h`
@@ -6,12 +6,13 @@
 //!
 //! The AST mirrors RDKit's atom/bond query trees: leaf *primitives* (element,
 //! charge, H-count, ...) combined by AND / OR / NOT nodes. Evaluation is a
-//! pure read against a [`MolGraph`] plus a precomputed [`MolContext`] that
+//! pure read against a [`Atomistic`] plus a precomputed [`MolContext`] that
 //! carries ring info and the project-convention aromaticity perception.
 
 use std::collections::HashMap;
 
-use crate::molgraph::{AtomId, MolGraph, PropValue};
+use crate::atomistic::{AtomId, Atomistic};
+use crate::molgraph::PropValue;
 use crate::rings::{RingInfo, find_rings};
 
 /// Precomputed, read-only context shared by every primitive evaluation.
@@ -22,7 +23,7 @@ use crate::rings::{RingInfo, find_rings};
 /// the truth (e.g. transplanted from RDKit) may instead set an `is_aromatic`
 /// atom prop, which takes precedence when present.
 pub struct MolContext<'m> {
-    pub mol: &'m MolGraph,
+    pub mol: &'m Atomistic,
     pub rings: RingInfo,
     /// atom → is-aromatic (perceived once, up front).
     aromatic_atom: HashMap<AtomId, bool>,
@@ -36,7 +37,7 @@ pub struct MolContext<'m> {
 
 impl<'m> MolContext<'m> {
     /// Build the context for `mol` (runs ring perception once).
-    pub fn new(mol: &'m MolGraph) -> Self {
+    pub fn new(mol: &'m Atomistic) -> Self {
         let rings = find_rings(mol);
         let mut aromatic_atom = HashMap::new();
         let mut h_count = HashMap::new();
@@ -79,7 +80,7 @@ impl<'m> MolContext<'m> {
             mol.atoms().map(|(id, _)| (id, 0)).collect();
         for (bid, bond) in mol.bonds() {
             if rings.is_bond_in_ring(bid) {
-                for &end in &bond.atoms {
+                for &end in &bond.nodes {
                     *ring_bond_count.entry(end).or_insert(0) += 1;
                 }
             }
@@ -117,7 +118,7 @@ fn element_is_hydrogen(sym: &str) -> bool {
 }
 
 /// Read an atom's element symbol, defaulting to `""` when absent.
-fn atom_symbol(mol: &MolGraph, id: AtomId) -> &str {
+fn atom_symbol(mol: &Atomistic, id: AtomId) -> &str {
     mol.get_atom(id)
         .ok()
         .and_then(|a| a.get_str("element"))
@@ -125,7 +126,7 @@ fn atom_symbol(mol: &MolGraph, id: AtomId) -> &str {
 }
 
 /// Read an atom's formal charge as an integer (`PropValue::Int` or `F64`).
-fn atom_charge(mol: &MolGraph, id: AtomId) -> i32 {
+fn atom_charge(mol: &Atomistic, id: AtomId) -> i32 {
     match mol.get_atom(id).ok().and_then(|a| a.get("formal_charge")) {
         Some(PropValue::Int(v)) => *v,
         Some(PropValue::F64(v)) => v.round() as i32,
