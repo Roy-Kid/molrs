@@ -289,6 +289,17 @@ macro_rules! graph_world_impl {
                     })?;
                 Ok(numpy::PyArray1::from_slice(py, valid.as_slice()))
             }
+
+            // ---- zero-copy adopt ----
+
+            /// Zero-copy adopt: **move** `other`'s graph storage into `self`,
+            /// leaving `other` empty. Handles in the adopted graph stay valid
+            /// (the whole generational slotmap is moved, not reindexed). For
+            /// taking ownership of a graph produced elsewhere without a per-node
+            /// copy. Defined per leaf so it swaps the leaf's own backing store.
+            fn adopt(&mut self, other: &mut $ty) {
+                self.inner = std::mem::take(&mut other.inner);
+            }
         }
     };
 }
@@ -322,14 +333,6 @@ impl PyGraph {
         Self {
             inner: MolGraph::new(),
         }
-    }
-
-    /// Zero-copy adopt: **move** `other`'s graph storage into `self`, leaving
-    /// `other` empty. Handles in the adopted graph stay valid (the whole
-    /// generational slotmap is moved, not reindexed). For taking ownership of a
-    /// graph produced elsewhere without a per-node copy.
-    fn adopt(&mut self, other: &mut PyGraph) {
-        self.inner = std::mem::replace(&mut other.inner, MolGraph::new());
     }
 }
 graph_world_impl!(PyGraph);

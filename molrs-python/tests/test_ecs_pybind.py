@@ -217,6 +217,20 @@ def test_adopt_moves_storage_and_empties_source():
     assert len(src.entities()) == 0  # source emptied
 
 
+def test_adopt_on_leaf_moves_its_own_store():
+    # adopt must move the *leaf's* backing store, not an empty base graph —
+    # regression for adopt being a no-op on Atomistic/CoarseGrain.
+    src = molrs.parse_smiles("CCO").to_atomistic()
+    n = src.n_atoms
+    assert n == 3
+
+    dst = molrs.Atomistic()
+    dst.adopt(src)
+
+    assert dst.n_atoms == n
+    assert src.n_atoms == 0  # source emptied
+
+
 # --------------------------------------------------------------------------- #
 # keys convention                                                            #
 # --------------------------------------------------------------------------- #
