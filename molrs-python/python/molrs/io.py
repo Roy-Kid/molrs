@@ -35,9 +35,9 @@ from .fields import (
     PdbFieldFormatter,
     XyzFieldFormatter,
 )
+from .frame import Frame  # canonical rich Frame (spec frame-block-sink-01)
 from .molrs import (
     DCDTrajReader as _DCDTrajReader,
-    Frame,
     LAMMPSTrajReader as _LAMMPSTrajReader,
     XYZTrajReader as _XYZTrajReader,
     read_gro as _read_gro,
@@ -61,6 +61,15 @@ _xyz_fmt = XyzFieldFormatter()
 _noop_fmt = FieldFormatter()
 
 PathInput = Union[str, "PathLike[str]"]
+
+
+def _wrap(frame: Any) -> Frame:
+    """Upgrade a freshly-read, canonicalized bare frame to the rich :class:`Frame`.
+
+    Zero-copy: the rich Frame views the same Rust-backed Block buffers (no
+    column data is copied). Already-rich frames pass through unchanged.
+    """
+    return Frame.from_dict(frame)
 
 
 def read_lammps_data(
@@ -88,7 +97,7 @@ def read_lammps_data(
         )
     result = _read_lammps(str(file))
     _lammps_fmt.canonicalize_frame(result)
-    return result
+    return _wrap(result)
 
 
 def read_pdb(file: str | PathLike[str], frame: Any = None) -> Any:
@@ -103,7 +112,7 @@ def read_pdb(file: str | PathLike[str], frame: Any = None) -> Any:
         )
     result = _read_pdb(str(file))
     _pdb_fmt.canonicalize_frame(result)
-    return result
+    return _wrap(result)
 
 
 def read_pdb_trajectory(file: str | PathLike[str]) -> list[Any]:
@@ -115,7 +124,7 @@ def read_pdb_trajectory(file: str | PathLike[str]) -> list[Any]:
     frames = _read_pdb_trajectory(str(file))
     for frame in frames:
         _pdb_fmt.canonicalize_frame(frame)
-    return frames
+    return [_wrap(frame) for frame in frames]
 
 
 def read_xyz(file: str | PathLike[str], frame: Any = None) -> Any:
@@ -130,7 +139,7 @@ def read_xyz(file: str | PathLike[str], frame: Any = None) -> Any:
         )
     result = _read_xyz(str(file))
     _xyz_fmt.canonicalize_frame(result)
-    return result
+    return _wrap(result)
 
 
 def read_gro(file: str | PathLike[str]) -> list[Any]:
@@ -149,7 +158,7 @@ def read_gro(file: str | PathLike[str]) -> list[Any]:
     frames = _read_gro(str(file))
     for f in frames:
         _gro_fmt.canonicalize_frame(f)
-    return frames
+    return [_wrap(f) for f in frames]
 
 
 def write_lammps_data(
@@ -262,11 +271,16 @@ class TrajectoryReader:
         return sum(self._ensure_counts())
 
     def read_frame(self, index: int) -> Frame:
-        """Read a single frame (supports negative indexing)."""
+        """Read a single frame (supports negative indexing).
+
+        The single chokepoint for every trajectory access (``read_frames`` /
+        ``read_range`` / ``read_all`` / indexing / iteration all funnel here),
+        so wrapping to the rich :class:`Frame` once here covers them all.
+        """
         reader, local = self._locate(index)
         frame = reader.read_frame(local)
         self._formatter.canonicalize_frame(frame)
-        return frame
+        return _wrap(frame)
 
     def read_frames(self, indices: Sequence[int]) -> list[Frame]:
         """Read an explicit list of frame indices."""

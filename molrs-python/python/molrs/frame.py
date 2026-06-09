@@ -426,7 +426,14 @@ class Frame(_RsFrame):
             raw_box = _RsFrame.box.__get__(data, type(data))  # type: ignore[attr-defined]
             if raw_box is not None:
                 frame.box = raw_box
-            frame.metadata = dict(data.meta) if data.meta else {}
+            src_meta = dict(data.meta) if data.meta else {}
+            frame.metadata = src_meta
+            if src_meta:
+                # Preserve the native Rust-side meta too, so callers reading
+                # ``frame.meta`` (e.g. molpy's readers before the spec-04
+                # adoption) keep seeing it after the wrap, not just
+                # ``frame.metadata``.
+                frame.meta = src_meta
             return frame
         blocks = {name: Block.from_dict(blk) for name, blk in data["blocks"].items()}
         frame = cls(blocks=blocks)
