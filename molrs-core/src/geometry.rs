@@ -18,9 +18,9 @@ pub fn translate(mol: &mut MolGraph, delta: [f64; 3]) {
     let table = mol.node_table_mut();
     for (i, key) in keys::COORDS.iter().enumerate() {
         if let Ok((data, valid)) = table.column_f64_mut(key) {
-            for row in 0..data.len() {
+            for (row, val) in data.iter_mut().enumerate() {
                 if valid.get(row) {
-                    data[row] += delta[i];
+                    *val += delta[i];
                 }
             }
         }

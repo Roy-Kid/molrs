@@ -22,7 +22,6 @@
 use wasm_bindgen::prelude::*;
 
 use molrs::atomistic::Atomistic;
-use molrs::molgraph::MolGraph;
 use molrs_conformer::{Conformer, ConformerOptions, ConformerSpeed};
 
 use crate::core::frame::Frame;
@@ -80,14 +79,11 @@ pub fn generate_3d_wasm(
 ) -> Result<Frame, JsValue> {
     let opts = parse_opts(speed.as_deref(), seed)?;
     let atomistic = frame.with_frame(|rs_frame| {
-        let molgraph = MolGraph::from_frame(rs_frame)
-            .map_err(|e| JsValue::from_str(&format!("Frame → MolGraph: {e}")))?;
-        Atomistic::try_from_molgraph(molgraph)
-            .map_err(|e| JsValue::from_str(&format!("MolGraph → Atomistic: {e}")))
+        Atomistic::from_frame(rs_frame)
+            .map_err(|e| JsValue::from_str(&format!("Frame → Atomistic: {e}")))
     })?;
 
-    let (result, _report) =
-        Conformer::new(opts)
+    let (result, _report) = Conformer::new(opts)
         .generate(&atomistic)
         .map_err(|e| JsValue::from_str(&format!("conformer: {e}")))?;
 
