@@ -976,11 +976,24 @@ impl MolGraph {
             }
             let nrel = block.nrows().unwrap_or(0);
             let endpoint_names: Vec<String> = (0..arity).map(rel_col_name).collect();
-            let prop_f: Vec<(String, &ndarray::ArrayD<F>)> = block
-                .keys()
-                .filter(|k| !endpoint_names.iter().any(|e| e == *k))
-                .filter_map(|k| block.get_float(k).map(|a| (k.to_owned(), a)))
-                .collect();
+            // Collect non-endpoint relation property columns by element type so
+            // a to_frame -> read_frame round-trip restores int and string
+            // relation props (e.g. a string bond label), not just floats.
+            let mut prop_f: Vec<(String, &ndarray::ArrayD<F>)> = Vec::new();
+            let mut prop_i: Vec<(String, &ndarray::ArrayD<I>)> = Vec::new();
+            let mut prop_s: Vec<(String, &ndarray::ArrayD<String>)> = Vec::new();
+            for k in block.keys() {
+                if endpoint_names.iter().any(|e| e == k) {
+                    continue;
+                }
+                if let Some(a) = block.get_float(k) {
+                    prop_f.push((k.to_owned(), a));
+                } else if let Some(a) = block.get_int(k) {
+                    prop_i.push((k.to_owned(), a));
+                } else if let Some(a) = block.get_string(k) {
+                    prop_s.push((k.to_owned(), a));
+                }
+            }
 
             for row in 0..nrel {
                 let mut nodes: SmallVec<[NodeId; 4]> = SmallVec::new();
@@ -1000,6 +1013,13 @@ impl MolGraph {
                     for (k, arr) in &prop_f {
                         #[allow(clippy::unnecessary_cast)]
                         let _ = self.set_relation_prop(kid, rid, k, arr[[row]] as f64);
+                    }
+                    for (k, arr) in &prop_i {
+                        let _ = self.set_relation_prop(kid, rid, k, PropValue::Int(arr[[row]]));
+                    }
+                    for (k, arr) in &prop_s {
+                        let _ =
+                            self.set_relation_prop(kid, rid, k, PropValue::Str(arr[[row]].clone()));
                     }
                 }
             }
@@ -1231,6 +1251,42 @@ mod tests {
         g2.read_frame(&frame).unwrap();
         assert_eq!(g2.n_nodes(), 3);
         assert_eq!(g2.n_relations(bond2), 2);
+    }
+
+    #[test]
+    fn test_read_frame_restores_int_and_str_relation_props() {
+        let mut g = MolGraph::new();
+        let bond = g.register_kind("bonds", 2);
+        let a = g.add_node_with(Atom::xyz("C", 0.0, 0.0, 0.0));
+        let b = g.add_node_with(Atom::xyz("C", 1.5, 0.0, 0.0));
+        let rid = g.add_relation(bond, &[a, b]).unwrap();
+        g.set_relation_prop(bond, rid, "order", 2.0_f64).unwrap();
+        g.set_relation_prop(bond, rid, "ring_size", PropValue::Int(6))
+            .unwrap();
+        g.set_relation_prop(bond, rid, "label", PropValue::Str("aromatic".to_owned()))
+            .unwrap();
+
+        let frame = g.to_frame();
+
+        let mut g2 = MolGraph::new();
+        let bond2 = g2.register_kind("bonds", 2);
+        g2.read_frame(&frame).unwrap();
+
+        let (_, r) = g2.relations(bond2).next().expect("relation round-trips");
+        assert_eq!(
+            r.props.get("ring_size"),
+            Some(&PropValue::Int(6)),
+            "int relation prop lost on round-trip"
+        );
+        assert_eq!(
+            r.props.get("label"),
+            Some(&PropValue::Str("aromatic".to_owned())),
+            "string relation prop lost on round-trip"
+        );
+        match r.props.get("order") {
+            Some(PropValue::F64(v)) => assert!((v - 2.0).abs() < 1e-12),
+            other => panic!("float relation prop lost: {other:?}"),
+        }
     }
 
     // ----- Merge (registry-driven; covers all kinds) -----
