@@ -17,6 +17,18 @@ ArrayU32 = npt.NDArray[np.uint32]
 ArrayI64 = npt.NDArray[np.int64]
 
 # ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+class BlockDtypeError(TypeError):
+    """Raised by ``Block.insert`` for a non-numpy-representable column.
+
+    The Rust Store holds only float / int / bool / str columns. Object-dtype,
+    None-bearing, and ragged/mixed arrays are rejected fail-fast; the message
+    names the column and the detected dtype. Subclasses ``TypeError``.
+    """
+
+# ---------------------------------------------------------------------------
 # Simulation box
 # ---------------------------------------------------------------------------
 
@@ -105,7 +117,9 @@ class Block:
     """Heterogeneous column store (dict of typed numpy arrays)."""
 
     def __init__(self) -> None: ...
-    def insert(self, key: str, array: npt.NDArray | Sequence[str]) -> None: ...
+    def insert(self, key: str, array: npt.NDArray | Sequence[str]) -> None:
+        """Store a column. Raises ``BlockDtypeError`` for object/None/ragged."""
+        ...
     def view(self, key: str) -> npt.NDArray | list[str]: ...
     @property
     def nrows(self) -> Optional[int]: ...

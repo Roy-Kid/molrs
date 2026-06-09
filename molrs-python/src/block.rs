@@ -23,7 +23,7 @@ use molrs::types::{F, I, U};
 use molrs_ffi::BlockRef;
 use ndarray::{Array1, ArrayD, IxDyn};
 use numpy::{PyArrayDyn, PyArrayMethods, PyReadonlyArrayDyn, PyUntypedArrayMethods};
-use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 
 use crate::store::ffi_error_to_pyerr;
@@ -156,6 +156,20 @@ impl PyBlock {
     /// >>> b.insert("x", np.zeros(10, dtype=np.float32))
     /// >>> b.insert("y", np.ones(10, dtype=np.float32))
     fn insert(&mut self, key: &str, array: &Bound<'_, pyo3::types::PyAny>) -> PyResult<()> {
+        // numpy-only Store contract: reject object-kind arrays (object dtype,
+        // None-bearing, ragged/mixed — numpy renders all of these as kind 'O')
+        // up front, before the typed-cast / Vec<String> extraction below, so
+        // even an empty object array fails fast instead of slipping through as
+        // an empty string column. Python lists (the list[str] path) carry no
+        // `.dtype` and are untouched here.
+        if let Ok(dtype) = array.getattr("dtype") {
+            if let Ok(kind) = dtype.getattr("kind").and_then(|k| k.extract::<String>()) {
+                if kind == "O" {
+                    return Err(crate::error::dtype_reject(key, array));
+                }
+            }
+        }
+
         // Matched-dtype, C-contiguous numpy arrays get forged into a
         // foreign-backed Column (zero memcpy). When the layout forbids
         // forging, the same numpy array is copied into a Rust-owned column.
@@ -204,9 +218,7 @@ impl PyBlock {
         if let Ok(strings) = array.extract::<Vec<String>>() {
             return self.insert_array::<String>(key, Array1::from(strings).into_dyn());
         }
-        Err(PyTypeError::new_err(
-            "unsupported dtype: expected float32, float64, int32, int64, bool, uint32, uint64, u8, or list[str]",
-        ))
+        Err(crate::error::dtype_reject(key, array))
     }
 
     /// Return a zero-copy numpy view of the column data.

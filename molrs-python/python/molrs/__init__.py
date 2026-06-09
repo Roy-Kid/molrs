@@ -15,6 +15,8 @@ force fields, and the SMILES front-end. Analysis classes live under the
 """
 
 from .molrs import (
+    # Public exceptions
+    BlockDtypeError,
     # SimBox + neighbors
     Box,
     LinkedCell,
@@ -106,6 +108,7 @@ __all__ = [
     "validate",
     "dielectric",
     "transport",
+    "BlockDtypeError",
     "Box",
     "LinkedCell",
     "NeighborQuery",

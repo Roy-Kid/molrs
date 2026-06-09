@@ -26,6 +26,7 @@
 
 use pyo3::prelude::*;
 
+mod error;
 mod helpers;
 mod store;
 
@@ -110,6 +111,12 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLinkedCell>()?;
     m.add_class::<PyNeighborQuery>()?;
     m.add_class::<PyNeighborList>()?;
+
+    // Public exceptions
+    m.add(
+        "BlockDtypeError",
+        m.py().get_type::<error::BlockDtypeError>(),
+    )?;
 
     // Block + Frame
     m.add_class::<PyBlock>()?;
