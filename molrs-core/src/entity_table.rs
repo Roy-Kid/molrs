@@ -432,6 +432,20 @@ typed_accessors!(set_f64, get_f64, column_f64, F64, F, "f64");
 typed_accessors!(set_i32, get_i32, column_i32, I32, I, "i32");
 typed_accessors!(set_bool, get_bool, column_bool, Bool, bool, "bool");
 
+impl<K: Key> EntityTable<K> {
+    /// Mutably borrow the whole `f64` column `key` (zero-copy slice) plus its
+    /// validity mask, for in-place vectorized updates over the dense, row-aligned
+    /// column (rows are compacted, so the slice spans exactly the live entities).
+    /// Errors if the column is absent or has a different element type.
+    pub fn column_f64_mut(&mut self, key: &str) -> Result<(&mut [F], &Validity), MolRsError> {
+        match self.cols.get_mut(key) {
+            Some(Column::F64(data, valid)) => Ok((data.as_mut_slice(), &*valid)),
+            Some(other) => Err(type_conflict(key, "f64", other.type_name())),
+            None => Err(missing(key)),
+        }
+    }
+}
+
 // `Str` accessors are written by hand: `get` borrows rather than clones, and
 // `set` takes `&str`.
 impl<K: Key> EntityTable<K> {
