@@ -138,11 +138,11 @@ impl<'m> TargetCtx<'m> {
             .unwrap_or(false)
     }
 
-    fn element(&self, atom_id: AtomId) -> Option<&str> {
+    fn element(&self, atom_id: AtomId) -> Option<String> {
         self.mol
             .get_atom(atom_id)
             .ok()
-            .and_then(|a| a.get_str("element"))
+            .and_then(|a| a.get_str("element").map(str::to_owned))
     }
 
     fn formal_charge(&self, atom_id: AtomId) -> i32 {
