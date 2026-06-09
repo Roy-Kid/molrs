@@ -211,6 +211,15 @@ impl Atomistic {
             })
     }
 
+    /// Endpoints `(a, b)` of a bond by id, without materializing its property
+    /// map (reads only the relation's endpoint list).
+    pub fn bond_endpoints(&self, id: BondId) -> Option<(AtomId, AtomId)> {
+        self.graph
+            .relation_nodes(self.bond, id)
+            .ok()
+            .map(|eps| (eps[0], eps[1]))
+    }
+
     /// Iterate `(BondId, neighbor_id)` incident to `id` via the adjacency index
     /// (O(degree)), without materializing each bond's property map. The bond
     /// order, if needed, is looked up separately by the caller.

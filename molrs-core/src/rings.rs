@@ -126,9 +126,9 @@ pub fn find_rings(mol: &Atomistic) -> RingInfo {
     // Map from graph edge index (usize) → bond_vec index
     let mut edge_to_bond: Vec<usize> = Vec::with_capacity(bond_vec.len());
     for (bi, &bid) in bond_vec.iter().enumerate() {
-        let b = mol.get_bond(bid).expect("bond must exist");
-        let u = atom_to_idx[&b.nodes[0]];
-        let v = atom_to_idx[&b.nodes[1]];
+        let (n0, n1) = mol.bond_endpoints(bid).expect("bond must exist");
+        let u = atom_to_idx[&n0];
+        let v = atom_to_idx[&n1];
         graph.add_edge(NodeIndex::new(u), NodeIndex::new(v), ());
         edge_to_bond.push(bi);
     }
@@ -215,8 +215,7 @@ pub fn find_rings(mol: &Atomistic) -> RingInfo {
     // Fast (AtomId, AtomId) → BondId lookup table.
     let mut bond_map: HashMap<(AtomId, AtomId), BondId> = HashMap::new();
     for &bid in &bond_vec {
-        let b = mol.get_bond(bid).expect("bond must exist");
-        let (a, bb) = (b.nodes[0], b.nodes[1]);
+        let (a, bb) = mol.bond_endpoints(bid).expect("bond must exist");
         bond_map.insert((a, bb), bid);
         bond_map.insert((bb, a), bid);
     }
