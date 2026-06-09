@@ -51,6 +51,9 @@ use region::{PyHollowSphere, PyRegion, PySphere};
 
 pub(crate) mod molgraph;
 use molgraph::{PyAtomistic, PyCoarseGrain, PyGraph};
+use molgraph::{
+    add_hydrogens, compute_gasteiger_charges, find_rings, perceive_aromaticity, rotate, translate,
+};
 
 mod conformer;
 use conformer::{PyConformer, PyConformerReport, PyConformerStageReport};
@@ -71,6 +74,30 @@ mod dielectric;
 mod signal;
 mod transport;
 mod validate;
+
+/// Register the `keys` submodule mirroring `molrs_core::keys` so Python code
+/// references the field-name convention by name (`molrs.keys.X`) instead of
+/// scattering string literals.
+fn register_keys(parent: &Bound<'_, PyModule>) -> PyResult<()> {
+    use ::molrs::keys;
+    let m = PyModule::new(parent.py(), "keys")?;
+    m.add("X", keys::X)?;
+    m.add("Y", keys::Y)?;
+    m.add("Z", keys::Z)?;
+    m.add("COORDS", keys::COORDS.to_vec())?;
+    m.add("ELEMENT", keys::ELEMENT)?;
+    m.add("BEAD_TYPE", keys::BEAD_TYPE)?;
+    m.add("CHARGE", keys::CHARGE)?;
+    m.add("ORDER", keys::ORDER)?;
+    m.add("MASS", keys::MASS)?;
+    m.add("TYPE", keys::TYPE)?;
+    m.add("ID", keys::ID)?;
+    m.add("MOL_ID", keys::MOL_ID)?;
+    m.add("SYMBOL", keys::SYMBOL)?;
+    m.add("NAME", keys::NAME)?;
+    parent.add_submodule(&m)?;
+    Ok(())
+}
 
 /// Root Python module for the molrs library.
 ///
@@ -130,6 +157,17 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGraph>()?;
     m.add_class::<PyAtomistic>()?;
     m.add_class::<PyCoarseGrain>()?;
+
+    // Systems = module-level free functions (no algorithm methods on the classes)
+    m.add_function(wrap_pyfunction!(translate, m)?)?;
+    m.add_function(wrap_pyfunction!(rotate, m)?)?;
+    m.add_function(wrap_pyfunction!(perceive_aromaticity, m)?)?;
+    m.add_function(wrap_pyfunction!(add_hydrogens, m)?)?;
+    m.add_function(wrap_pyfunction!(find_rings, m)?)?;
+    m.add_function(wrap_pyfunction!(compute_gasteiger_charges, m)?)?;
+
+    // Field-name convention (`molrs.keys.X`, `molrs.keys.ELEMENT`, …)
+    register_keys(m)?;
 
     // Conformer generation
     m.add_class::<PyConformer>()?;

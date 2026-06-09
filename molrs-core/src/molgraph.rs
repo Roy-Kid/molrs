@@ -52,7 +52,7 @@
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
-use slotmap::{SecondaryMap, SlotMap, new_key_type};
+use slotmap::{Key, KeyData, SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
 
 use super::block::Block;
@@ -245,6 +245,25 @@ new_key_type! {
     pub struct RelationId;
     /// Stable handle to a reserved containment group (see module docs).
     pub struct GroupId;
+}
+
+/// Convert a [`NodeId`] to/from a stable opaque `u64` handle (the generational
+/// slotmap key's FFI form). For exposing stable entity handles across an FFI /
+/// language boundary without leaking the `slotmap` types.
+pub fn node_to_u64(id: NodeId) -> u64 {
+    id.data().as_ffi()
+}
+/// See [`node_to_u64`].
+pub fn node_from_u64(h: u64) -> NodeId {
+    NodeId::from(KeyData::from_ffi(h))
+}
+/// Convert a [`RelationId`] to a stable opaque `u64` handle. See [`node_to_u64`].
+pub fn relation_to_u64(id: RelationId) -> u64 {
+    id.data().as_ffi()
+}
+/// See [`relation_to_u64`].
+pub fn relation_from_u64(h: u64) -> RelationId {
+    RelationId::from(KeyData::from_ffi(h))
 }
 
 /// Dense index identifying a registered relation kind. Resolved once at

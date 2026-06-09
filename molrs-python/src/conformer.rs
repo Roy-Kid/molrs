@@ -23,7 +23,7 @@ use pyo3::prelude::*;
 use molrs_conformer::{Conformer, ConformerOptions, ConformerSpeed, StageKind};
 
 use crate::helpers::molrs_error_to_pyerr;
-use crate::molgraph::{PyAtomistic, PyGraph};
+use crate::molgraph::PyAtomistic;
 
 /// Map a `StageKind` enum to a human-readable name.
 fn stage_kind_name(kind: StageKind) -> &'static str {
@@ -240,13 +240,11 @@ impl PyConformer {
     fn generate(
         &self,
         py: Python<'_>,
-        mol: &PyGraph,
+        mol: &PyAtomistic,
     ) -> PyResult<(Py<PyAtomistic>, PyConformerReport)> {
-        let atomistic = molrs::atomistic::Atomistic::try_from_molgraph(mol.inner.clone())
-            .map_err(molrs_error_to_pyerr)?;
         let (result_mol, report) = self
             .inner
-            .generate(&atomistic)
+            .generate(mol.core())
             .map_err(molrs_error_to_pyerr)?;
 
         let stages: Vec<PyConformerStageReport> = report
@@ -268,15 +266,7 @@ impl PyConformer {
             stages_inner: stages,
         };
 
-        let py_mol = Py::new(
-            py,
-            (
-                PyAtomistic,
-                PyGraph {
-                    inner: result_mol.into_inner(),
-                },
-            ),
-        )?;
+        let py_mol = PyAtomistic::from_core(py, result_mol)?;
 
         Ok((py_mol, py_report))
     }

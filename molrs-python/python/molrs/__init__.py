@@ -58,6 +58,13 @@ from .molrs import (
     Graph,
     Atomistic,
     CoarseGrain,
+    # Systems (module-level free functions over a graph)
+    translate,
+    rotate,
+    perceive_aromaticity,
+    add_hydrogens,
+    find_rings,
+    compute_gasteiger_charges,
     # Conformer generation
     Conformer,
     ConformerReport,
@@ -68,6 +75,12 @@ from .molrs import (
     Potentials,
     read_forcefield_xml,
     extract_coords,
+    # Field-name convention submodule
+    keys,
+    # Signal processing (low-level FFT helpers)
+    signal_acf_fft,
+    signal_apply_window,
+    signal_frequency_grid,
 )
 
 from . import io  # molpy-compatible I/O facade (read_lammps_data, …)
@@ -122,6 +135,13 @@ __all__ = [
     "Graph",
     "Atomistic",
     "CoarseGrain",
+    "translate",
+    "rotate",
+    "perceive_aromaticity",
+    "add_hydrogens",
+    "find_rings",
+    "compute_gasteiger_charges",
+    "keys",
     "Conformer",
     "ConformerReport",
     "ConformerStageReport",
@@ -130,4 +150,7 @@ __all__ = [
     "Potentials",
     "read_forcefield_xml",
     "extract_coords",
+    "signal_acf_fft",
+    "signal_apply_window",
+    "signal_frequency_grid",
 ]

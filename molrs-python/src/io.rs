@@ -14,7 +14,7 @@
 
 use crate::frame::PyFrame;
 use crate::helpers::{io_error_to_pyerr, molrs_error_to_pyerr, smiles_error_to_pyerr};
-use crate::molgraph::{PyAtomistic, PyGraph};
+use crate::molgraph::PyAtomistic;
 use molrs::frame::Frame as CoreFrame;
 use molrs_io::chgcar::read_chgcar;
 use molrs_io::cube::{read_cube, write_cube};
@@ -1080,15 +1080,7 @@ impl PySmilesIR {
     /// 6
     fn to_atomistic(&self, py: Python<'_>) -> PyResult<Py<PyAtomistic>> {
         let mol = molrs_io::smiles::to_atomistic(&self.inner).map_err(smiles_error_to_pyerr)?;
-        Py::new(
-            py,
-            (
-                PyAtomistic,
-                PyGraph {
-                    inner: mol.into_inner(),
-                },
-            ),
-        )
+        PyAtomistic::from_core(py, mol)
     }
 
     fn __repr__(&self) -> String {

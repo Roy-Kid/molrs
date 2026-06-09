@@ -23,7 +23,7 @@ use molrs_ff::typifier::mmff::MMFFTypifier;
 
 use crate::frame::PyFrame;
 use crate::helpers::NpF;
-use crate::molgraph::PyGraph;
+use crate::molgraph::PyAtomistic;
 
 use numpy::{PyArray1, ToPyArray};
 
@@ -185,10 +185,10 @@ impl PyMMFFTypifier {
     /// ------
     /// ValueError
     ///     If atom types cannot be determined (e.g. unsupported elements).
-    fn typify(&self, mol: &PyGraph) -> PyResult<PyFrame> {
+    fn typify(&self, mol: &PyAtomistic) -> PyResult<PyFrame> {
         let frame = self
             .inner
-            .typify(&mol.inner)
+            .typify(mol.core())
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         PyFrame::from_core_frame(frame)
     }
@@ -217,12 +217,10 @@ impl PyMMFFTypifier {
     /// --------
     /// >>> potentials = typifier.build(mol)
     /// >>> energy, forces = potentials.eval(coords)
-    fn build(&self, mol: &PyGraph) -> PyResult<PyPotentials> {
-        let atomistic = molrs::atomistic::Atomistic::try_from_molgraph(mol.inner.clone())
-            .map_err(crate::helpers::molrs_error_to_pyerr)?;
+    fn build(&self, mol: &PyAtomistic) -> PyResult<PyPotentials> {
         let potentials = self
             .inner
-            .build(&atomistic)
+            .build(mol.core())
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         Ok(PyPotentials { inner: potentials })
     }

@@ -272,6 +272,12 @@ impl<K: Key> EntityTable<K> {
         self.cols.keys().map(String::as_str)
     }
 
+    /// The validity mask of column `key`, regardless of element type
+    /// (`None` if the column is absent). Aligned to row order.
+    pub fn col_validity(&self, key: &str) -> Option<&Validity> {
+        self.cols.get(key).map(Column::validity)
+    }
+
     /// Spawn a new entity: appends a null row across all existing columns and
     /// returns its stable handle. O(n_columns).
     pub fn spawn(&mut self) -> K {
