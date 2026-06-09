@@ -164,6 +164,24 @@ impl SimBox {
         math::det3(&self.h).abs()
     }
 
+    /// `true` when the box is free (non-periodic on every axis).
+    pub fn is_free(&self) -> bool {
+        self.pbc.iter().all(|&p| !p)
+    }
+
+    /// Geometry style label: `"free"` (no periodic axis), `"orthogonal"`
+    /// (diagonal H), or `"triclinic"`.
+    pub fn style(&self) -> &'static str {
+        if self.is_free() {
+            "free"
+        } else {
+            match self.kind {
+                BoxKind::Ortho { .. } => "orthogonal",
+                BoxKind::Triclinic => "triclinic",
+            }
+        }
+    }
+
     /// Off-diagonal tilts [xy, xz, yz] of the cell matrix
     pub fn tilts(&self) -> F3 {
         array![self.h[[0, 1]], self.h[[0, 2]], self.h[[1, 2]]]

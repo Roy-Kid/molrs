@@ -21,6 +21,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from .molrs import Block as _RsBlock
+from .molrs import BlockDtypeError
 from .molrs import Frame as _RsFrame
 
 type BlockLike = Mapping[str, ArrayLike]
@@ -56,6 +57,10 @@ class Block(_RsBlock, MutableMapping[str, np.ndarray]):
             for k, v in vars_.items():
                 try:
                     self[k] = v
+                except BlockDtypeError:
+                    # Surface the precise numpy-only contract error unchanged
+                    # (object / None / ragged column) rather than masking it.
+                    raise
                 except Exception as e:
                     raise ValueError(
                         f"Value must be array-like for key {k!r}, got {type(v)}"
@@ -205,6 +210,7 @@ class Block(_RsBlock, MutableMapping[str, np.ndarray]):
         delimiter: str = ",",
         encoding: str = "utf-8",
         header: list[str] | None = None,
+        skipinitialspace: bool = False,
     ) -> "Block":
         """Create a Block from CSV.
 
@@ -212,6 +218,12 @@ class Block(_RsBlock, MutableMapping[str, np.ndarray]):
         implemented in the molrs Rust core; this wrapper only resolves *source*
         (text, a file path, or a ``StringIO``) to text and adopts the parsed
         core block as a rich :class:`Block`.
+
+        Args:
+            skipinitialspace: When True, runs of the delimiter are collapsed so
+                whitespace-aligned columns (e.g. LAMMPS data sections) parse
+                cleanly. The core also trims each field; combined, leading and
+                repeated delimiters never produce spurious empty columns.
         """
         if isinstance(source, StringIO):
             text = source.getvalue()
@@ -222,6 +234,13 @@ class Block(_RsBlock, MutableMapping[str, np.ndarray]):
         else:
             text = str(source)  # already CSV text
         d = delimiter if len(delimiter) == 1 else ","
+        if skipinitialspace:
+            # Collapse consecutive delimiters per line so aligned/whitespace-
+            # padded columns don't yield empty fields.
+            text = "\n".join(
+                d.join(part for part in line.split(d) if part != "")
+                for line in text.splitlines()
+            )
         return cls.from_dict(_RsBlock.from_csv(text, d, header))
 
     def to_csv(

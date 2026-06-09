@@ -88,11 +88,13 @@ from .molrs import (
 )
 
 # Rich Python Frame/Block layer (pandas-style API; CSV engine in Rust on the
-# core Block). Accessible as ``molrs.frame.Block`` / ``molrs.frame.Frame``. It
-# does NOT yet shadow the top-level ``molrs.Block`` / ``molrs.Frame`` — that
-# cutover happens once molpy stops subclassing the core (chain spec 04), so this
-# spec stays non-breaking for molpy.
+# core Block). These subclass the bare PyO3 cores and SHADOW the top-level
+# ``molrs.Block`` / ``molrs.Frame`` as the canonical types — every public API
+# (io readers, etc.) yields these. The shadow is safe now that molpy re-exports
+# them instead of subclassing the bare core (chain spec 04). Internal modules
+# that need the raw cores import them from ``.molrs`` directly.
 from . import frame  # noqa: F401
+from .frame import Block, Frame
 
 from . import io  # molpy-compatible I/O facade (read_lammps_data, …)
 from . import compute  # analysis subpackage — molrs.compute.{density,order,…}

@@ -37,8 +37,17 @@ pub fn block_from_csv(
     let mut cols: Vec<Vec<String>> = vec![Vec::new(); ncol];
     for line in lines {
         let fields: Vec<&str> = line.split(delimiter).collect();
+        // Fewer fields than columns can't be filled → error. Extra trailing
+        // fields are ignored (the header count defines how many columns to read).
+        if fields.len() < ncol {
+            return Err(format!(
+                "CSV row has {} field(s) but {} column name(s) were given",
+                fields.len(),
+                ncol
+            ));
+        }
         for (i, col) in cols.iter_mut().enumerate() {
-            col.push(fields.get(i).map(|s| s.trim()).unwrap_or("").to_string());
+            col.push(fields[i].trim().to_string());
         }
     }
 

@@ -170,6 +170,18 @@ impl PyBox {
         self.inner.volume()
     }
 
+    /// ``True`` when the box is free (non-periodic on every axis).
+    #[getter]
+    fn is_free(&self) -> bool {
+        self.inner.is_free()
+    }
+
+    /// Geometry style label: ``"free"``, ``"orthogonal"``, or ``"triclinic"``.
+    #[getter]
+    fn style(&self) -> &'static str {
+        self.inner.style()
+    }
+
     /// Return a lattice vector by index.
     ///
     /// Parameters
