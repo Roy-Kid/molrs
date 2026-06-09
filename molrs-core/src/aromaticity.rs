@@ -210,19 +210,16 @@ fn total_degree(mol: &Atomistic, id: AtomId) -> i32 {
 }
 
 /// Iterate incident `(BondId, other_atom, kekule_order)` for an atom.
+///
+/// Uses the graph adjacency index (O(degree)) rather than scanning every bond
+/// (O(n_bonds)); the latter made per-ring-atom classification O(N^2) on
+/// ring-heavy molecules.
 fn incident_bonds<'a>(
     mol: &'a Atomistic,
     id: AtomId,
 ) -> impl Iterator<Item = (BondId, AtomId, f64)> + 'a {
-    mol.bonds().filter_map(move |(bid, b)| {
-        if b.nodes[0] == id {
-            Some((bid, b.nodes[1], bond_order(mol, bid)))
-        } else if b.nodes[1] == id {
-            Some((bid, b.nodes[0], bond_order(mol, bid)))
-        } else {
-            None
-        }
-    })
+    mol.incident_bond_ids(id)
+        .map(move |(bid, other)| (bid, other, bond_order(mol, bid)))
 }
 
 /// Explicit valence = sum of incident **Kekulé** bond orders (RDKit
@@ -457,39 +454,67 @@ fn ring_bonds(mol: &Atomistic, ring: &[AtomId]) -> Vec<BondId> {
 }
 
 /// Find the bond connecting `a` and `b`, if any.
+///
+/// Walks `a`'s adjacency (O(degree)) rather than scanning every bond; the latter
+/// made `ring_bonds` O(rings × n_bonds) ≈ O(N²) on ring-heavy molecules.
 fn find_bond(mol: &Atomistic, a: AtomId, b: AtomId) -> Option<BondId> {
-    mol.bonds()
-        .find(|(_, bond)| {
-            (bond.nodes[0] == a && bond.nodes[1] == b) || (bond.nodes[0] == b && bond.nodes[1] == a)
-        })
+    mol.incident_bond_ids(a)
+        .find(|&(_, other)| other == b)
         .map(|(bid, _)| bid)
 }
 
 /// Build fused systems: groups of candidate-ring indices connected by sharing
 /// at least one bond.
+///
+/// Uses a bond→rings index plus union-find (near-linear in the total number of
+/// ring bonds) rather than the all-pairs `is_disjoint` scan, which was O(rings²)
+/// even for entirely disjoint ring systems.
 fn fused_systems(ring_bond_sets: &[HashSet<BondId>]) -> Vec<Vec<usize>> {
     let n = ring_bond_sets.len();
-    let mut seen = vec![false; n];
-    let mut systems = Vec::new();
-    for start in 0..n {
-        if seen[start] {
-            continue;
+
+    // union-find with path compression
+    fn find(parent: &mut [usize], x: usize) -> usize {
+        let mut root = x;
+        while parent[root] != root {
+            root = parent[root];
         }
-        let mut stack = vec![start];
-        let mut group = Vec::new();
-        seen[start] = true;
-        while let Some(cur) = stack.pop() {
-            group.push(cur);
-            for other in 0..n {
-                if !seen[other] && !ring_bond_sets[cur].is_disjoint(&ring_bond_sets[other]) {
-                    seen[other] = true;
-                    stack.push(other);
-                }
+        let mut cur = x;
+        while parent[cur] != root {
+            let next = parent[cur];
+            parent[cur] = root;
+            cur = next;
+        }
+        root
+    }
+
+    let mut parent: Vec<usize> = (0..n).collect();
+
+    // Rings that share a bond belong to the same system. Group ring indices by
+    // bond, then union all rings touching each bond.
+    let mut bond_to_rings: HashMap<BondId, Vec<usize>> = HashMap::new();
+    for (ri, set) in ring_bond_sets.iter().enumerate() {
+        for &b in set {
+            bond_to_rings.entry(b).or_default().push(ri);
+        }
+    }
+    for rings in bond_to_rings.values() {
+        for pair in rings.windows(2) {
+            let a = find(&mut parent, pair[0]);
+            let b = find(&mut parent, pair[1]);
+            if a != b {
+                parent[a] = b;
             }
         }
-        systems.push(group);
     }
-    systems
+
+    // Gather members per root, preserving ascending ring-index order within each
+    // system for deterministic output.
+    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for i in 0..n {
+        let root = find(&mut parent, i);
+        groups.entry(root).or_default().push(i);
+    }
+    groups.into_values().collect()
 }
 
 /// All k-combinations of indices `0..n` (RDKit iterates these via

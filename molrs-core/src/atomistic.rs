@@ -211,6 +211,16 @@ impl Atomistic {
             })
     }
 
+    /// Iterate `(BondId, neighbor_id)` incident to `id` via the adjacency index
+    /// (O(degree)), without materializing each bond's property map. The bond
+    /// order, if needed, is looked up separately by the caller.
+    pub fn incident_bond_ids(&self, id: AtomId) -> impl Iterator<Item = (BondId, AtomId)> + '_ {
+        let bond = self.bond;
+        self.graph
+            .neighbor_relations(id)
+            .filter_map(move |(kind, rid, other)| (kind == bond).then_some((rid, other)))
+    }
+
     // ---- angles ----
 
     /// Add an angle (i-j-k, j central).
