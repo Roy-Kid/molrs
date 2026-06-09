@@ -157,10 +157,7 @@ impl Atomistic {
     /// Add a bond between two existing atoms (default order 1.0).
     pub fn add_bond(&mut self, a: AtomId, b: AtomId) -> Result<BondId, MolRsError> {
         let bid = self.graph.add_relation(self.bond, &[a, b])?;
-        self.graph
-            .get_relation_mut(self.bond, bid)?
-            .props
-            .insert("order".to_owned(), PropValue::F64(1.0));
+        self.graph.set_relation_prop(self.bond, bid, "order", 1.0)?;
         Ok(bid)
     }
 
@@ -169,18 +166,23 @@ impl Atomistic {
         self.graph.remove_relation(self.bond, id)
     }
 
-    /// Get a reference to a bond.
-    pub fn get_bond(&self, id: BondId) -> Result<&Bond, MolRsError> {
+    /// Materialize a bond (endpoints + properties).
+    pub fn get_bond(&self, id: BondId) -> Result<Bond, MolRsError> {
         self.graph.get_relation(self.bond, id)
     }
 
-    /// Get a mutable reference to a bond.
-    pub fn get_bond_mut(&mut self, id: BondId) -> Result<&mut Bond, MolRsError> {
-        self.graph.get_relation_mut(self.bond, id)
+    /// Set a single property on a bond.
+    pub fn set_bond_prop(
+        &mut self,
+        id: BondId,
+        key: &str,
+        val: impl Into<PropValue>,
+    ) -> Result<(), MolRsError> {
+        self.graph.set_relation_prop(self.bond, id, key, val)
     }
 
-    /// Iterate over all `(BondId, &Bond)` pairs.
-    pub fn bonds(&self) -> impl Iterator<Item = (BondId, &Bond)> {
+    /// Iterate over all `(BondId, Bond)` pairs (each materialized).
+    pub fn bonds(&self) -> impl Iterator<Item = (BondId, Bond)> + '_ {
         self.graph.relations(self.bond)
     }
 
@@ -221,18 +223,23 @@ impl Atomistic {
         self.graph.remove_relation(self.angle, id)
     }
 
-    /// Get a reference to an angle.
-    pub fn get_angle(&self, id: AngleId) -> Result<&Angle, MolRsError> {
+    /// Materialize an angle (endpoints + properties).
+    pub fn get_angle(&self, id: AngleId) -> Result<Angle, MolRsError> {
         self.graph.get_relation(self.angle, id)
     }
 
-    /// Get a mutable reference to an angle.
-    pub fn get_angle_mut(&mut self, id: AngleId) -> Result<&mut Angle, MolRsError> {
-        self.graph.get_relation_mut(self.angle, id)
+    /// Set a single property on an angle.
+    pub fn set_angle_prop(
+        &mut self,
+        id: AngleId,
+        key: &str,
+        val: impl Into<PropValue>,
+    ) -> Result<(), MolRsError> {
+        self.graph.set_relation_prop(self.angle, id, key, val)
     }
 
-    /// Iterate over all `(AngleId, &Angle)` pairs.
-    pub fn angles(&self) -> impl Iterator<Item = (AngleId, &Angle)> {
+    /// Iterate over all `(AngleId, Angle)` pairs (each materialized).
+    pub fn angles(&self) -> impl Iterator<Item = (AngleId, Angle)> + '_ {
         self.graph.relations(self.angle)
     }
 
@@ -259,18 +266,23 @@ impl Atomistic {
         self.graph.remove_relation(self.dihedral, id)
     }
 
-    /// Get a reference to a dihedral.
-    pub fn get_dihedral(&self, id: DihedralId) -> Result<&Dihedral, MolRsError> {
+    /// Materialize a dihedral (endpoints + properties).
+    pub fn get_dihedral(&self, id: DihedralId) -> Result<Dihedral, MolRsError> {
         self.graph.get_relation(self.dihedral, id)
     }
 
-    /// Get a mutable reference to a dihedral.
-    pub fn get_dihedral_mut(&mut self, id: DihedralId) -> Result<&mut Dihedral, MolRsError> {
-        self.graph.get_relation_mut(self.dihedral, id)
+    /// Set a single property on a dihedral.
+    pub fn set_dihedral_prop(
+        &mut self,
+        id: DihedralId,
+        key: &str,
+        val: impl Into<PropValue>,
+    ) -> Result<(), MolRsError> {
+        self.graph.set_relation_prop(self.dihedral, id, key, val)
     }
 
-    /// Iterate over all `(DihedralId, &Dihedral)` pairs.
-    pub fn dihedrals(&self) -> impl Iterator<Item = (DihedralId, &Dihedral)> {
+    /// Iterate over all `(DihedralId, Dihedral)` pairs (each materialized).
+    pub fn dihedrals(&self) -> impl Iterator<Item = (DihedralId, Dihedral)> + '_ {
         self.graph.relations(self.dihedral)
     }
 
@@ -297,18 +309,23 @@ impl Atomistic {
         self.graph.remove_relation(self.improper, id)
     }
 
-    /// Get a reference to an improper.
-    pub fn get_improper(&self, id: ImproperId) -> Result<&Improper, MolRsError> {
+    /// Materialize an improper (endpoints + properties).
+    pub fn get_improper(&self, id: ImproperId) -> Result<Improper, MolRsError> {
         self.graph.get_relation(self.improper, id)
     }
 
-    /// Get a mutable reference to an improper.
-    pub fn get_improper_mut(&mut self, id: ImproperId) -> Result<&mut Improper, MolRsError> {
-        self.graph.get_relation_mut(self.improper, id)
+    /// Set a single property on an improper.
+    pub fn set_improper_prop(
+        &mut self,
+        id: ImproperId,
+        key: &str,
+        val: impl Into<PropValue>,
+    ) -> Result<(), MolRsError> {
+        self.graph.set_relation_prop(self.improper, id, key, val)
     }
 
-    /// Iterate over all `(ImproperId, &Improper)` pairs.
-    pub fn impropers(&self) -> impl Iterator<Item = (ImproperId, &Improper)> {
+    /// Iterate over all `(ImproperId, Improper)` pairs (each materialized).
+    pub fn impropers(&self) -> impl Iterator<Item = (ImproperId, Improper)> + '_ {
         self.graph.relations(self.improper)
     }
 

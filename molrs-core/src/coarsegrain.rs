@@ -110,13 +110,13 @@ impl CoarseGrain {
         self.graph.add_relation(self.bond, &[a, b])
     }
 
-    /// Get a reference to a CG bond.
-    pub fn get_bond(&self, id: BondId) -> Result<&Bond, MolRsError> {
+    /// Materialize a CG bond (endpoints + properties).
+    pub fn get_bond(&self, id: BondId) -> Result<Bond, MolRsError> {
         self.graph.get_relation(self.bond, id)
     }
 
-    /// Iterate over all `(BondId, &Bond)` pairs.
-    pub fn bonds(&self) -> impl Iterator<Item = (BondId, &Bond)> {
+    /// Iterate over all `(BondId, Bond)` pairs (each materialized).
+    pub fn bonds(&self) -> impl Iterator<Item = (BondId, Bond)> + '_ {
         self.graph.relations(self.bond)
     }
 

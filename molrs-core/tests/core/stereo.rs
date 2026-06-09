@@ -10,10 +10,8 @@ fn atom_at(sym: &str, x: f64, y: f64, z: f64) -> Atom {
 }
 
 fn add_double_bond(g: &mut Atomistic, a: AtomId, b: AtomId) {
-    if let Ok(bid) = g.add_bond(a, b)
-        && let Ok(bnd) = g.get_bond_mut(bid)
-    {
-        bnd.props.insert("order".to_string(), PropValue::F64(2.0));
+    if let Ok(bid) = g.add_bond(a, b) {
+        let _ = g.set_bond_prop(bid, "order", PropValue::F64(2.0));
     }
 }
 

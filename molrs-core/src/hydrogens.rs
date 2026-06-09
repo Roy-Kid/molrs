@@ -59,10 +59,8 @@ pub fn add_hydrogens(mol: &Atomistic) -> Atomistic {
             h.set("element", "H");
             h.set("mass", 1.008_f64);
             let h_id = new_mol.add_atom(h);
-            if let Ok(bid) = new_mol.add_bond(heavy_id, h_id)
-                && let Ok(bond) = new_mol.get_bond_mut(bid)
-            {
-                bond.props.insert("order".to_string(), 1.0_f64.into());
+            if let Ok(bid) = new_mol.add_bond(heavy_id, h_id) {
+                let _ = new_mol.set_bond_prop(bid, "order", 1.0_f64);
             }
         }
     }
@@ -209,11 +207,8 @@ mod tests {
     }
 
     fn bond_with_order(mol: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
-        if let Ok(bid) = mol.add_bond(a, b)
-            && let Ok(bond) = mol.get_bond_mut(bid)
-        {
-            bond.props
-                .insert("order".to_string(), PropValue::F64(order));
+        if let Ok(bid) = mol.add_bond(a, b) {
+            let _ = mol.set_bond_prop(bid, "order", PropValue::F64(order));
         }
     }
 

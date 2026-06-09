@@ -168,13 +168,12 @@ fn more_electronegative(za: u8, zb: u8) -> bool {
 /// perception idempotent — re-running it sees the original integer orders, not
 /// the aromatic `1.5` written by a prior call.
 fn bond_order(mol: &Atomistic, bid: BondId) -> f64 {
-    let props = match mol.get_bond(bid) {
-        Ok(b) => &b.props,
-        Err(_) => return 1.0,
+    let Ok(b) = mol.get_bond(bid) else {
+        return 1.0;
     };
-    props
+    b.props
         .get("kekule_order")
-        .or_else(|| props.get("order"))
+        .or_else(|| b.props.get("order"))
         .and_then(|v| v.as_f64())
         .unwrap_or(1.0)
 }
@@ -641,9 +640,7 @@ pub fn perceive_aromaticity(mol: &mut Atomistic) -> usize {
         })
         .collect();
     for (bid, o) in snapshot {
-        if let Ok(b) = mol.get_bond_mut(bid) {
-            b.props.insert("kekule_order".into(), PropValue::F64(o));
-        }
+        let _ = mol.set_bond_prop(bid, "kekule_order", PropValue::F64(o));
     }
 
     let rings_info = find_rings(mol);
@@ -707,13 +704,11 @@ pub fn perceive_aromaticity(mol: &mut Atomistic) -> usize {
     let all_bond_ids: Vec<BondId> = mol.bonds().map(|(id, _)| id).collect();
     for bid in all_bond_ids {
         if aromatic_bonds.contains(&bid) {
-            if let Ok(bond) = mol.get_bond_mut(bid) {
-                bond.props.insert("order".into(), PropValue::F64(1.5));
-                bond.props.insert("is_aromatic".into(), PropValue::Int(1));
-            }
-        } else if let Ok(bond) = mol.get_bond_mut(bid) {
+            let _ = mol.set_bond_prop(bid, "order", PropValue::F64(1.5));
+            let _ = mol.set_bond_prop(bid, "is_aromatic", PropValue::Int(1));
+        } else {
             // ensure non-aromatic bonds don't keep a stale aromatic flag
-            bond.props.insert("is_aromatic".into(), PropValue::Int(0));
+            let _ = mol.set_bond_prop(bid, "is_aromatic", PropValue::Int(0));
         }
     }
 
@@ -734,10 +729,8 @@ mod tests {
         for i in 0..6 {
             let bid = g.add_bond(c[i], c[(i + 1) % 6]).unwrap();
             let order = if i % 2 == 0 { 2.0 } else { 1.0 };
-            g.get_bond_mut(bid)
-                .unwrap()
-                .props
-                .insert("order".into(), PropValue::F64(order));
+            g.set_bond_prop(bid, "order", PropValue::F64(order))
+                .unwrap();
         }
         // one explicit H per carbon
         for &ci in &c {

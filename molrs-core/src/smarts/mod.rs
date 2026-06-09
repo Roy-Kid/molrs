@@ -47,7 +47,7 @@
 //! let n = g.add_atom(Atom::xyz("N", 1.0, 1.0, 0.0));
 //! g.add_bond(c0, c1).unwrap();
 //! let bo = g.add_bond(c1, o).unwrap();
-//! g.get_bond_mut(bo).unwrap().props.insert("order".into(), PropValue::F64(2.0));
+//! g.set_bond_prop(bo, "order", PropValue::F64(2.0)).unwrap();
 //! g.add_bond(c1, n).unwrap();
 //!
 //! let pat = SmartsPattern::parse("[$([CX3]=[OX1]):1]~[*:2]").unwrap();

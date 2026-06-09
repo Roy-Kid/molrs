@@ -357,10 +357,8 @@ fn build_benzene() -> Atomistic {
 
     for i in 0..6 {
         let bid = mol.add_bond(carbons[i], carbons[(i + 1) % 6]).unwrap();
-        mol.get_bond_mut(bid)
-            .unwrap()
-            .props
-            .insert("order".into(), PropValue::F64(1.5));
+        mol.set_bond_prop(bid, "order", PropValue::F64(1.5))
+            .unwrap();
     }
 
     let rh = 2.48;
@@ -392,10 +390,8 @@ fn build_acetic_acid() -> Atomistic {
 
     let o_dbl = mol.add_atom(Atom::xyz("O", 2.1, 1.1, 0.0));
     let bid_co = mol.add_bond(c_co, o_dbl).unwrap();
-    mol.get_bond_mut(bid_co)
-        .unwrap()
-        .props
-        .insert("order".into(), PropValue::F64(2.0));
+    mol.set_bond_prop(bid_co, "order", PropValue::F64(2.0))
+        .unwrap();
 
     let o_oh = mol.add_atom(Atom::xyz("O", 2.1, -1.1, 0.0));
     mol.add_bond(c_co, o_oh).unwrap();

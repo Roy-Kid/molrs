@@ -294,10 +294,7 @@ impl CGMapping {
                     let bid = template.add_bond(new_a, new_b)?;
                     // Copy bond properties (e.g. order).
                     for (k, v) in &bond.props {
-                        template
-                            .get_bond_mut(bid)?
-                            .props
-                            .insert(k.clone(), v.clone());
+                        template.set_bond_prop(bid, k, v.clone())?;
                     }
                 }
             }

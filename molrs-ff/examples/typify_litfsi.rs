@@ -143,10 +143,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn add_bond(mol: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
     let bid = mol.add_bond(a, b).expect("add_bond");
     if (order - 1.0).abs() > 0.01 {
-        mol.get_bond_mut(bid)
-            .unwrap()
-            .props
-            .insert("order".to_string(), PropValue::F64(order));
+        mol.set_bond_prop(bid, "order", PropValue::F64(order))
+            .unwrap();
     }
 }
 

@@ -53,10 +53,8 @@ fn load_sdf(path: &PathBuf) -> (Atomistic, Vec<AtomId>) {
         let aj: usize = l[3..6].trim().parse::<usize>().unwrap() - 1;
         let order: f64 = l[6..9].trim().parse().unwrap_or(1.0);
         let bid = g.add_bond(ids[ai], ids[aj]).expect("add bond");
-        g.get_bond_mut(bid)
-            .unwrap()
-            .props
-            .insert("order".into(), PropValue::F64(order));
+        g.set_bond_prop(bid, "order", PropValue::F64(order))
+            .unwrap();
     }
     (g, ids)
 }
@@ -90,9 +88,9 @@ fn apply_flags(g: &mut Atomistic, ids: &[AtomId], meta: &Value) {
             })
             .map(|(bid, _)| bid)
             .expect("aromatic bond present");
-        let bond = g.get_bond_mut(bid).unwrap();
-        bond.props.insert("order".into(), PropValue::F64(1.5));
-        bond.props.insert("is_aromatic".into(), PropValue::Int(1));
+        g.set_bond_prop(bid, "order", PropValue::F64(1.5)).unwrap();
+        g.set_bond_prop(bid, "is_aromatic", PropValue::Int(1))
+            .unwrap();
     }
 }
 

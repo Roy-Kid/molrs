@@ -52,7 +52,7 @@
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
-use slotmap::{SlotMap, new_key_type};
+use slotmap::{SecondaryMap, SlotMap, new_key_type};
 use smallvec::SmallVec;
 
 use super::block::Block;
@@ -269,6 +269,27 @@ pub struct Relation {
     pub props: HashMap<String, PropValue>,
 }
 
+/// Storage for one relation kind: properties live in the aligned column table
+/// (the same [`EntityTable`] machinery as nodes — relations are entities with
+/// components), while the fixed-arity endpoints are kept structurally in a
+/// [`SecondaryMap`] keyed by the same [`RelationId`] the property table mints.
+#[derive(Debug, Clone)]
+struct RelationKind {
+    /// Property columns, keyed by `RelationId` (the kind's relation arena).
+    props: EntityTable<RelationId>,
+    /// Endpoint node handles per relation (length == kind arity).
+    endpoints: SecondaryMap<RelationId, SmallVec<[NodeId; 4]>>,
+}
+
+impl RelationKind {
+    fn new() -> Self {
+        Self {
+            props: EntityTable::new(),
+            endpoints: SecondaryMap::new(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Group (reserved containment axis — no behavior in this module)
 // ---------------------------------------------------------------------------
@@ -295,8 +316,8 @@ pub struct Group {
 pub struct MolGraph {
     /// Node entities + their components, stored as an aligned column table.
     nodes: EntityTable<NodeId>,
-    /// Relation arenas, indexed by `KindId.0`.
-    kinds: Vec<SlotMap<RelationId, Relation>>,
+    /// Relation kinds (props columns + endpoints), indexed by `KindId.0`.
+    kinds: Vec<RelationKind>,
     /// Arity of each kind, indexed by `KindId.0`.
     kind_arity: Vec<usize>,
     /// Registered name of each kind, indexed by `KindId.0` (used as the
@@ -349,7 +370,7 @@ impl MolGraph {
             return kid;
         }
         let kid = KindId(self.kinds.len() as u16);
-        self.kinds.push(SlotMap::with_key());
+        self.kinds.push(RelationKind::new());
         self.kind_arity.push(arity);
         self.kind_name.push(name.to_owned());
         self.name_to_kind.insert(name.to_owned(), kid);
@@ -406,13 +427,16 @@ impl MolGraph {
 
         for kid in 0..self.kinds.len() {
             let doomed: Vec<RelationId> = self.kinds[kid]
+                .endpoints
                 .iter()
-                .filter(|(_, r)| r.nodes.contains(&id))
+                .filter(|(_, eps)| eps.contains(&id))
                 .map(|(rid, _)| rid)
                 .collect();
             for rid in doomed {
                 self.detach_relation_from_adjacency(KindId(kid as u16), rid, Some(id));
-                self.kinds[kid].remove(rid);
+                let k = &mut self.kinds[kid];
+                k.props.despawn(rid);
+                k.endpoints.remove(rid);
             }
         }
         self.adjacency.remove(&id);
@@ -515,12 +539,8 @@ impl MolGraph {
             .into_iter()
             .flatten()
             .filter_map(move |&(kind, rid)| {
-                let rel = self.kinds[kind.0 as usize].get(rid)?;
-                let other = if rel.nodes[0] == id {
-                    rel.nodes[1]
-                } else {
-                    rel.nodes[0]
-                };
+                let eps = self.kinds[kind.0 as usize].endpoints.get(rid)?;
+                let other = if eps[0] == id { eps[1] } else { eps[0] };
                 Some((kind, rid, other))
             })
     }
@@ -555,10 +575,9 @@ impl MolGraph {
                 return Err(MolRsError::not_found("node", format!("NodeId {:?}", n)));
             }
         }
-        let rid = self.kinds[kidx].insert(Relation {
-            nodes: SmallVec::from_slice(nodes),
-            props: HashMap::new(),
-        });
+        let k = &mut self.kinds[kidx];
+        let rid = k.props.spawn();
+        k.endpoints.insert(rid, SmallVec::from_slice(nodes));
         if arity == 2 {
             self.adjacency
                 .entry(nodes[0])
@@ -572,47 +591,147 @@ impl MolGraph {
         Ok(rid)
     }
 
-    /// Get a reference to a relation by kind + handle.
-    pub fn get_relation(&self, kind: KindId, id: RelationId) -> Result<&Relation, MolRsError> {
+    /// Materialize a relation (endpoints + properties) by kind + handle.
+    pub fn get_relation(&self, kind: KindId, id: RelationId) -> Result<Relation, MolRsError> {
+        let k = self
+            .kinds
+            .get(kind.0 as usize)
+            .ok_or_else(|| MolRsError::not_found("kind", format!("KindId {:?}", kind)))?;
+        if !k.props.contains(id) {
+            return Err(MolRsError::not_found(
+                "relation",
+                format!("RelationId {:?}", id),
+            ));
+        }
+        Ok(self.read_relation(kind, id))
+    }
+
+    /// Endpoint node handles of a relation.
+    pub fn relation_nodes(
+        &self,
+        kind: KindId,
+        id: RelationId,
+    ) -> Result<SmallVec<[NodeId; 4]>, MolRsError> {
         self.kinds
             .get(kind.0 as usize)
-            .and_then(|arena| arena.get(id))
+            .and_then(|k| k.endpoints.get(id).cloned())
             .ok_or_else(|| MolRsError::not_found("relation", format!("RelationId {:?}", id)))
     }
 
-    /// Get a mutable reference to a relation by kind + handle.
-    pub fn get_relation_mut(
+    /// Set a single property on a relation.
+    pub fn set_relation_prop(
         &mut self,
         kind: KindId,
         id: RelationId,
-    ) -> Result<&mut Relation, MolRsError> {
-        self.kinds
+        key: &str,
+        val: impl Into<PropValue>,
+    ) -> Result<(), MolRsError> {
+        let k = self
+            .kinds
             .get_mut(kind.0 as usize)
-            .and_then(|arena| arena.get_mut(id))
-            .ok_or_else(|| MolRsError::not_found("relation", format!("RelationId {:?}", id)))
+            .ok_or_else(|| MolRsError::not_found("kind", format!("KindId {:?}", kind)))?;
+        if !k.props.contains(id) {
+            return Err(MolRsError::not_found(
+                "relation",
+                format!("RelationId {:?}", id),
+            ));
+        }
+        match val.into() {
+            PropValue::F64(v) => k.props.set_f64(id, key, v),
+            PropValue::Int(v) => k.props.set_i32(id, key, v),
+            PropValue::Str(s) => k.props.set_str(id, key, &s),
+        }
     }
 
-    /// Remove a relation by kind + handle, updating adjacency.
+    /// Clear a single property on a relation (no-op if absent).
+    pub fn clear_relation_prop(
+        &mut self,
+        kind: KindId,
+        id: RelationId,
+        key: &str,
+    ) -> Result<(), MolRsError> {
+        let k = self
+            .kinds
+            .get_mut(kind.0 as usize)
+            .ok_or_else(|| MolRsError::not_found("kind", format!("KindId {:?}", kind)))?;
+        k.props.clear(id, key)
+    }
+
+    /// Remove a relation by kind + handle, updating adjacency. Returns the
+    /// materialized relation.
     pub fn remove_relation(
         &mut self,
         kind: KindId,
         id: RelationId,
     ) -> Result<Relation, MolRsError> {
+        let exists = self
+            .kinds
+            .get(kind.0 as usize)
+            .is_some_and(|k| k.props.contains(id));
+        if !exists {
+            return Err(MolRsError::not_found(
+                "relation",
+                format!("RelationId {:?}", id),
+            ));
+        }
+        let rel = self.read_relation(kind, id);
         self.detach_relation_from_adjacency(kind, id, None);
-        self.kinds
-            .get_mut(kind.0 as usize)
-            .and_then(|arena| arena.remove(id))
-            .ok_or_else(|| MolRsError::not_found("relation", format!("RelationId {:?}", id)))
+        let k = &mut self.kinds[kind.0 as usize];
+        k.props.despawn(id);
+        k.endpoints.remove(id);
+        Ok(rel)
     }
 
-    /// Iterate over `(RelationId, &Relation)` for one kind.
-    pub fn relations(&self, kind: KindId) -> impl Iterator<Item = (RelationId, &Relation)> {
-        self.kinds[kind.0 as usize].iter()
+    /// Iterate over `(RelationId, Relation)` for one kind (each materialized).
+    pub fn relations(&self, kind: KindId) -> impl Iterator<Item = (RelationId, Relation)> + '_ {
+        let ids: Vec<RelationId> = self.kinds[kind.0 as usize].props.handles().collect();
+        ids.into_iter()
+            .map(move |rid| (rid, self.read_relation(kind, rid)))
+    }
+
+    /// Relation handles of a kind, in row order.
+    pub fn relation_ids(&self, kind: KindId) -> impl Iterator<Item = RelationId> + '_ {
+        self.kinds[kind.0 as usize].props.handles()
     }
 
     /// Number of relations of a kind.
     pub fn n_relations(&self, kind: KindId) -> usize {
-        self.kinds[kind.0 as usize].len()
+        self.kinds[kind.0 as usize].props.len()
+    }
+
+    /// Materialize a relation's endpoints + properties.
+    fn read_relation(&self, kind: KindId, id: RelationId) -> Relation {
+        let k = &self.kinds[kind.0 as usize];
+        let nodes = k.endpoints.get(id).cloned().unwrap_or_default();
+        let mut props = HashMap::new();
+        for (key, cell) in k.props.row_cells(id) {
+            let pv = match cell {
+                Cell::F64(v) => PropValue::F64(v),
+                Cell::I32(v) => PropValue::Int(v),
+                Cell::Str(s) => PropValue::Str(s.to_owned()),
+                Cell::Bool(_) => continue,
+            };
+            props.insert(key.to_owned(), pv);
+        }
+        Relation { nodes, props }
+    }
+
+    /// Write a property bag into a relation's columns.
+    fn write_relation_props(
+        &mut self,
+        kind: KindId,
+        id: RelationId,
+        props: &HashMap<String, PropValue>,
+    ) {
+        let k = &mut self.kinds[kind.0 as usize];
+        for (key, val) in props {
+            let r = match val {
+                PropValue::F64(v) => k.props.set_f64(id, key, *v),
+                PropValue::Int(v) => k.props.set_i32(id, key, *v),
+                PropValue::Str(s) => k.props.set_str(id, key, s),
+            };
+            let _ = r;
+        }
     }
 
     /// Remove an arity-2 relation from the adjacency lists of its endpoints.
@@ -627,8 +746,9 @@ impl MolGraph {
             return;
         }
         let endpoints: Option<[NodeId; 2]> = self.kinds[kind.0 as usize]
+            .endpoints
             .get(id)
-            .map(|r| [r.nodes[0], r.nodes[1]]);
+            .map(|eps| [eps[0], eps[1]]);
         if let Some(eps) = endpoints {
             for ep in eps {
                 if Some(ep) == skip {
@@ -666,10 +786,12 @@ impl MolGraph {
             let name = &other.kind_name[oidx];
             let arity = other.kind_arity[oidx];
             let self_kind = self.register_kind(name, arity);
-            for (_, rel) in other.kinds[oidx].iter() {
+            let orids: Vec<RelationId> = other.relation_ids(okid).collect();
+            for orid in orids {
+                let rel = other.read_relation(okid, orid);
                 let mapped: SmallVec<[NodeId; 4]> = rel.nodes.iter().map(|n| node_map[n]).collect();
                 if let Ok(rid) = self.add_relation(self_kind, &mapped) {
-                    self.kinds[self_kind.0 as usize][rid].props = rel.props.clone();
+                    self.write_relation_props(self_kind, rid, &rel.props);
                 }
             }
         }
@@ -728,66 +850,34 @@ impl MolGraph {
         // ---- one block per non-empty relation kind ----
         for kid in self.kind_ids() {
             let kidx = kid.0 as usize;
-            let arena = &self.kinds[kidx];
-            if arena.is_empty() {
+            let k = &self.kinds[kidx];
+            if k.props.is_empty() {
                 continue;
             }
             let arity = self.kind_arity[kidx];
+            // Relation row order: shared by the endpoint columns and the (already
+            // aligned, dense) property columns.
+            let rids: Vec<RelationId> = k.props.handles().collect();
             let mut block = Block::new();
 
             for pos in 0..arity {
-                let col: Vec<U> = arena
+                let col: Vec<U> = rids
                     .iter()
-                    .map(|(_, rel)| id_to_row[&rel.nodes[pos]] as U)
+                    .map(|rid| id_to_row[&k.endpoints[*rid][pos]] as U)
                     .collect();
                 let _ = block.insert(rel_col_name(pos), Array1::from_vec(col).into_dyn());
             }
 
-            let mut prop_keys: Vec<String> = {
-                let mut set = std::collections::BTreeSet::new();
-                for (_, rel) in arena.iter() {
-                    for k in rel.props.keys() {
-                        set.insert(k.clone());
-                    }
-                }
-                set.into_iter().collect()
-            };
+            // Property columns read straight from the column table.
+            let mut prop_keys: Vec<String> = k.props.columns().map(|s| s.to_owned()).collect();
             prop_keys.sort();
             for key in &prop_keys {
-                let first_val = arena.iter().filter_map(|(_, r)| r.props.get(key)).next();
-                match first_val {
-                    Some(PropValue::F64(_)) => {
-                        let col: Vec<F> = arena
-                            .iter()
-                            .map(|(_, r)| match r.props.get(key) {
-                                Some(PropValue::F64(v)) => *v as F,
-                                Some(PropValue::Int(v)) => *v as F,
-                                _ => 0.0,
-                            })
-                            .collect();
-                        let _ = block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
-                    }
-                    Some(PropValue::Int(_)) => {
-                        let col: Vec<I> = arena
-                            .iter()
-                            .map(|(_, r)| match r.props.get(key) {
-                                Some(PropValue::Int(v)) => *v,
-                                _ => 0,
-                            })
-                            .collect();
-                        let _ = block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
-                    }
-                    Some(PropValue::Str(_)) => {
-                        let col: Vec<String> = arena
-                            .iter()
-                            .map(|(_, r)| match r.props.get(key) {
-                                Some(PropValue::Str(s)) => s.clone(),
-                                _ => String::new(),
-                            })
-                            .collect();
-                        let _ = block.insert(key.as_str(), Array1::from_vec(col).into_dyn());
-                    }
-                    _ => {}
+                if let Ok((data, _)) = k.props.column_f64(key) {
+                    let _ = block.insert(key.as_str(), Array1::from_vec(data.to_vec()).into_dyn());
+                } else if let Ok((data, _)) = k.props.column_i32(key) {
+                    let _ = block.insert(key.as_str(), Array1::from_vec(data.to_vec()).into_dyn());
+                } else if let Ok((data, _)) = k.props.column_str(key) {
+                    let _ = block.insert(key.as_str(), Array1::from_vec(data.to_vec()).into_dyn());
                 }
             }
 
@@ -890,9 +980,7 @@ impl MolGraph {
                 if let Ok(rid) = self.add_relation(kid, &nodes) {
                     for (k, arr) in &prop_f {
                         #[allow(clippy::unnecessary_cast)]
-                        self.kinds[kid.0 as usize][rid]
-                            .props
-                            .insert(k.clone(), PropValue::F64(arr[[row]] as f64));
+                        let _ = self.set_relation_prop(kid, rid, k, arr[[row]] as f64);
                     }
                 }
             }

@@ -18,10 +18,8 @@ fn atom(sym: &str) -> Atom {
 }
 
 fn bond(mol: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
-    if let Ok(bid) = mol.add_bond(a, b)
-        && let Ok(bd) = mol.get_bond_mut(bid)
-    {
-        bd.props.insert("order".to_string(), PropValue::F64(order));
+    if let Ok(bid) = mol.add_bond(a, b) {
+        let _ = mol.set_bond_prop(bid, "order", PropValue::F64(order));
     }
 }
 

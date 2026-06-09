@@ -298,10 +298,8 @@ mod tests {
     }
 
     fn add_double_bond(mol: &mut Atomistic, a: AtomId, b: AtomId) {
-        if let Ok(bid) = mol.add_bond(a, b)
-            && let Ok(bond) = mol.get_bond_mut(bid)
-        {
-            bond.props.insert("order".to_string(), PropValue::F64(2.0));
+        if let Ok(bid) = mol.add_bond(a, b) {
+            let _ = mol.set_bond_prop(bid, "order", PropValue::F64(2.0));
         }
     }
 

@@ -66,10 +66,8 @@ fn load_sdf(path: &Path) -> Atomistic {
         let j: usize = line[3..6].trim().parse::<usize>().expect("bond j") - 1;
         let order: f64 = line[6..9].trim().parse().expect("bond order");
         let bid = g.add_bond(ids[i], ids[j]).expect("add bond");
-        g.get_bond_mut(bid)
-            .expect("bond")
-            .props
-            .insert("order".to_string(), PropValue::F64(order));
+        g.set_bond_prop(bid, "order", PropValue::F64(order))
+            .expect("bond");
     }
     // M  CHG  n   a1 c1 a2 c2 ...   (a* are 1-based atom indices)
     for line in &lines[4 + n_atoms + n_bonds..] {
@@ -221,10 +219,8 @@ fn atom_with_charge(sym: &str, charge: i32) -> Atom {
 
 fn add_bond_order(g: &mut Atomistic, i: AtomId, j: AtomId, order: f64) {
     let bid = g.add_bond(i, j).expect("add bond");
-    g.get_bond_mut(bid)
-        .expect("bond")
-        .props
-        .insert("order".to_string(), PropValue::F64(order));
+    g.set_bond_prop(bid, "order", PropValue::F64(order))
+        .expect("bond");
 }
 
 #[test]

@@ -33,10 +33,8 @@ fn build_benzene() -> Atomistic {
     let mut bond_ids = Vec::new();
     for i in 0..6 {
         let bid = mol.add_bond(carbons[i], carbons[(i + 1) % 6]).unwrap();
-        mol.get_bond_mut(bid)
-            .expect("bond just added")
-            .props
-            .insert("order".into(), PropValue::F64(1.5));
+        mol.set_bond_prop(bid, "order", PropValue::F64(1.5))
+            .expect("bond just added");
         bond_ids.push(bid);
     }
 
@@ -51,10 +49,8 @@ fn build_benzene() -> Atomistic {
     for (i, &a) in angles_rad.iter().enumerate() {
         let h = mol.add_atom(Atom::xyz("H", r_h * a.cos(), r_h * a.sin(), 0.0));
         let bid = mol.add_bond(carbons[i], h).expect("add C-H bond");
-        mol.get_bond_mut(bid)
-            .expect("bond just added")
-            .props
-            .insert("order".into(), PropValue::F64(1.0));
+        mol.set_bond_prop(bid, "order", PropValue::F64(1.0))
+            .expect("bond just added");
     }
 
     mol

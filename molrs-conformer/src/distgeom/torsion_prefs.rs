@@ -150,10 +150,7 @@ fn aromatic_working_copy(mol: &Atomistic, p: &Perceived) -> Atomistic {
             continue;
         };
         if p.is_aromatic_bond(ia, ib) {
-            if let Ok(bond) = g.get_bond_mut(bid) {
-                bond.props
-                    .insert("is_aromatic".to_string(), PropValue::Int(1));
-            }
+            let _ = g.set_bond_prop(bid, "is_aromatic", PropValue::Int(1));
         }
     }
     g

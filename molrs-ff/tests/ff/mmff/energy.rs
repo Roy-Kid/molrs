@@ -53,10 +53,8 @@ fn load_sdf(path: &Path) -> Atomistic {
         let j: usize = line[3..6].trim().parse::<usize>().expect("bond j") - 1;
         let order: f64 = line[6..9].trim().parse().expect("bond order");
         let bid = g.add_bond(ids[i], ids[j]).expect("add bond");
-        g.get_bond_mut(bid)
-            .expect("bond")
-            .props
-            .insert("order".to_string(), PropValue::F64(order));
+        g.set_bond_prop(bid, "order", PropValue::F64(order))
+            .expect("bond");
     }
     for line in &lines[4 + n_atoms + n_bonds..] {
         let t = line.trim_end();

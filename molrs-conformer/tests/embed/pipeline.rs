@@ -9,8 +9,8 @@ use molrs_conformer::{Conformer, ConformerAlgorithm, ConformerOptions, ForceFiel
 
 fn bond(g: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
     let bid = g.add_bond(a, b).expect("add bond");
-    let bnd = g.get_bond_mut(bid).expect("bond mutable");
-    bnd.props.insert("order".to_string(), PropValue::F64(order));
+    g.set_bond_prop(bid, "order", PropValue::F64(order))
+        .expect("set order");
 }
 
 fn coords_of(g: &Atomistic) -> Vec<[f64; 3]> {

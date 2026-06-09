@@ -74,14 +74,10 @@ fn water() {
     println!("  n_angles = {}", mol.n_angles());
 
     // Set bond order
-    mol.get_bond_mut(b1)
-        .expect("bond b1")
-        .props
-        .insert("order".into(), PropValue::F64(1.0));
-    mol.get_bond_mut(b2)
-        .expect("bond b2")
-        .props
-        .insert("order".into(), PropValue::F64(1.0));
+    mol.set_bond_prop(b1, "order", PropValue::F64(1.0))
+        .expect("bond b1");
+    mol.set_bond_prop(b2, "order", PropValue::F64(1.0))
+        .expect("bond b2");
 
     // --- 4. Iteration ---
     println!("\nAll atoms:");
