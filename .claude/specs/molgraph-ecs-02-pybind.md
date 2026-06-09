@@ -51,15 +51,27 @@ supersedes: molgraph-views-01-stable-handles
 
 PyO3 模块函数（非方法）：`molrs.perceive_aromaticity(mol)`、`molrs.find_rings(mol)`、
 `molrs.add_hydrogens(mol)`、`molrs.compute_gasteiger_charges(mol)`、`molrs.translate(mol, delta)`、
-`molrs.rotate(mol, axis, angle, about=None)`、`molrs.to_frame(mol) -> Frame`、`molrs.from_frame(frame)`。
-转发到 01 的 core 自由函数。**类上无算法方法**（与 01 数据/行为分离一致）。
+`molrs.rotate(mol, axis, angle, about=None)`。转发到 01 的 core 自由函数。**类上无通用算法方法**。
 
-### 3.3 叶子 + adopt
+**`to_frame`/`from_frame` 不是自由函数**——它们是**领域转换**(知道 atoms/bonds/… 块),由叶子
+`PyAtomistic`/`PyCoarseGrain` **作为方法**提供(§3.3),与 core `Atomistic::to_frame` 对齐。
 
-- `PyAtomistic`/`PyCoarseGrain` `#[pyclass(extends=PyGraph, subclass)]`：`#[new]` 经 core 叶子注册
-  领域 kind；领域 builder 暴露为模块函数或叶子薄方法（`molrs.add_atom(mol, "C")` 风格，与 system 一致）。
-- `adopt(dst, src)`：core `adopt` 的 Python 入口，零拷贝接管 `Conformer`/SMILES 产出图（取代旧逐节点
-  深拷贝）。`subclass` 修复当前「`class S(molrs.Atomistic)` → TypeError: not an acceptable base type」。
+### 3.3 叶子 = 持有 core 叶子（**绝不** base→subclass 转换）
+
+**铁律(评审):一个 `MolGraph` 不能被「物化成」一个 `Atomistic`** —— 那是父类→子类的反模式
+(同 molpy 已删的 `from_molrs_graph`)。`Atomistic` 从 `Atomistic::new()` 起就是 `Atomistic`(注册自己的
+kind、拥有自己的图);**不存在 `from_molgraph` 这种转换**。
+
+- `PyAtomistic` **直接持有一个 core `molrs::Atomistic`**(`PyCoarseGrain` 持 `CoarseGrain`),从构造起
+  就是叶子;`PyGraph` 持 `MolGraph`。
+- **`to_frame(&self)` = `self.inner.to_frame()`**(叶子自己的、core 已公开的方法,零转换);
+  `from_frame(frame)` = `Atomistic::new()` + 读帧(注册自己的 kind 后回读 bonds/… 块),是**叶子构造器**,
+  不是把 MolGraph 转成 Atomistic。
+- 通用 graph 面(entity/component/relation)在叶子上经 `self.inner` Deref 到 `MolGraph` 暴露;Python
+  `issubclass(Atomistic, Graph)` 经 PyO3 继承达成(机制:叶子持数据 + 共享通用面;实现时定一处数据槽,
+  不让两层各持一份图)。`subclass` 修复 `class S(molrs.Atomistic)` 的 TypeError。
+- `adopt(dst, src)`:零拷贝**移动**单图存储进 dst(不是转换、不是逐节点拷贝),接管 `Conformer`/SMILES
+  产出。core 需补 `MolGraph`/叶子的 `adopt`(move 语义)。
 
 ### 3.4 字段约定到 Python
 
