@@ -197,6 +197,20 @@ macro_rules! graph_world_impl {
                 Ok(nodes.iter().map(|&n| node_to_u64(n)).collect())
             }
 
+            /// Relations of `kind` incident to node `nh`, as
+            /// `(relation_handle, other_node_handle)` pairs, via the adjacency
+            /// index (O(degree)). Only arity-2 kinds are tracked in adjacency.
+            fn incident_relations(&self, nh: u64, kind: &str) -> PyResult<Vec<(u64, u64)>> {
+                let kid = kind_id_checked(self.mol(), kind)?;
+                let nid = node_from_u64(nh);
+                Ok(self
+                    .mol()
+                    .neighbor_relations(nid)
+                    .filter(|(k, _, _)| *k == kid)
+                    .map(|(_, rid, other)| (relation_to_u64(rid), node_to_u64(other)))
+                    .collect())
+            }
+
             /// Set a property on relation `rh` of `kind`.
             fn set_relation_prop(
                 &mut self,
