@@ -16,7 +16,9 @@
 
 use std::sync::Arc;
 
-use molrs::block::{Block as CoreBlock, BlockDtype, Column, ColumnHolder};
+use molrs::block::{
+    Block as CoreBlock, BlockDtype, Column, ColumnHolder, block_from_csv, block_to_csv,
+};
 use molrs::types::{F, I, U};
 use molrs_ffi::BlockRef;
 use ndarray::{Array1, ArrayD, IxDyn};
@@ -105,6 +107,25 @@ impl PyBlock {
     #[new]
     fn new() -> PyResult<Self> {
         Self::from_core_block(CoreBlock::new())
+    }
+
+    /// Build a Block from CSV ``text`` (hand-written parser, no dependency).
+    ///
+    /// Each column's dtype is inferred int → float → str. When ``header`` is
+    /// given the text is treated as headerless and those names are used;
+    /// otherwise the first non-empty line provides the column names.
+    #[staticmethod]
+    #[pyo3(signature = (text, delimiter = ',', header = None))]
+    fn from_csv(text: &str, delimiter: char, header: Option<Vec<String>>) -> PyResult<Self> {
+        let block =
+            block_from_csv(text, delimiter, header.as_deref()).map_err(PyValueError::new_err)?;
+        Self::from_core_block(block)
+    }
+
+    /// Serialize the block to CSV text (inverse of :meth:`from_csv`).
+    #[pyo3(signature = (delimiter = ',', header = true))]
+    fn to_csv(&self, delimiter: char, header: bool) -> PyResult<String> {
+        self.with_block(|b| block_to_csv(b, delimiter, header))
     }
 
     /// Insert a numpy array (or list of strings) as a named column.

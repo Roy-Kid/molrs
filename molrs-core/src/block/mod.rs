@@ -28,6 +28,7 @@
 //! ```
 
 mod column;
+mod csv;
 mod dtype;
 mod error;
 
@@ -39,6 +40,7 @@ pub use access::{BlockAccess, ColumnAccess};
 pub use block_view::BlockView;
 pub use column::{Column, ColumnHolder};
 pub use column_view::ColumnView;
+pub use csv::{block_from_csv, block_to_csv};
 pub use dtype::{BlockDtype, DType};
 pub use error::BlockError;
 

@@ -85,6 +85,13 @@ from .molrs import (
     signal_frequency_grid,
 )
 
+# Rich Python Frame/Block layer (pandas-style API; CSV engine in Rust on the
+# core Block). Accessible as ``molrs.frame.Block`` / ``molrs.frame.Frame``. It
+# does NOT yet shadow the top-level ``molrs.Block`` / ``molrs.Frame`` — that
+# cutover happens once molpy stops subclassing the core (chain spec 04), so this
+# spec stays non-breaking for molpy.
+from . import frame  # noqa: F401
+
 from . import io  # molpy-compatible I/O facade (read_lammps_data, …)
 from . import compute  # analysis subpackage — molrs.compute.{density,order,…}
 from . import signal
