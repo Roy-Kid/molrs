@@ -43,10 +43,12 @@ from .molrs import (
     read_gro as _read_gro,
     read_lammps as _read_lammps,
     read_pdb as _read_pdb,
+    read_pdb_trajectory as _read_pdb_trajectory,
     read_xyz as _read_xyz,
     write_gro as _write_gro,
     write_lammps as _write_lammps,
     write_pdb as _write_pdb,
+    write_pdb_trajectory as _write_pdb_trajectory,
     write_xyz as _write_xyz,
 )
 
@@ -104,6 +106,18 @@ def read_pdb(file: str | PathLike[str], frame: Any = None) -> Any:
     return result
 
 
+def read_pdb_trajectory(file: str | PathLike[str]) -> list[Any]:
+    """Read every MODEL of a PDB file as a trajectory (one Frame per MODEL).
+
+    A single-model (or MODEL-less) PDB returns a one-element list. Each frame
+    is canonicalized like :func:`read_pdb`.
+    """
+    frames = _read_pdb_trajectory(str(file))
+    for frame in frames:
+        _pdb_fmt.canonicalize_frame(frame)
+    return frames
+
+
 def read_xyz(file: str | PathLike[str], frame: Any = None) -> Any:
     """Read an XYZ file. molpy-compatible signature.
 
@@ -159,6 +173,18 @@ def write_pdb(file: str | PathLike[str], frame: Any) -> None:
     """Write a PDB file.  Localises *frame* in-place before writing."""
     _pdb_fmt.localize_frame(frame)
     _write_pdb(str(file), frame)
+
+
+def write_pdb_trajectory(file: str | PathLike[str], frames: Any) -> None:
+    """Write a list of Frames as a multi-MODEL PDB trajectory.
+
+    Each frame becomes one ``MODEL``/``ENDMDL`` block. Localises each frame
+    in-place before writing (same convention as :func:`write_pdb`).
+    """
+    frames = list(frames)
+    for frame in frames:
+        _pdb_fmt.localize_frame(frame)
+    _write_pdb_trajectory(str(file), frames)
 
 
 def write_xyz(file: str | PathLike[str], frame: Any) -> None:
@@ -347,10 +373,12 @@ def read_dcd_trajectory(file: PathInput | Sequence[PathInput]) -> TrajectoryRead
 __all__ = [
     "read_lammps_data",
     "read_pdb",
+    "read_pdb_trajectory",
     "read_xyz",
     "read_gro",
     "write_lammps_data",
     "write_pdb",
+    "write_pdb_trajectory",
     "write_xyz",
     "write_gro",
     "TrajectoryReader",

@@ -17,7 +17,7 @@ exclude = ["molrs-ffi"]
 resolver = "3"
 
 [workspace.package]
-version = "0.0.17"
+version = "0.0.18"
 edition = "2024"
 rust-version = "1.85"
 license = "BSD-3-Clause"
@@ -29,13 +29,13 @@ homepage = "https://github.com/MolCrafts/molrs"
 # workspace members (e.g. `use molrs::Frame`). The `package =` field points to
 # the actual crates.io name.
 [workspace.dependencies]
-molrs         = { path = "molrs-core",    version = "0.0.17", package = "molcrafts-molrs-core", default-features = false }
-molrs_io      = { path = "molrs-io",      version = "0.0.17", package = "molcrafts-molrs-io" }
-molrs_compute = { path = "molrs-compute", version = "0.0.17", package = "molcrafts-molrs-compute" }
-molrs_ff      = { path = "molrs-ff",      version = "0.0.17", package = "molcrafts-molrs-ff" }
-molrs_conformer = { path = "molrs-conformer", version = "0.0.17", package = "molcrafts-molrs-conformer" }
-molrs_cxxapi  = { path = "molrs-cxxapi",  version = "0.0.17", package = "molcrafts-molrs-cxxapi" }
-molrs_signal  = { path = "molrs-signal", version = "0.0.17", package = "molcrafts-molrs-signal" }
+molrs         = { path = "molrs-core",    version = "0.0.18", package = "molcrafts-molrs-core", default-features = false }
+molrs_io      = { path = "molrs-io",      version = "0.0.18", package = "molcrafts-molrs-io" }
+molrs_compute = { path = "molrs-compute", version = "0.0.18", package = "molcrafts-molrs-compute" }
+molrs_ff      = { path = "molrs-ff",      version = "0.0.18", package = "molcrafts-molrs-ff" }
+molrs_conformer = { path = "molrs-conformer", version = "0.0.18", package = "molcrafts-molrs-conformer" }
+molrs_cxxapi  = { path = "molrs-cxxapi",  version = "0.0.18", package = "molcrafts-molrs-cxxapi" }
+molrs_signal  = { path = "molrs-signal", version = "0.0.18", package = "molcrafts-molrs-signal" }
 
 [profile.release]
 lto = "thin"

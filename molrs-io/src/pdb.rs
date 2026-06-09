@@ -615,11 +615,27 @@ impl<W: Write> PDBWriter<W> {
     }
 }
 
-/// Write a single frame in PDB format.
-///
-/// Accepts any type implementing [`FrameAccess`], including both [`Frame`] and
-/// [`FrameView`](crate::frame_view::FrameView).
-pub fn write_pdb_frame<W: Write>(writer: &mut W, frame: &impl FrameAccess) -> std::io::Result<()> {
+/// Write the `CRYST1` record from the frame's simulation box, if any.
+fn write_cryst1<W: Write>(writer: &mut W, frame: &impl FrameAccess) -> std::io::Result<()> {
+    if let Some(simbox) = frame.simbox_ref() {
+        let lengths = simbox.lengths();
+        writeln!(
+            writer,
+            "CRYST1{:9.3}{:9.3}{:9.3}{:7.2}{:7.2}{:7.2} {:<11}{:>4}",
+            lengths[0], lengths[1], lengths[2], 90.00, 90.00, 90.00, "P 1", 1
+        )?;
+    }
+    Ok(())
+}
+
+/// Write `ATOM` records (PDB v3.3 column layout) plus `CONECT` records derived
+/// from the `bonds` block. Emits neither `CRYST1` nor a frame terminator
+/// (`END`/`ENDMDL`) — callers wrap as needed (see [`write_pdb_frame`] and
+/// [`write_pdb_traj`]).
+fn write_atom_conect_records<W: Write>(
+    writer: &mut W,
+    frame: &impl FrameAccess,
+) -> std::io::Result<()> {
     let x = frame
         .get_float("atoms", "x")
         .ok_or_else(|| err_mapper("Missing 'x' column"))?;
@@ -645,49 +661,89 @@ pub fn write_pdb_frame<W: Write>(writer: &mut W, frame: &impl FrameAccess) -> st
         .as_slice_memory_order()
         .ok_or_else(|| err_mapper("Non-contiguous 'z' column"))?;
 
-    let elements_view = frame.get_string("atoms", "element");
-    let elements_owned: Vec<String> = elements_view
+    // Optional per-atom string columns (snake_case, as emitted by the reader).
+    let owned_str = |col: &str| -> Vec<String> {
+        frame
+            .get_string("atoms", col)
+            .as_ref()
+            .and_then(|arr| arr.as_slice().map(|s| s.to_vec()))
+            .unwrap_or_default()
+    };
+    let names = owned_str("name");
+    let res_names = owned_str("res_name");
+    let chain_ids = owned_str("chain_id");
+    let elements = owned_str("element");
+
+    let res_seqs: Vec<I> = frame
+        .get_int("atoms", "res_seq")
         .as_ref()
         .and_then(|arr| arr.as_slice().map(|s| s.to_vec()))
         .unwrap_or_default();
 
-    let ids_view = frame.get_uint("atoms", "id");
-    let ids_owned: Vec<U> = ids_view
+    let ids: Vec<U> = frame
+        .get_uint("atoms", "id")
         .as_ref()
         .and_then(|arr| arr.as_slice().map(|s| s.to_vec()))
         .unwrap_or_default();
-    let has_ids = !ids_owned.is_empty();
-
-    // Write CRYST1 from SimBox if present
-    if let Some(simbox) = frame.simbox_ref() {
-        let lengths = simbox.lengths();
-        writeln!(
-            writer,
-            "CRYST1{:9.3}{:9.3}{:9.3}{:7.2}{:7.2}{:7.2} {:<11}{:>4}",
-            lengths[0], lengths[1], lengths[2], 90.00, 90.00, 90.00, "P 1", 1
-        )?;
-    }
+    let has_ids = !ids.is_empty();
 
     let mut serials = Vec::with_capacity(n);
     for i in 0..n {
-        let serial = if has_ids {
-            ids_owned[i] as usize
-        } else {
-            i + 1
-        };
+        let serial = if has_ids { ids[i] as usize } else { i + 1 };
         serials.push(serial);
-        let elem_raw = elements_owned
+
+        let elem_raw = elements
             .get(i)
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .unwrap_or("X");
-        let name = format!("{:<4}", elem_raw);
-        let elem_field = format!("{:>2}", elem_raw);
 
+        // Atom name (cols 13-16): single-char names are offset one column.
+        let name_raw = names
+            .get(i)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(elem_raw);
+        let name_field = if name_raw.chars().count() == 1 {
+            format!(" {:<3}", name_raw)
+        } else {
+            let truncated: String = name_raw.chars().take(4).collect();
+            format!("{:<4}", truncated)
+        };
+
+        let res_name: String = res_names
+            .get(i)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("UNK")
+            .chars()
+            .take(3)
+            .collect();
+
+        let chain = chain_ids
+            .get(i)
+            .and_then(|s| s.trim().chars().next())
+            .unwrap_or(' ');
+
+        let res_seq = res_seqs.get(i).copied().unwrap_or(1);
+
+        let elem_field: String = elem_raw.chars().take(2).collect();
+
+        // PDB v3.3 ATOM record. occupancy/tempFactor default to 1.00/0.00.
         writeln!(
             writer,
-            "ATOM  {:>5} {} MOL A{:>4}    {:>8.3}{:>8.3}{:>8.3}  1.00  0.00           {}",
-            serial, name, 1, x_slice[i], y_slice[i], z_slice[i], elem_field
+            "ATOM  {:>5} {} {:<3} {}{:>4}    {:>8.3}{:>8.3}{:>8.3}{:>6.2}{:>6.2}          {:>2}",
+            serial,
+            name_field,
+            res_name,
+            chain,
+            res_seq,
+            x_slice[i],
+            y_slice[i],
+            z_slice[i],
+            1.0_f64,
+            0.0_f64,
+            elem_field,
         )?;
     }
 
@@ -748,6 +804,37 @@ pub fn write_pdb_frame<W: Write>(writer: &mut W, frame: &impl FrameAccess) -> st
         }
     }
 
+    Ok(())
+}
+
+/// Write a single frame in PDB format (`CRYST1` + `ATOM`/`CONECT` + `END`).
+///
+/// Accepts any type implementing [`FrameAccess`], including both [`Frame`] and
+/// [`FrameView`](crate::frame_view::FrameView).
+pub fn write_pdb_frame<W: Write>(writer: &mut W, frame: &impl FrameAccess) -> std::io::Result<()> {
+    write_cryst1(writer, frame)?;
+    write_atom_conect_records(writer, frame)?;
+    writeln!(writer, "END")?;
+    Ok(())
+}
+
+/// Write a trajectory as a multi-`MODEL` PDB.
+///
+/// A shared `CRYST1` is written once from the first frame, then each frame
+/// becomes one `MODEL`/`ENDMDL` block, reusing the same record writer as
+/// [`write_pdb_frame`]. The inverse of [`read_pdb_traj`].
+pub fn write_pdb_traj<W: Write, FA: FrameAccess>(
+    writer: &mut W,
+    frames: &[FA],
+) -> std::io::Result<()> {
+    if let Some(first) = frames.first() {
+        write_cryst1(writer, first)?;
+    }
+    for (i, frame) in frames.iter().enumerate() {
+        writeln!(writer, "MODEL     {:>4}", i + 1)?;
+        write_atom_conect_records(writer, frame)?;
+        writeln!(writer, "ENDMDL")?;
+    }
     writeln!(writer, "END")?;
     Ok(())
 }
@@ -778,6 +865,34 @@ pub fn read_pdb_frame<P: AsRef<Path>>(path: P) -> std::io::Result<Frame> {
             "No frame found in PDB file",
         )
     })
+}
+
+/// Read every `MODEL` of a PDB file as a trajectory — one [`Frame`] per model.
+///
+/// Reuses the single-frame parser ([`PDBReader::read_single_frame`]): each
+/// `MODEL`/`ENDMDL` block parses to one frame (`read_single_frame` stops at
+/// `ENDMDL` and ignores the `MODEL` header). A single-model or MODEL-less PDB
+/// yields a one-frame trajectory. The inverse of [`write_pdb_traj`].
+///
+/// # Examples
+///
+/// ```no_run
+/// use molrs_io::pdb::read_pdb_traj;
+///
+/// # fn main() -> std::io::Result<()> {
+/// let frames = read_pdb_traj("ensemble.pdb")?;
+/// # Ok(())
+/// # }
+/// ```
+pub fn read_pdb_traj<P: AsRef<Path>>(path: P) -> std::io::Result<Vec<Frame>> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut pdb_reader = PDBReader::new(reader);
+    let mut frames = Vec::new();
+    while let Some(frame) = pdb_reader.read_frame()? {
+        frames.push(frame);
+    }
+    Ok(frames)
 }
 
 // ============================================================================
@@ -1184,5 +1299,143 @@ END
             let frame = parse_frame_bytes(&bytes[lo..hi]).expect("parse model");
             assert_eq!(frame.get("atoms").unwrap().nrows().unwrap(), 2);
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Trajectory (multi-MODEL) reader/writer
+    // -----------------------------------------------------------------
+
+    fn read_all_models(text: &str) -> Vec<Frame> {
+        let mut reader = PDBReader::new(std::io::Cursor::new(text.to_string()));
+        let mut frames = Vec::new();
+        while let Some(f) = reader.read_frame().expect("read frame") {
+            frames.push(f);
+        }
+        frames
+    }
+
+    #[test]
+    fn multi_model_yields_one_frame_per_model() {
+        // The same iteration read_pdb_traj performs: one frame per MODEL,
+        // reusing read_single_frame (stops at ENDMDL, ignores MODEL header).
+        let frames = read_all_models(MULTI_PDB);
+        assert_eq!(frames.len(), 2);
+        for f in &frames {
+            assert_eq!(f.get("atoms").unwrap().nrows().unwrap(), 2);
+        }
+    }
+
+    #[test]
+    fn write_pdb_traj_roundtrips() {
+        let frames = read_all_models(MULTI_PDB);
+        let mut out = Vec::new();
+        write_pdb_traj(&mut out, &frames).expect("write traj");
+        let text = String::from_utf8(out).expect("utf8");
+        assert_eq!(text.matches("MODEL ").count(), 2, "{text}");
+        assert_eq!(text.matches("ENDMDL").count(), 2, "{text}");
+
+        let reparsed = read_all_models(&text);
+        assert_eq!(reparsed.len(), 2);
+        assert_eq!(reparsed[0].get("atoms").unwrap().nrows().unwrap(), 2);
+    }
+
+    #[test]
+    fn write_pdb_frame_uses_atom_columns() {
+        use molrs::block::Block;
+        use molrs::frame::Frame;
+        use ndarray::{Array1, IxDyn};
+
+        let n = 1;
+        let mut atoms = Block::new();
+        atoms
+            .insert(
+                "x",
+                Array1::from_vec(vec![1.0 as F])
+                    .into_shape_with_order(IxDyn(&[n]))
+                    .unwrap()
+                    .into_dyn(),
+            )
+            .unwrap();
+        atoms
+            .insert(
+                "y",
+                Array1::from_vec(vec![2.0 as F])
+                    .into_shape_with_order(IxDyn(&[n]))
+                    .unwrap()
+                    .into_dyn(),
+            )
+            .unwrap();
+        atoms
+            .insert(
+                "z",
+                Array1::from_vec(vec![3.0 as F])
+                    .into_shape_with_order(IxDyn(&[n]))
+                    .unwrap()
+                    .into_dyn(),
+            )
+            .unwrap();
+        atoms
+            .insert(
+                "name",
+                Array1::from_vec(vec!["CA".to_string()])
+                    .into_shape_with_order(IxDyn(&[n]))
+                    .unwrap()
+                    .into_dyn(),
+            )
+            .unwrap();
+        atoms
+            .insert(
+                "res_name",
+                Array1::from_vec(vec!["ALA".to_string()])
+                    .into_shape_with_order(IxDyn(&[n]))
+                    .unwrap()
+                    .into_dyn(),
+            )
+            .unwrap();
+        atoms
+            .insert(
+                "res_seq",
+                Array1::from_vec(vec![5 as I])
+                    .into_shape_with_order(IxDyn(&[n]))
+                    .unwrap()
+                    .into_dyn(),
+            )
+            .unwrap();
+        atoms
+            .insert(
+                "chain_id",
+                Array1::from_vec(vec!["B".to_string()])
+                    .into_shape_with_order(IxDyn(&[n]))
+                    .unwrap()
+                    .into_dyn(),
+            )
+            .unwrap();
+        atoms
+            .insert(
+                "element",
+                Array1::from_vec(vec!["C".to_string()])
+                    .into_shape_with_order(IxDyn(&[n]))
+                    .unwrap()
+                    .into_dyn(),
+            )
+            .unwrap();
+
+        let mut frame = Frame::new();
+        frame.insert("atoms", atoms);
+
+        let mut out = Vec::new();
+        write_pdb_frame(&mut out, &frame).expect("write frame");
+        let text = String::from_utf8(out).expect("utf8");
+        let atom_line = text
+            .lines()
+            .find(|l| l.starts_with("ATOM"))
+            .expect("atom line");
+
+        // PDB v3.3 column checks: name (13-16), resName (18-20), chain (22),
+        // resSeq (23-26).
+        assert_eq!(atom_line[12..16].trim(), "CA", "name: {atom_line}");
+        assert_eq!(atom_line[17..20].trim(), "ALA", "resName: {atom_line}");
+        assert_eq!(&atom_line[21..22], "B", "chain: {atom_line}");
+        assert_eq!(atom_line[22..26].trim(), "5", "resSeq: {atom_line}");
     }
 }

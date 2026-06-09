@@ -118,6 +118,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // I/O + SMILES
     // Readers
     m.add_function(wrap_pyfunction!(io::read_pdb, m)?)?;
+    m.add_function(wrap_pyfunction!(io::read_pdb_trajectory, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_xyz, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_xyz_trajectory, m)?)?;
     m.add_class::<io::PyXYZTrajReader>()?;
@@ -133,6 +134,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Writers
     m.add_function(wrap_pyfunction!(io::write_gro, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_pdb, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_pdb_trajectory, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_xyz, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_lammps, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_lammps_traj, m)?)?;

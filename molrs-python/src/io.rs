@@ -24,7 +24,7 @@ use molrs_io::lammps_data::{read_lammps_data, write_lammps_data};
 use molrs_io::lammps_dump::{
     LAMMPSTrajReader, open_lammps_dump, read_lammps_dump, write_lammps_dump,
 };
-use molrs_io::pdb::{read_pdb_frame, write_pdb_frame};
+use molrs_io::pdb::{read_pdb_frame, read_pdb_traj, write_pdb_frame, write_pdb_traj};
 use molrs_io::reader::{ReadSeek, TrajReader, open_seekable};
 use molrs_io::xyz::{XYZReader, read_xyz_frame, read_xyz_traj, write_xyz_frame};
 use pyo3::exceptions::{PyIndexError, PyValueError};
@@ -63,6 +63,24 @@ use std::io::BufWriter;
 pub fn read_pdb(path: &str) -> PyResult<PyFrame> {
     let frame = read_pdb_frame(path).map_err(io_error_to_pyerr)?;
     PyFrame::from_core_frame(frame)
+}
+
+/// Read every MODEL of a PDB file as a trajectory (one Frame per MODEL).
+///
+/// A single-model (or MODEL-less) PDB returns a one-element list.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a (possibly multi-MODEL) ``.pdb`` file.
+///
+/// Returns
+/// -------
+/// list[Frame]
+#[pyfunction]
+pub fn read_pdb_trajectory(path: &str) -> PyResult<Vec<PyFrame>> {
+    let frames = read_pdb_traj(path).map_err(io_error_to_pyerr)?;
+    frames.into_iter().map(PyFrame::from_core_frame).collect()
 }
 
 /// Read an XYZ file and return a single Frame.
@@ -940,6 +958,28 @@ pub fn write_pdb(path: &str, frame: &PyFrame) -> PyResult<()> {
     let file = File::create(path).map_err(io_error_to_pyerr)?;
     let mut buf = BufWriter::new(file);
     write_pdb_frame(&mut buf, &core_frame).map_err(io_error_to_pyerr)
+}
+
+/// Write a list of Frames to a multi-MODEL PDB trajectory.
+///
+/// Each frame becomes one ``MODEL``/``ENDMDL`` block; a shared ``CRYST1`` is
+/// written once from the first frame. Inverse of :func:`read_pdb_trajectory`.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frames : list[Frame]
+///     Frames to write, in order.
+#[pyfunction]
+pub fn write_pdb_trajectory(path: &str, frames: Vec<PyFrame>) -> PyResult<()> {
+    let core_frames: Vec<_> = frames
+        .iter()
+        .map(|f| f.clone_core_frame())
+        .collect::<PyResult<_>>()?;
+    let file = File::create(path).map_err(io_error_to_pyerr)?;
+    let mut buf = BufWriter::new(file);
+    write_pdb_traj(&mut buf, &core_frames).map_err(io_error_to_pyerr)
 }
 
 /// Write a Frame to an XYZ file.

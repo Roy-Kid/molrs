@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "molcrafts-molrs-compute",
  "molcrafts-molrs-conformer",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-compute"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "criterion",
  "molcrafts-molrs-core",
@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-conformer"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "molcrafts-molrs-core",
  "molcrafts-molrs-ff",
@@ -903,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-core"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "criterion",
  "libm",
@@ -922,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-cxxapi"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-ff"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "libm",
  "molcrafts-molrs-core",
@@ -946,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-ffi"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "molcrafts-molrs-core",
  "slotmap",
@@ -954,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-io"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "flate2",
  "molcrafts-molrs-core",
@@ -968,7 +968,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-signal"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "ndarray",
  "rand 0.9.2",
