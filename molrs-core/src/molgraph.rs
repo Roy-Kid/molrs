@@ -1052,12 +1052,9 @@ impl MolGraph {
 
 /// Endpoint column name for the `pos`-th node of a relation block.
 pub(crate) fn rel_col_name(pos: usize) -> String {
-    match pos {
-        0 => "atomi".to_owned(),
-        1 => "atomj".to_owned(),
-        2 => "atomk".to_owned(),
-        3 => "atoml".to_owned(),
-        n => format!("atom{n}"),
+    match crate::keys::ENDPOINTS.get(pos) {
+        Some(name) => (*name).to_owned(),
+        None => format!("atom{pos}"),
     }
 }
 

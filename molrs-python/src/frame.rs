@@ -10,8 +10,8 @@
 //! | Block key   | Expected columns                                      | Notes                                    |
 //! |-------------|-------------------------------------------------------|------------------------------------------|
 //! | `"atoms"`   | `symbol` (str), `x`/`y`/`z` (float), `mass` (float)  | Atom positions and properties             |
-//! | `"bonds"`   | `i`/`j` (uint), `order` (float)                       | Bond topology (indices into atoms)        |
-//! | `"angles"`  | `i`/`j`/`k` (uint), `type` (int)                      | Angle topology                            |
+//! | `"bonds"`   | `atomi`/`atomj` (uint), `order` (float)               | Bond topology (indices into atoms)        |
+//! | `"angles"`  | `atomi`/`atomj`/`atomk` (uint), `type` (int)          | Angle topology                            |
 //!
 //! The frame itself does **not** enforce cross-block row consistency; that is
 //! the caller's responsibility (use [`PyFrame::validate`] to check).

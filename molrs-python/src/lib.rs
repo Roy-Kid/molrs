@@ -96,6 +96,18 @@ fn register_keys(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("MOL_ID", keys::MOL_ID)?;
     m.add("SYMBOL", keys::SYMBOL)?;
     m.add("NAME", keys::NAME)?;
+    m.add("VX", keys::VX)?;
+    m.add("VY", keys::VY)?;
+    m.add("VZ", keys::VZ)?;
+    m.add("VELOCITIES", keys::VELOCITIES.to_vec())?;
+    m.add("XYZ", keys::XYZ)?;
+    m.add("RES_ID", keys::RES_ID)?;
+    m.add("RES_NAME", keys::RES_NAME)?;
+    m.add("ATOMI", keys::ATOMI)?;
+    m.add("ATOMJ", keys::ATOMJ)?;
+    m.add("ATOMK", keys::ATOMK)?;
+    m.add("ATOML", keys::ATOML)?;
+    m.add("ENDPOINTS", keys::ENDPOINTS.to_vec())?;
     parent.add_submodule(&m)?;
     Ok(())
 }

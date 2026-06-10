@@ -49,8 +49,39 @@ pub const ID: &str = "id";
 pub const MOL_ID: &str = "mol_id";
 /// Element/site symbol when keyed separately from `element` (e.g. crystal sites).
 pub const SYMBOL: &str = "symbol";
-/// Human-readable name.
+/// Human-readable / atom name (e.g. `"CA"`). Capped at PDB's 4-char column on write.
 pub const NAME: &str = "name";
+
+/// Cartesian x-velocity component.
+pub const VX: &str = "vx";
+/// Cartesian y-velocity component.
+pub const VY: &str = "vy";
+/// Cartesian z-velocity component.
+pub const VZ: &str = "vz";
+/// The three Cartesian velocity component keys, in axis order.
+pub const VELOCITIES: [&str; 3] = [VX, VY, VZ];
+
+/// Position 3-vector key, when coordinates are stored as one `xyz` column
+/// instead of decomposed `x`/`y`/`z` scalars.
+pub const XYZ: &str = "xyz";
+
+/// Residue identifier (groups atoms into residues).
+pub const RES_ID: &str = "res_id";
+/// Residue name (e.g. `"ALA"`).
+pub const RES_NAME: &str = "res_name";
+
+/// First endpoint of a relation block (bond/angle/dihedral), 0-indexed into atoms.
+pub const ATOMI: &str = "atomi";
+/// Second endpoint of a relation block, 0-indexed into atoms.
+pub const ATOMJ: &str = "atomj";
+/// Third endpoint of a relation block (angle vertex / dihedral), 0-indexed.
+pub const ATOMK: &str = "atomk";
+/// Fourth endpoint of a relation block (dihedral/improper), 0-indexed.
+pub const ATOML: &str = "atoml";
+
+/// Relation endpoint column keys in position order. `rel_col_name(pos)` reads
+/// from this array so the bond/angle/dihedral index convention is defined once.
+pub const ENDPOINTS: [&str; 4] = [ATOMI, ATOMJ, ATOMK, ATOML];
 
 use crate::block::DType;
 
