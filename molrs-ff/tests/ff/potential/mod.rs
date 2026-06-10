@@ -13,6 +13,8 @@ mod angle;
 mod bond;
 #[path = "mmff.rs"]
 mod mmff;
+#[path = "opls.rs"]
+mod opls;
 #[path = "pair.rs"]
 mod pair;
 #[path = "pme.rs"]

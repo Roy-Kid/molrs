@@ -186,7 +186,9 @@ impl KernelRegistry {
         // Generic kernels
         self.register("bond", "harmonic", bond::harmonic::bond_harmonic_ctor);
         self.register("angle", "harmonic", angle::harmonic::angle_harmonic_ctor);
+        self.register("dihedral", "opls", dihedral::opls::dihedral_opls_ctor);
         self.register("pair", "lj/cut", pair::lj_cut::pair_lj_cut_ctor);
+        self.register("pair", "coul/cut", pair::coul_cut::pair_coul_cut_ctor);
 
         // MMFF94 kernels
         self.register("bond", "mmff_bond", bond::mmff::mmff_bond_ctor);
