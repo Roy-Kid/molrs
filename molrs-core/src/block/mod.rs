@@ -276,6 +276,71 @@ impl Block {
         Ok(())
     }
 
+    /// New Block with rows gathered at `indices` (along axis 0), preserving the
+    /// column set and dtypes. Errors if any index is out of range. This is the
+    /// Rust-native row select/gather backing the Python `Block[rows]` path.
+    pub fn select_rows(&self, indices: &[usize]) -> Result<Block, BlockError> {
+        let nrows = self.nrows.unwrap_or(0);
+        if let Some(&bad) = indices.iter().find(|&&i| i >= nrows) {
+            return Err(BlockError::validation(format!(
+                "row index {bad} out of range (nrows={nrows})"
+            )));
+        }
+        let mut out = Block::with_capacity(self.map.len());
+        for (k, col) in &self.map {
+            out.insert_column(k.clone(), col.select_rows(indices))?;
+        }
+        Ok(out)
+    }
+
+    /// Row order that sorts the block by the `key` column (ascending, or the
+    /// ascending order reversed when `reverse` — matching numpy's
+    /// `argsort()[::-1]`). Floats use a total order (NaN at an extreme).
+    pub fn sort_indices(&self, key: &str, reverse: bool) -> Result<Vec<usize>, BlockError> {
+        let nrows = self.nrows.unwrap_or(0);
+        let col = self
+            .map
+            .get(key)
+            .ok_or_else(|| BlockError::validation(format!("sort key '{key}' not found")))?;
+        let mut order: Vec<usize> = (0..nrows).collect();
+        match col {
+            Column::Float(h) => {
+                let v: Vec<crate::types::F> = h.array().iter().copied().collect();
+                order.sort_by(|&i, &j| v[i].total_cmp(&v[j]));
+            }
+            Column::Int(h) => {
+                let v: Vec<crate::types::I> = h.array().iter().copied().collect();
+                order.sort_by_key(|&i| v[i]);
+            }
+            Column::UInt(h) => {
+                let v: Vec<crate::types::U> = h.array().iter().copied().collect();
+                order.sort_by_key(|&i| v[i]);
+            }
+            Column::U8(h) => {
+                let v: Vec<u8> = h.array().iter().copied().collect();
+                order.sort_by_key(|&i| v[i]);
+            }
+            Column::Bool(h) => {
+                let v: Vec<bool> = h.array().iter().copied().collect();
+                order.sort_by_key(|&i| v[i]);
+            }
+            Column::String(h) => {
+                let v: Vec<&String> = h.array().iter().collect();
+                order.sort_by(|&i, &j| v[i].cmp(v[j]));
+            }
+        }
+        if reverse {
+            order.reverse();
+        }
+        Ok(order)
+    }
+
+    /// New Block sorted by the `key` column (original unchanged).
+    pub fn sort_by(&self, key: &str, reverse: bool) -> Result<Block, BlockError> {
+        let order = self.sort_indices(key, reverse)?;
+        self.select_rows(&order)
+    }
+
     /// Gets an immutable reference to the column for `key` if present.
     ///
     /// For type-safe access, prefer using `get_float()`, `get_int()`, etc.
@@ -665,6 +730,54 @@ mod tests {
     use super::*;
     use crate::types::{F, I};
     use ndarray::Array1;
+
+    #[test]
+    fn test_select_rows_and_sort() {
+        let mut b = Block::new();
+        b.insert("id", Array1::from_vec(vec![3 as I, 1, 2]).into_dyn())
+            .unwrap();
+        b.insert("x", Array1::from_vec(vec![3.5 as F, 1.5, 2.5]).into_dyn())
+            .unwrap();
+
+        // select_rows gathers in order.
+        let sel = b.select_rows(&[2, 0]).unwrap();
+        assert_eq!(
+            sel.get_int("id")
+                .unwrap()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+
+        // out-of-range index errors.
+        assert!(b.select_rows(&[5]).is_err());
+
+        // sort by id ascending reorders all columns.
+        let s = b.sort_by("id", false).unwrap();
+        assert_eq!(
+            s.get_int("id").unwrap().iter().copied().collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(
+            s.get_float("x")
+                .unwrap()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![1.5, 2.5, 3.5]
+        );
+
+        // reverse = ascending reversed.
+        let r = b.sort_by("id", true).unwrap();
+        assert_eq!(
+            r.get_int("id").unwrap().iter().copied().collect::<Vec<_>>(),
+            vec![3, 2, 1]
+        );
+
+        // unknown sort key errors.
+        assert!(b.sort_by("nope", false).is_err());
+    }
 
     #[test]
     fn test_insert_mixed_dtypes() {

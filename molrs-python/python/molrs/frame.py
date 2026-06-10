@@ -284,33 +284,34 @@ class Block(_RsBlock, MutableMapping[str, np.ndarray]):
         _RsBlock.remove(self._backing(), old_key)
         _RsBlock.insert(self._backing(), new_key, arr)
 
-    def _sort(self, key: str, *, reverse: bool = False) -> dict[str, NDArray[Any]]:
+    def sort(self, key: str, *, reverse: bool = False) -> "Block":
+        """Return a new Block sorted by *key* (original unchanged).
+
+        The argsort + per-column gather runs in the Rust core
+        (``molrs.Block.sort``); this is a thin call, not a NumPy reimplementation.
+        """
         if self.nrows == 0:
-            return {}
+            return self.copy()
         if key not in self:
             raise KeyError(f"Variable '{key}' not found in block")
-        order = np.argsort(self._view_array(key))
-        if reverse:
-            order = order[::-1]
-        nrows = self.nrows
-        out: dict[str, np.ndarray] = {}
-        for name in self.keys():
-            data = self._view_array(name)
-            if len(data) != nrows:
-                raise ValueError(f"Variable '{name}' has different length than '{key}'")
-            out[name] = data[order]
-        return out
-
-    def sort(self, key: str, *, reverse: bool = False) -> "Block":
-        """Return a new Block sorted by *key* (original unchanged)."""
-        return Block(self._sort(key, reverse=reverse))
+        return Block.from_dict(_RsBlock.sort(self._backing(), key, reverse))
 
     def sort_(self, key: str, *, reverse: bool = False) -> "Self":
         """Sort the block in place by *key*; returns self."""
-        ordered = self._sort(key, reverse=reverse)
-        for k, v in ordered.items():
-            _RsBlock.remove(self._backing(), k)
-            _RsBlock.insert(self._backing(), k, v)
+        if self.nrows == 0:
+            return self
+        if key not in self:
+            raise KeyError(f"Variable '{key}' not found in block")
+        ordered = _RsBlock.sort(self._backing(), key, reverse)
+        cols = {
+            k: np.asarray(_RsBlock.view(ordered, k)).copy()
+            for k in _RsBlock.keys(ordered)
+        }
+        backing = self._backing()
+        for k in list(_RsBlock.keys(backing)):
+            _RsBlock.remove(backing, k)
+        for k, v in cols.items():
+            _RsBlock.insert(backing, k, v)
         return self
 
     def __repr__(self) -> str:

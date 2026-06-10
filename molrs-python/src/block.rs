@@ -384,6 +384,48 @@ impl PyBlock {
         }
     }
 
+    /// Return a new Block with rows gathered at ``indices`` (Rust-native row
+    /// select/gather; preserves the column set and dtypes).
+    ///
+    /// Parameters
+    /// ----------
+    /// indices : Sequence[int]
+    ///     Row indices to gather, in order.
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If any index is out of range.
+    fn select_rows(&self, indices: Vec<usize>) -> PyResult<PyBlock> {
+        let core = self.clone_core_block()?;
+        let out = core
+            .select_rows(&indices)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        PyBlock::from_core_block(out)
+    }
+
+    /// Return a new Block sorted by the ``key`` column (original unchanged).
+    ///
+    /// Parameters
+    /// ----------
+    /// key : str
+    ///     Column to sort by.
+    /// reverse : bool, optional
+    ///     Descending order (the ascending order reversed). Default ``False``.
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If ``key`` is not a column.
+    #[pyo3(signature = (key, reverse = false))]
+    fn sort(&self, key: &str, reverse: bool) -> PyResult<PyBlock> {
+        let core = self.clone_core_block()?;
+        let out = core
+            .sort_by(key, reverse)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        PyBlock::from_core_block(out)
+    }
+
     /// Return the dtype string for the given column.
     ///
     /// Parameters

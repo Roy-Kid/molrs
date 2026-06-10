@@ -288,6 +288,21 @@ impl Column {
         }
     }
 
+    /// Gather rows at `indices` (along axis 0) into a new owned Column of the
+    /// same dtype. Backs [`Block::select_rows`](crate::block::Block::select_rows)
+    /// and the sort path. String rows are cloned.
+    pub fn select_rows(&self, indices: &[usize]) -> Column {
+        use ndarray::Axis;
+        match self {
+            Column::Float(h) => Column::from_float(h.array().select(Axis(0), indices)),
+            Column::Int(h) => Column::from_int(h.array().select(Axis(0), indices)),
+            Column::Bool(h) => Column::from_bool(h.array().select(Axis(0), indices)),
+            Column::UInt(h) => Column::from_uint(h.array().select(Axis(0), indices)),
+            Column::U8(h) => Column::from_u8(h.array().select(Axis(0), indices)),
+            Column::String(h) => Column::from_string(h.array().select(Axis(0), indices)),
+        }
+    }
+
     /// Is this column backed by a foreign (non-Rust) buffer?
     pub fn is_foreign(&self) -> bool {
         match self {
