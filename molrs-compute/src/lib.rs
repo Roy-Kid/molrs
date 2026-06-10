@@ -73,6 +73,7 @@ pub mod result;
 pub mod spectra;
 pub mod traits;
 pub mod util;
+pub mod validate;
 
 // Re-exports
 pub use center_of_mass::{COMResult, CenterOfMass};

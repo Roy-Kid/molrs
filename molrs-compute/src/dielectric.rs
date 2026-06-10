@@ -96,7 +96,9 @@ pub struct StaticDielectricResult {
 // ── Physical constants (MD real units: kcal, mol, Angstrom, e, K) ─────────
 
 const KAPPA: f64 = 332.0637; // 1/(4*pi*epsilon_0) in kcal·Å·mol⁻¹·e⁻²
-const K_B: f64 = 1.98720425864083e-3; // Boltzmann constant in kcal/(mol·K)
+/// Boltzmann constant in kcal/(mol·K) — MD "real" units. Shared with the
+/// spectral validation checks ([`crate::validate`]) so there is one value.
+pub const K_B: f64 = 1.98720425864083e-3;
 const FOUR_PI_OVER_3: f64 = 4.1887902047863905; // 4π/3
 
 // SI constants for the Einstein–Helfand conductivity unit conversion. The
