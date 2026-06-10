@@ -556,6 +556,43 @@ impl PyForceField {
         Ok(PyPotentials { inner: potentials })
     }
 
+    /// Project this force field onto the types a typed :class:`Frame` uses.
+    ///
+    /// Reading a full force field yields every type it defines, but a concrete
+    /// typed structure references only a fraction of them. ``subset`` returns a
+    /// new, smaller :class:`ForceField` restricted to exactly the types named
+    /// in the frame's per-block ``type`` columns
+    /// (``atoms``/``bonds``/``angles``/``dihedrals``/``impropers``), leaving the
+    /// original force field unchanged. A ``PairType`` is kept iff both of its
+    /// endpoint atom types are used; styles left with no types are dropped; type
+    /// names are preserved verbatim (no renumbering).
+    ///
+    /// Parameters
+    /// ----------
+    /// frame : Frame
+    ///     Typed molecular data, as produced by a typifier or an emitter.
+    ///
+    /// Returns
+    /// -------
+    /// ForceField
+    ///     A new force field containing only the types ``frame`` references.
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If the frame's blocks cannot be read.
+    ///
+    /// Examples
+    /// --------
+    /// >>> mini = ff.subset(typed_frame)
+    /// >>> len(mini.style_names()) <= len(ff.style_names())
+    /// True
+    fn subset(&self, frame: &PyFrame) -> PyResult<PyForceField> {
+        let core = frame.clone_core_frame()?;
+        let pruned = self.inner.subset(&core);
+        Ok(PyForceField { inner: pruned })
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "ForceField(name='{}', styles={})",
