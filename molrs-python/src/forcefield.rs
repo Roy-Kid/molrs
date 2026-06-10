@@ -615,3 +615,48 @@ pub fn read_forcefield_xml_str_py(xml: &str) -> PyResult<PyForceField> {
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     Ok(PyForceField { inner: forcefield })
 }
+
+/// Read an OPLS-AA / GROMACS force-field XML file into a :class:`ForceField`.
+///
+/// Parses the OpenMM-style OPLS-AA XML (GROMACS units — nm, kJ/mol,
+/// Ryckaert-Bellemans torsions) and normalizes it to molrs units (Å, kcal/mol,
+/// radians, e): bond/angle/pair conversions plus the RB → OPLS 4-cosine
+/// (``f1..f4``) inversion happen in the reader, so the returned force field is
+/// pure molrs units. Distinct from :func:`read_forcefield_xml`, which reads
+/// molrs's own native schema.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to an ``oplsaa.xml`` (OpenMM/GROMACS layout).
+///
+/// Returns
+/// -------
+/// ForceField
+///
+/// Raises
+/// ------
+/// ValueError
+///     On a malformed document, an unknown section, or a missing/non-numeric
+///     required attribute (reading is total — never a silent skip).
+#[pyfunction]
+#[pyo3(name = "read_opls_xml")]
+pub fn read_opls_xml_py(path: &str) -> PyResult<PyForceField> {
+    use molrs_ff::ForceFieldReader;
+    let forcefield = molrs_ff::OplsXmlReader::new()
+        .read(path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    Ok(PyForceField { inner: forcefield })
+}
+
+/// Parse an OPLS-AA / GROMACS force field from an XML string (same schema and
+/// unit normalization as :func:`read_opls_xml`).
+#[pyfunction]
+#[pyo3(name = "read_opls_xml_str")]
+pub fn read_opls_xml_str_py(xml: &str) -> PyResult<PyForceField> {
+    use molrs_ff::ForceFieldReader;
+    let forcefield = molrs_ff::OplsXmlReader::new()
+        .read_str(xml)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    Ok(PyForceField { inner: forcefield })
+}

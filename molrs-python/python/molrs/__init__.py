@@ -81,6 +81,8 @@ from .molrs import (
     LBFGS,
     read_forcefield_xml,
     read_forcefield_xml_str,
+    read_opls_xml,
+    read_opls_xml_str,
     extract_coords,
     build_mmff_potentials,
     # Field-name convention submodule
@@ -173,6 +175,8 @@ __all__ = [
     "build_mmff_potentials",
     "read_forcefield_xml",
     "read_forcefield_xml_str",
+    "read_opls_xml",
+    "read_opls_xml_str",
     "extract_coords",
     "signal_acf_fft",
     "signal_apply_window",

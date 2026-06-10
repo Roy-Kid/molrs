@@ -6,6 +6,7 @@
 //! into computational [`Potential`](super::potential::Potential) objects via
 //! [`ForceField::compile`].
 
+pub mod readers;
 pub mod xml;
 
 use std::collections::{HashMap, HashSet};
