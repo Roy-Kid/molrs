@@ -97,7 +97,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "molcrafts-molrs-core"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "libm",
  "ndarray",
@@ -106,11 +106,12 @@ dependencies = [
  "serde",
  "serde_json",
  "slotmap",
+ "smallvec",
 ]
 
 [[package]]
 name = "molcrafts-molrs-ffi"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "molcrafts-molrs-core",
  "ndarray",
@@ -279,6 +280,12 @@ checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
 dependencies = [
  "version_check",
 ]
+
+[[package]]
+name = "smallvec"
+version = "1.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "syn"
