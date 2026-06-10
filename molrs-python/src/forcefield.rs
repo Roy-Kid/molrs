@@ -142,7 +142,7 @@ impl PyPotentials {
     /// >>> energy, forces = potentials.eval(coords)
     /// >>> energy
     /// -12.34
-    fn eval<'py>(
+    fn calc_energy_forces<'py>(
         &self,
         py: Python<'py>,
         coords: numpy::PyReadonlyArray1<'_, NpF>,
@@ -169,78 +169,80 @@ impl PyPotentials {
     /// ------
     /// ValueError
     ///     If ``coords`` is not contiguous in memory.
-    fn energy(&self, coords: numpy::PyReadonlyArray1<'_, NpF>) -> PyResult<f64> {
+    fn calc_energy(&self, coords: numpy::PyReadonlyArray1<'_, NpF>) -> PyResult<f64> {
         let slice = coords.as_slice()?;
         Ok(self.inner.calc_energy(slice))
     }
 
-    /// Relax structures by L-BFGS energy minimization. Single or batch,
-    /// dispatched on the input rank.
+    /// Compute forces (= -gradient) for the given flat coordinates.
     ///
-    /// * ``(N, 3)`` (or flat ``(3N,)``) → optimize one structure; returns
-    ///   ``((N, 3) array, OptReport)``.
-    /// * ``(B, N, 3)`` → optimize a homogeneous batch (all structures share
-    ///   this :class:`Potentials`, hence the same atom count and topology);
-    ///   returns ``((B, N, 3) array, list[OptReport])``. With the ``rayon``
-    ///   build feature the batch runs in parallel.
-    ///
-    /// Heterogeneous systems (different topologies) cannot be batched — loop
-    /// over single calls with a separate :class:`Potentials` each.
-    ///
-    /// Parameters
-    /// ----------
-    /// coords : numpy.ndarray, shape (N, 3), (3*N,), or (B, N, 3), dtype float
-    ///     Starting coordinates. Not modified in place.
-    /// fmax : float, optional
-    ///     Convergence threshold on the maximum per-atom force magnitude
-    ///     ``max_i ||F_i||`` (kcal/mol/angstrom). Default ``0.05``.
-    /// max_steps : int, optional
-    ///     Maximum outer L-BFGS iterations. Default ``500``.
-    /// max_step : float, optional
-    ///     Per-step displacement cap in angstrom (trust region). Default
-    ///     ``0.2``.
-    /// memory : int, optional
-    ///     L-BFGS correction-pair history size. Default ``8``.
-    ///
-    /// Returns
-    /// -------
-    /// tuple[numpy.ndarray, OptReport] or tuple[numpy.ndarray, list[OptReport]]
-    ///     Optimized coordinates (same rank as a fresh ``(N, 3)`` / ``(B, N, 3)``
-    ///     array) and the per-structure report(s).
-    ///
-    /// Raises
-    /// ------
-    /// ValueError
-    ///     If the coordinate count is not a multiple of three, the rank is not
-    ///     1/2/3, the trailing axis of a 3-D array is not 3, or a batch's atom
-    ///     count ``N`` does not match this :class:`Potentials`.
-    ///
-    /// Examples
-    /// --------
-    /// >>> potentials = MMFFTypifier().build(mol)
-    /// >>> opt_coords, report = potentials.minimize(coords)          # (N, 3)
-    /// >>> opt_batch, reports = potentials.minimize(batch)           # (B, N, 3)
-    #[pyo3(signature = (coords, *, fmax = 0.05, max_steps = 500, max_step = 0.2, memory = 8))]
-    fn minimize<'py>(
+    /// Returns a flat array of the same shape as ``coords`` (kcal/mol/angstrom).
+    fn calc_forces<'py>(
         &self,
         py: Python<'py>,
-        coords: PyReadonlyArrayDyn<'_, NpF>,
+        coords: numpy::PyReadonlyArray1<'_, NpF>,
+    ) -> PyResult<Bound<'py, PyArray1<NpF>>> {
+        let slice = coords.as_slice()?;
+        Ok(self.inner.calc_forces(slice).to_pyarray(py))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Potentials(n_kernels={})", self.inner.len())
+    }
+}
+
+/// L-BFGS geometry optimizer, exposed as `molrs.LBFGS`.
+///
+/// Mirrors molpy: construct with the potentials + config, then ``run`` (single
+/// or homogeneous batch, dispatched on the input rank).
+///
+/// Examples
+/// --------
+/// >>> pots = molrs.build_mmff_potentials(mol)
+/// >>> opt = molrs.LBFGS(pots, fmax=0.05)
+/// >>> coords, report = opt.run(coords)         # (N, 3)
+/// >>> batch, reports = opt.run(batch)          # (B, N, 3)
+#[pyclass(name = "LBFGS")]
+pub struct PyLBFGS {
+    potentials: Py<PyPotentials>,
+    cfg: LbfgsConfig,
+}
+
+#[pymethods]
+impl PyLBFGS {
+    #[new]
+    #[pyo3(signature = (potentials, *, fmax = 0.05, max_steps = 500, max_step = 0.2, memory = 8))]
+    fn new(
+        potentials: Py<PyPotentials>,
         fmax: f64,
         max_steps: usize,
         max_step: f64,
         memory: usize,
+    ) -> Self {
+        Self {
+            potentials,
+            cfg: LbfgsConfig {
+                fmax,
+                max_steps,
+                max_step,
+                memory,
+            },
+        }
+    }
+
+    /// Relax coordinates by L-BFGS. ``(N, 3)`` / ``(3N,)`` -> single structure
+    /// returning ``((N, 3) array, OptReport)``; ``(B, N, 3)`` -> homogeneous
+    /// batch returning ``((B, N, 3) array, list[OptReport])``. Input is not
+    /// mutated.
+    fn run<'py>(
+        &self,
+        py: Python<'py>,
+        coords: PyReadonlyArrayDyn<'_, NpF>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let opts = LbfgsConfig {
-            fmax,
-            max_steps,
-            max_step,
-            memory,
-        };
+        let pots = self.potentials.borrow(py);
         let arr = coords.as_array();
         let shape = arr.shape();
-
         match shape.len() {
-            // Single structure: flat (3N,) or (N, 3).
             1 | 2 => {
                 let mut flat: Vec<NpF> = arr.iter().copied().collect();
                 let n_elem = flat.len();
@@ -249,7 +251,7 @@ impl PyPotentials {
                         "coords has {n_elem} elements, not a multiple of 3 (expected (N, 3) or (3N,))"
                     )));
                 }
-                let report = LBFGS::new(&self.inner, opts)
+                let report = LBFGS::new(&pots.inner, self.cfg)
                     .run(&mut flat)
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 let out: Bound<'py, PyArray2<NpF>> = Array2::from_shape_vec((n_elem / 3, 3), flat)
@@ -259,7 +261,6 @@ impl PyPotentials {
                     .into_pyobject(py)?
                     .into_any())
             }
-            // Homogeneous batch: (B, N, 3).
             3 => {
                 if shape[2] != 3 {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -268,16 +269,14 @@ impl PyPotentials {
                     )));
                 }
                 let (b, n) = (shape[0], shape[1]);
-                // Validate N against the compiled topology when known
-                // (n_atoms == 0 means built without a frame, e.g. via push()).
-                let expected = self.inner.n_atoms();
+                let expected = pots.inner.n_atoms();
                 if expected != 0 && n != expected {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
                         "structure atom count N={n} does not match this Potentials' atom count {expected}"
                     )));
                 }
                 let mut flat: Vec<NpF> = arr.iter().copied().collect();
-                let reports = LBFGS::new(&self.inner, opts)
+                let reports = LBFGS::new(&pots.inner, self.cfg)
                     .run_batch(&mut flat, n, b)
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 let out: Bound<'py, PyArray3<NpF>> = Array3::from_shape_vec((b, n, 3), flat)
@@ -294,7 +293,10 @@ impl PyPotentials {
     }
 
     fn __repr__(&self) -> String {
-        format!("Potentials(n_kernels={})", self.inner.len())
+        format!(
+            "LBFGS(fmax={}, max_steps={}, max_step={}, memory={})",
+            self.cfg.fmax, self.cfg.max_steps, self.cfg.max_step, self.cfg.memory
+        )
     }
 }
 
@@ -549,7 +551,7 @@ impl PyForceField {
     /// ValueError
     ///     If a style has no registered kernel, a topology block is missing,
     ///     or a type label is unknown.
-    fn compile(&self, frame: &PyFrame) -> PyResult<PyPotentials> {
+    fn to_potentials(&self, frame: &PyFrame) -> PyResult<PyPotentials> {
         let core = frame.clone_core_frame()?;
         let potentials = self
             .inner

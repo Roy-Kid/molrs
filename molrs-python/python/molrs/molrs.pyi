@@ -526,7 +526,7 @@ class ForceField:
     @property
     def name(self) -> str: ...
     def style_names(self) -> list[str]: ...
-    def compile(self, frame: Frame) -> Potentials: ...
+    def to_potentials(self, frame: Frame) -> Potentials: ...
 
 class OptReport:
     """Outcome of a geometry optimization (energy minimization)."""
@@ -542,29 +542,27 @@ class OptReport:
 
 class Potentials:
     def __len__(self) -> int: ...
-    def eval(self, coords: ArrayF) -> tuple[float, ArrayF]: ...
-    def energy(self, coords: ArrayF) -> float: ...
+    def calc_energy_forces(self, coords: ArrayF) -> tuple[float, ArrayF]: ...
+    def calc_energy(self, coords: ArrayF) -> float: ...
+    def calc_forces(self, coords: ArrayF) -> ArrayF: ...
+
+class LBFGS:
+    """L-BFGS geometry optimizer (mirrors molpy's `LBFGS(potential).run(...)`)."""
+
+    def __init__(
+        self,
+        potentials: Potentials,
+        *,
+        fmax: float = 0.05,
+        max_steps: int = 500,
+        max_step: float = 0.2,
+        memory: int = 8,
+    ) -> None: ...
     # (N, 3) or (3N,) -> single structure; (B, N, 3) -> homogeneous batch.
     @overload
-    def minimize(
-        self,
-        coords: ArrayF,
-        *,
-        fmax: float = 0.05,
-        max_steps: int = 500,
-        max_step: float = 0.2,
-        memory: int = 8,
-    ) -> tuple[ArrayF, OptReport]: ...
+    def run(self, coords: ArrayF) -> tuple[ArrayF, OptReport]: ...
     @overload
-    def minimize(
-        self,
-        coords: ArrayF,
-        *,
-        fmax: float = 0.05,
-        max_steps: int = 500,
-        max_step: float = 0.2,
-        memory: int = 8,
-    ) -> tuple[ArrayF, list[OptReport]]: ...
+    def run(self, coords: ArrayF) -> tuple[ArrayF, list[OptReport]]: ...
 
 class MMFFTypifier:
     def __init__(self) -> None: ...

@@ -60,7 +60,7 @@ mod conformer;
 use conformer::{PyConformer, PyConformerReport, PyConformerStageReport};
 
 mod forcefield;
-use forcefield::{PyForceField, PyMMFFTypifier, PyOptReport, PyPotentials};
+use forcefield::{PyForceField, PyLBFGS, PyMMFFTypifier, PyOptReport, PyPotentials};
 
 mod compute;
 use compute::{
@@ -188,6 +188,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMMFFTypifier>()?;
     m.add_class::<PyPotentials>()?;
     m.add_class::<PyOptReport>()?;
+    m.add_class::<PyLBFGS>()?;
     m.add_function(wrap_pyfunction!(forcefield::read_forcefield_xml_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::read_forcefield_xml_str_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::extract_coords_py, m)?)?;
