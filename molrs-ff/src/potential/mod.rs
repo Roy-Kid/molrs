@@ -184,12 +184,18 @@ impl crate::forcefield::Style {
         let sp = &self.params;
         let pot = match (category, self.name.as_str()) {
             ("bond", "harmonic") => bond::harmonic::bond_harmonic_ctor(sp, &type_refs, frame)?,
+            ("bond", "class2") => bond::class2::bond_class2_ctor(sp, &type_refs, frame)?,
+            ("bond", "morse") => bond::morse::bond_morse_ctor(sp, &type_refs, frame)?,
             ("angle", "harmonic") => angle::harmonic::angle_harmonic_ctor(sp, &type_refs, frame)?,
             ("dihedral", "opls") => dihedral::opls::dihedral_opls_ctor(sp, &type_refs, frame)?,
             ("pair", "lj/cut") => pair::lj_cut::pair_lj_cut_ctor(sp, &type_refs, frame)?,
             ("pair", "lj/class2") => pair::lj_class2::pair_lj_class2_ctor(sp, &type_refs, frame)?,
             ("pair", "buck") => pair::buck::pair_buck_ctor(sp, &type_refs, frame)?,
+            ("pair", "morse") => pair::morse::pair_morse_ctor(sp, &type_refs, frame)?,
             ("pair", "thole") => pair::thole::pair_thole_ctor(sp, &type_refs, frame)?,
+            ("pair", "coul/tt") => {
+                pair::tang_toennies::pair_tang_toennies_ctor(sp, &type_refs, frame)?
+            }
             ("pair", "coul/cut") => pair::coul_cut::pair_coul_cut_ctor(sp, &type_refs, frame)?,
             ("bond", "mmff_bond") => bond::mmff::mmff_bond_ctor(sp, &type_refs, frame)?,
             ("angle", "mmff_angle") => angle::mmff::mmff_angle_ctor(sp, &type_refs, frame)?,
