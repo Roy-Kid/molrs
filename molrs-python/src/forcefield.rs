@@ -14,7 +14,9 @@
 //!
 //! - Halgren, T.A. (1996). J. Comput. Chem. 17, 490-519. (MMFF94 force field)
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyList};
 
 use molrs_ff::ForceField;
 use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
@@ -105,6 +107,23 @@ pub struct PyPotentials {
 #[pyclass(name = "ForceField")]
 pub struct PyForceField {
     pub(crate) inner: ForceField,
+}
+
+/// Convert an optional Python ``dict[str, float]`` of parameters into owned
+/// ``(key, value)`` pairs. A missing dict yields no params.
+fn params_from_dict(params: Option<&Bound<'_, PyDict>>) -> PyResult<Vec<(String, f64)>> {
+    let mut out = Vec::new();
+    if let Some(d) = params {
+        for (k, v) in d.iter() {
+            out.push((k.extract::<String>()?, v.extract::<f64>()?));
+        }
+    }
+    Ok(out)
+}
+
+/// Borrow owned param pairs as the `&[(&str, f64)]` the builder API expects.
+fn as_pairs(owned: &[(String, f64)]) -> Vec<(&str, f64)> {
+    owned.iter().map(|(k, v)| (k.as_str(), *v)).collect()
 }
 
 #[pymethods]
@@ -517,6 +536,16 @@ pub fn read_forcefield_xml_py(path: &str) -> PyResult<PyForceField> {
 
 #[pymethods]
 impl PyForceField {
+    /// Construct an empty force field. Populate it with the ``def_*style`` /
+    /// ``def_*type`` builder methods, or load one with :func:`read_forcefield_xml`.
+    #[new]
+    #[pyo3(signature = (name = "forcefield"))]
+    fn new(name: &str) -> Self {
+        Self {
+            inner: ForceField::new(name),
+        }
+    }
+
     #[getter]
     fn name(&self) -> String {
         self.inner.name.clone()
@@ -528,6 +557,290 @@ impl PyForceField {
             .iter()
             .map(|style| format!("{}:{}", style.category(), style.name))
             .collect()
+    }
+
+    // -- builder: styles (idempotent find-or-create) -------------------------
+
+    /// Ensure an atom style ``name`` exists.
+    fn def_atomstyle(&mut self, name: &str) {
+        self.inner.def_atomstyle(name);
+    }
+
+    /// Ensure a bond style ``name`` exists.
+    fn def_bondstyle(&mut self, name: &str) {
+        self.inner.def_bondstyle(name);
+    }
+
+    /// Ensure an angle style ``name`` exists.
+    fn def_anglestyle(&mut self, name: &str) {
+        self.inner.def_anglestyle(name);
+    }
+
+    /// Ensure a dihedral style ``name`` exists.
+    fn def_dihedralstyle(&mut self, name: &str) {
+        self.inner.def_dihedralstyle(name);
+    }
+
+    /// Ensure an improper style ``name`` exists.
+    fn def_improperstyle(&mut self, name: &str) {
+        self.inner.def_improperstyle(name);
+    }
+
+    /// Ensure a pair style ``name`` exists, with optional style-level params
+    /// (e.g. ``{"cutoff": 10.0}``).
+    #[pyo3(signature = (name, params = None))]
+    fn def_pairstyle(&mut self, name: &str, params: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        let owned = params_from_dict(params)?;
+        self.inner.def_pairstyle(name, &as_pairs(&owned));
+        Ok(())
+    }
+
+    /// Ensure a k-space style ``name`` exists, with optional style-level params.
+    #[pyo3(signature = (name, params = None))]
+    fn def_kspacestyle(&mut self, name: &str, params: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+        let owned = params_from_dict(params)?;
+        self.inner.def_kspacestyle(name, &as_pairs(&owned));
+        Ok(())
+    }
+
+    // -- builder: types ------------------------------------------------------
+
+    /// Define an atom type under atom style ``style``.
+    #[pyo3(signature = (style, name, params = None))]
+    fn def_atomtype(
+        &mut self,
+        style: &str,
+        name: &str,
+        params: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let owned = params_from_dict(params)?;
+        self.inner
+            .def_atomstyle(style)
+            .def_atomtype(name, &as_pairs(&owned));
+        Ok(())
+    }
+
+    /// Define a bond type ``itom-jtom`` under bond style ``style``.
+    #[pyo3(signature = (style, itom, jtom, params = None))]
+    fn def_bondtype(
+        &mut self,
+        style: &str,
+        itom: &str,
+        jtom: &str,
+        params: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let owned = params_from_dict(params)?;
+        self.inner
+            .def_bondstyle(style)
+            .def_bondtype(itom, jtom, &as_pairs(&owned));
+        Ok(())
+    }
+
+    /// Define an angle type ``itom-jtom-ktom`` under angle style ``style``.
+    #[pyo3(signature = (style, itom, jtom, ktom, params = None))]
+    fn def_angletype(
+        &mut self,
+        style: &str,
+        itom: &str,
+        jtom: &str,
+        ktom: &str,
+        params: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let owned = params_from_dict(params)?;
+        self.inner
+            .def_anglestyle(style)
+            .def_angletype(itom, jtom, ktom, &as_pairs(&owned));
+        Ok(())
+    }
+
+    /// Define a dihedral type ``itom-jtom-ktom-ltom`` under dihedral style ``style``.
+    #[pyo3(signature = (style, itom, jtom, ktom, ltom, params = None))]
+    fn def_dihedraltype(
+        &mut self,
+        style: &str,
+        itom: &str,
+        jtom: &str,
+        ktom: &str,
+        ltom: &str,
+        params: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let owned = params_from_dict(params)?;
+        self.inner.def_dihedralstyle(style).def_dihedraltype(
+            itom,
+            jtom,
+            ktom,
+            ltom,
+            &as_pairs(&owned),
+        );
+        Ok(())
+    }
+
+    /// Define an improper type ``itom-jtom-ktom-ltom`` under improper style ``style``.
+    #[pyo3(signature = (style, itom, jtom, ktom, ltom, params = None))]
+    fn def_impropertype(
+        &mut self,
+        style: &str,
+        itom: &str,
+        jtom: &str,
+        ktom: &str,
+        ltom: &str,
+        params: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let owned = params_from_dict(params)?;
+        self.inner.def_improperstyle(style).def_impropertype(
+            itom,
+            jtom,
+            ktom,
+            ltom,
+            &as_pairs(&owned),
+        );
+        Ok(())
+    }
+
+    /// Define a pair type under pair style ``style``. ``jtom`` defaults to a
+    /// self-pair (``itom`` against itself).
+    #[pyo3(signature = (style, itom, jtom = None, params = None))]
+    fn def_pairtype(
+        &mut self,
+        style: &str,
+        itom: &str,
+        jtom: Option<&str>,
+        params: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let owned = params_from_dict(params)?;
+        self.inner
+            .def_pairstyle(style, &[])
+            .def_pairtype(itom, jtom, &as_pairs(&owned));
+        Ok(())
+    }
+
+    /// Unified type definition. ``category`` is one of ``atom``/``bond``/
+    /// ``angle``/``dihedral``/``improper``/``pair``; ``name`` encodes the atom
+    /// types in the dash form for that category (``"A"``, ``"A-B"``,
+    /// ``"A-B-C"``, ``"A-B-C-D"``). Validated here so a malformed name raises
+    /// ``ValueError`` rather than panicking across the FFI boundary.
+    #[pyo3(signature = (category, style, name, params = None))]
+    fn def_type(
+        &mut self,
+        category: &str,
+        style: &str,
+        name: &str,
+        params: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let owned = params_from_dict(params)?;
+        let pairs = as_pairs(&owned);
+        let parts: Vec<&str> = name.split('-').collect();
+        let arity_err = |shape: &str| -> PyErr {
+            PyValueError::new_err(format!(
+                "{category} type name must be \"{shape}\", got \"{name}\" ({} parts)",
+                parts.len()
+            ))
+        };
+        match category {
+            "atom" => {
+                self.inner.def_atomstyle(style).def_atomtype(name, &pairs);
+            }
+            "bond" => {
+                if parts.len() != 2 {
+                    return Err(arity_err("A-B"));
+                }
+                self.inner
+                    .def_bondstyle(style)
+                    .def_bondtype(parts[0], parts[1], &pairs);
+            }
+            "angle" => {
+                if parts.len() != 3 {
+                    return Err(arity_err("A-B-C"));
+                }
+                self.inner
+                    .def_anglestyle(style)
+                    .def_angletype(parts[0], parts[1], parts[2], &pairs);
+            }
+            "dihedral" => {
+                if parts.len() != 4 {
+                    return Err(arity_err("A-B-C-D"));
+                }
+                self.inner
+                    .def_dihedralstyle(style)
+                    .def_dihedraltype(parts[0], parts[1], parts[2], parts[3], &pairs);
+            }
+            "improper" => {
+                if parts.len() != 4 {
+                    return Err(arity_err("A-B-C-D"));
+                }
+                self.inner
+                    .def_improperstyle(style)
+                    .def_impropertype(parts[0], parts[1], parts[2], parts[3], &pairs);
+            }
+            "pair" => match parts.len() {
+                1 => {
+                    self.inner
+                        .def_pairstyle(style, &[])
+                        .def_pairtype(parts[0], None, &pairs);
+                }
+                2 => {
+                    self.inner.def_pairstyle(style, &[]).def_pairtype(
+                        parts[0],
+                        Some(parts[1]),
+                        &pairs,
+                    );
+                }
+                _ => return Err(arity_err("A\" or \"A-B")),
+            },
+            "kspace" => {
+                return Err(PyValueError::new_err(
+                    "kspace styles do not support per-type definitions",
+                ));
+            }
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown style category '{other}'"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    // -- read accessors (round-trip + P1-A migration) ------------------------
+
+    /// Style-level params for ``category``/``style`` (e.g. a pair style's cutoff).
+    fn style_params<'py>(
+        &self,
+        py: Python<'py>,
+        category: &str,
+        style: &str,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let s = self
+            .inner
+            .get_style(category, style)
+            .ok_or_else(|| PyValueError::new_err(format!("no {category} style named '{style}'")))?;
+        let d = PyDict::new(py);
+        for (k, v) in s.params.iter() {
+            d.set_item(k, v)?;
+        }
+        Ok(d)
+    }
+
+    /// List ``(type_name, params)`` tuples for ``category``/``style``.
+    fn types<'py>(
+        &self,
+        py: Python<'py>,
+        category: &str,
+        style: &str,
+    ) -> PyResult<Bound<'py, PyList>> {
+        let s = self
+            .inner
+            .get_style(category, style)
+            .ok_or_else(|| PyValueError::new_err(format!("no {category} style named '{style}'")))?;
+        let out = PyList::empty(py);
+        for (name, params) in s.defs.collect_type_params() {
+            let d = PyDict::new(py);
+            for (k, v) in params.iter() {
+                d.set_item(k, v)?;
+            }
+            out.append((name, d))?;
+        }
+        Ok(out)
     }
 
     /// Compile this force field against a typed :class:`Frame` into
