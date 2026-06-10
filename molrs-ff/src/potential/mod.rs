@@ -12,6 +12,9 @@ pub mod dihedral;
 pub mod improper;
 pub mod kspace;
 pub mod pair;
+pub mod registry;
+
+pub use registry::{KernelConstructor, KernelRegistry, lookup_kernel, register_kernel};
 
 /// Backward-compatible re-exports for existing consumers.
 pub mod kernels {
@@ -165,6 +168,10 @@ impl crate::forcefield::Style {
     ///
     /// Returns `Ok(None)` for a style that carries no pairwise kernel (an atom
     /// style — types/charges only), `Err` for an unknown `(category, name)`.
+    ///
+    /// The `(category, name)` → constructor mapping lives in the
+    /// [`registry`](crate::potential::registry); a new potential is added by
+    /// registering its kernel, not by editing this dispatch.
     pub fn to_potential(&self, frame: &Frame) -> Result<Option<Box<dyn Potential>>, String> {
         let category = self.category();
         if category == "atom" {
@@ -181,40 +188,13 @@ impl crate::forcefield::Style {
             .iter()
             .map(|(name, params)| (name.as_str(), params))
             .collect();
-        let sp = &self.params;
-        let pot = match (category, self.name.as_str()) {
-            ("bond", "harmonic") => bond::harmonic::bond_harmonic_ctor(sp, &type_refs, frame)?,
-            ("bond", "class2") => bond::class2::bond_class2_ctor(sp, &type_refs, frame)?,
-            ("bond", "morse") => bond::morse::bond_morse_ctor(sp, &type_refs, frame)?,
-            ("angle", "harmonic") => angle::harmonic::angle_harmonic_ctor(sp, &type_refs, frame)?,
-            ("angle", "class2") => angle::class2::angle_class2_ctor(sp, &type_refs, frame)?,
-            ("dihedral", "opls") => dihedral::opls::dihedral_opls_ctor(sp, &type_refs, frame)?,
-            ("pair", "lj/cut") => pair::lj_cut::pair_lj_cut_ctor(sp, &type_refs, frame)?,
-            ("pair", "lj/class2") => pair::lj_class2::pair_lj_class2_ctor(sp, &type_refs, frame)?,
-            ("pair", "buck") => pair::buck::pair_buck_ctor(sp, &type_refs, frame)?,
-            ("pair", "morse") => pair::morse::pair_morse_ctor(sp, &type_refs, frame)?,
-            ("pair", "thole") => pair::thole::pair_thole_ctor(sp, &type_refs, frame)?,
-            ("pair", "coul/tt") => {
-                pair::tang_toennies::pair_tang_toennies_ctor(sp, &type_refs, frame)?
-            }
-            ("pair", "coul/cut") => pair::coul_cut::pair_coul_cut_ctor(sp, &type_refs, frame)?,
-            ("bond", "mmff_bond") => bond::mmff::mmff_bond_ctor(sp, &type_refs, frame)?,
-            ("angle", "mmff_angle") => angle::mmff::mmff_angle_ctor(sp, &type_refs, frame)?,
-            ("angle", "mmff_stbn") => angle::mmff::mmff_stbn_ctor(sp, &type_refs, frame)?,
-            ("dihedral", "mmff_torsion") => {
-                dihedral::mmff::mmff_torsion_ctor(sp, &type_refs, frame)?
-            }
-            ("improper", "mmff_oop") => improper::mmff::mmff_oop_ctor(sp, &type_refs, frame)?,
-            ("pair", "mmff_vdw") => pair::mmff::mmff_vdw_ctor(sp, &type_refs, frame)?,
-            ("pair", "mmff_ele") => pair::mmff::mmff_ele_ctor(sp, &type_refs, frame)?,
-            ("kspace", "pme") => kspace::pme::pme_ctor(sp, &type_refs, frame)?,
-            _ => {
-                return Err(format!(
-                    "no kernel for style category '{}' name '{}'",
-                    category, self.name
-                ));
-            }
-        };
+        let ctor = registry::lookup_kernel(category, &self.name).ok_or_else(|| {
+            format!(
+                "no kernel for style category '{}' name '{}'",
+                category, self.name
+            )
+        })?;
+        let pot = ctor(&self.params, &type_refs, frame)?;
         Ok(Some(pot))
     }
 }
@@ -364,6 +344,28 @@ mod tests {
         let frame = make_lj_frame();
         let err = ff.to_potentials(&frame).unwrap_err();
         assert!(err.contains("no kernel"), "{err}");
+    }
+
+    #[test]
+    fn register_kernel_extends_dispatch() {
+        // A custom (category, name) with no built-in kernel becomes usable by
+        // registering its constructor — no edit to to_potential required.
+        fn my_ctor(
+            _sp: &Params,
+            _tp: &[(&str, &Params)],
+            _f: &Frame,
+        ) -> Result<Box<dyn Potential>, String> {
+            Ok(Box::new(DummyPotential { value: 42.0 }))
+        }
+        register_kernel("pair", "test/custom", my_ctor);
+
+        let mut ff = ForceField::new("test");
+        ff.def_pairstyle("test/custom", &[]).def_type("A", &[]);
+        let frame = make_lj_frame();
+        let pots = ff.to_potentials(&frame).unwrap();
+        let coords = extract_coords(&frame).unwrap();
+        // the custom kernel ran: DummyPotential yields its constant value.
+        assert!((pots.calc_energy(&coords) - 42.0).abs() < 1e-9);
     }
 
     #[test]
