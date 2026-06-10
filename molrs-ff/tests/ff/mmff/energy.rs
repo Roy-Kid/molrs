@@ -328,20 +328,22 @@ fn timing_baseline_50_atoms() {
 
 // ---------------------------------------------------------------------------
 // Geometry optimization over the (RDKit-validated) MmffForceField path.
-// Proves molrs_ff::{minimize, minimize_batch} relax a real force field, and
+// Proves molrs_ff::{LBFGS} relax a real force field, and
 // that the homogeneous batch path reproduces the single-structure result.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn lbfgs_minimize_relaxes_mmff_ethane() {
-    use molrs_ff::{MinimizeOptions, minimize};
+    use molrs_ff::{LBFGS, LbfgsConfig};
 
     let (ff, coords0) = build_ff("e_ethane");
     let e_start = ff.calc_energy_forces(&coords0).0;
 
     let mut coords = coords0.clone();
-    let opts = MinimizeOptions::default();
-    let report = minimize(&ff, &mut coords, &opts).expect("minimize ethane");
+    let opts = LbfgsConfig::default();
+    let report = LBFGS::new(&ff, opts)
+        .run(&mut coords)
+        .expect("minimize ethane");
 
     assert!(
         report.final_energy <= e_start + 1e-9,
@@ -362,15 +364,15 @@ fn lbfgs_minimize_relaxes_mmff_ethane() {
 
 #[test]
 fn lbfgs_minimize_batch_matches_single() {
-    use molrs_ff::{MinimizeOptions, minimize, minimize_batch};
+    use molrs_ff::{LBFGS, LbfgsConfig};
 
     let (ff, coords0) = build_ff("e_ethane");
     let n_atoms = coords0.len() / 3;
-    let opts = MinimizeOptions::default();
+    let opts = LbfgsConfig::default();
 
     // Single-structure reference.
     let mut single = coords0.clone();
-    let single_report = minimize(&ff, &mut single, &opts).expect("single");
+    let single_report = LBFGS::new(&ff, opts).run(&mut single).expect("single");
 
     // Homogeneous batch: block 0 identical to the single start; blocks 1..B
     // deterministically perturbed (same topology, same force field).
@@ -387,7 +389,9 @@ fn lbfgs_minimize_batch_matches_single() {
         }
     }
 
-    let reports = minimize_batch(&ff, &mut batch, n_atoms, b, &opts).expect("batch");
+    let reports = LBFGS::new(&ff, opts)
+        .run_batch(&mut batch, n_atoms, b)
+        .expect("batch");
     assert_eq!(reports.len(), b);
 
     // Block 0 started from the same coords as `single` -> identical outcome.

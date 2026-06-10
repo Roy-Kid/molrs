@@ -10,7 +10,7 @@
 use crate::helpers::{atoms_block, flat_coords, numerical_forces, topo_block};
 use molrs::frame::Frame;
 use molrs::types::F;
-use molrs_ff::{ForceField, MinimizeOptions, minimize, minimize_batch};
+use molrs_ff::{ForceField, LBFGS, LbfgsConfig};
 
 /// A 4-atom chain (butane-like backbone) with one of each OPLS term.
 fn opls_chain_ff() -> ForceField {
@@ -114,7 +114,9 @@ fn opls_minimize_single_and_batch() {
 
     // Single relax.
     let mut single = start.clone();
-    let report = minimize(&pots, &mut single, &MinimizeOptions::default()).expect("minimize");
+    let report = LBFGS::new(&pots, LbfgsConfig::default())
+        .run(&mut single)
+        .expect("minimize");
     assert!(
         report.final_energy <= e_start + 1e-9,
         "energy must not increase: {e_start} -> {}",
@@ -136,8 +138,9 @@ fn opls_minimize_single_and_batch() {
             batch.push(c + pert);
         }
     }
-    let reports =
-        minimize_batch(&pots, &mut batch, n_atoms, b, &MinimizeOptions::default()).expect("batch");
+    let reports = LBFGS::new(&pots, LbfgsConfig::default())
+        .run_batch(&mut batch, n_atoms, b)
+        .expect("batch");
     assert_eq!(reports.len(), b);
     assert!(
         (reports[0].final_energy - report.final_energy).abs() < 1e-9,

@@ -1,11 +1,10 @@
 //! Force-field-agnostic geometry optimization (energy minimization).
 //!
-//! [`minimize`] relaxes a single structure and [`minimize_batch`] relaxes a
-//! homogeneous batch (many structures sharing one topology, hence one
-//! [`Potential`]) using the shared L-BFGS core in [`lbfgs`]. The optimizer
-//! consumes only the `(energy, forces = -grad)` contract of [`Potential`], so
-//! it works with any force field — MMFF94, the harmonic/LJ kernels, or a
-//! user-supplied potential.
+//! The [`LBFGS`] class relaxes a single structure ([`run`](LBFGS::run)) or a
+//! homogeneous batch ([`run_batch`](LBFGS::run_batch)) using the shared L-BFGS
+//! core in [`lbfgs`]. It consumes only the `(energy, forces = -grad)` contract
+//! of [`Potential`](crate::potential::Potential), so it works with any force
+//! field — MMFF94, the harmonic/LJ kernels, or a user-supplied potential.
 //!
 //! Coordinates use the same flat layout as the rest of `molrs-ff`:
 //! `[x0,y0,z0, x1,y1,z1, ...]` (`3·n_atoms` elements, `f64`). Convergence is on
@@ -20,9 +19,9 @@ use molrs::types::F;
 
 pub use lbfgs::{MinResult, minimize_lbfgs_rms};
 
-/// Convergence and step controls for L-BFGS geometry optimization.
+/// Convergence and step controls for the [`LBFGS`] optimizer.
 #[derive(Clone, Copy, Debug)]
-pub struct MinimizeOptions {
+pub struct LbfgsConfig {
     /// Maximum per-atom force magnitude for convergence (kcal/mol/Å).
     /// Optimization stops when `max_i ‖F_i‖ < fmax`. Default `0.05`.
     pub fmax: F,
@@ -35,7 +34,7 @@ pub struct MinimizeOptions {
     pub memory: usize,
 }
 
-impl Default for MinimizeOptions {
+impl Default for LbfgsConfig {
     fn default() -> Self {
         Self {
             fmax: 0.05,
@@ -59,107 +58,119 @@ pub struct OptReport {
     pub final_fmax: F,
 }
 
-/// Minimize a single structure in place.
+/// Limited-memory BFGS geometry optimizer over a molecule-bound [`Potential`].
 ///
-/// `coords` is the flat `3·n_atoms` buffer `[x0,y0,z0, ...]`, updated in place
-/// to the located minimizer. Returns an [`OptReport`].
+/// Mirrors molpy's `LBFGS(potential, …).run(structure)`: hold the potential and
+/// config, then [`run`](LBFGS::run) a single structure or [`run_batch`] a
+/// homogeneous set. Coordinates are flat `[x0,y0,z0, …]` and relaxed in place.
 ///
-/// # Errors
-/// Returns `Err` if `coords.len()` is not a multiple of three.
-pub fn minimize(
-    potential: &dyn Potential,
-    coords: &mut [F],
-    opts: &MinimizeOptions,
-) -> Result<OptReport, String> {
-    if coords.is_empty() {
-        return Ok(OptReport {
-            converged: true,
-            n_steps: 0,
-            final_energy: 0.0,
-            final_fmax: 0.0,
-        });
-    }
-    if coords.len() % 3 != 0 {
-        return Err(format!(
-            "coords length {} is not a multiple of 3 (expected 3·n_atoms)",
-            coords.len()
-        ));
-    }
-    Ok(minimize_one(potential, coords, opts))
+/// [`run_batch`]: LBFGS::run_batch
+pub struct LBFGS<'p> {
+    potential: &'p dyn Potential,
+    cfg: LbfgsConfig,
 }
 
-/// Minimize a homogeneous batch in place, one [`OptReport`] per structure.
-///
-/// All `n_structs` structures share `potential` (identical topology, hence the
-/// same atom count and parameters). `coords` is the concatenation of
-/// `n_structs` flat blocks each of length `3·n_atoms` (row-major over the
-/// conceptual `(B, N, 3)` array). Each block is optimized independently; with
-/// the `rayon` feature the blocks run in parallel, otherwise serially.
-///
-/// # Errors
-/// Returns `Err` if `coords.len() != n_structs · n_atoms · 3`.
-pub fn minimize_batch(
-    potential: &dyn Potential,
-    coords: &mut [F],
-    n_atoms: usize,
-    n_structs: usize,
-    opts: &MinimizeOptions,
-) -> Result<Vec<OptReport>, String> {
-    let stride = n_atoms * 3;
-    let expected = n_structs * stride;
-    if coords.len() != expected {
-        return Err(format!(
-            "coords length {} != n_structs ({}) · n_atoms ({}) · 3 = {}",
-            coords.len(),
-            n_structs,
-            n_atoms,
-            expected
-        ));
-    }
-    if n_structs == 0 {
-        return Ok(Vec::new());
-    }
-    // `chunks_mut(0)` / `par_chunks_mut(0)` panic, so reject a zero-atom batch
-    // explicitly (a (B, 0, 3) input) rather than letting it reach the split.
-    if stride == 0 {
-        return Err(format!(
-            "n_atoms must be > 0 for a batch of {n_structs} structures"
-        ));
+impl<'p> LBFGS<'p> {
+    /// Create an optimizer bound to `potential` with the given config.
+    pub fn new(potential: &'p dyn Potential, cfg: LbfgsConfig) -> Self {
+        Self { potential, cfg }
     }
 
-    #[cfg(feature = "rayon")]
-    {
-        use rayon::prelude::*;
-        Ok(coords
-            .par_chunks_mut(stride)
-            .map(|block| minimize_one(potential, block, opts))
-            .collect())
+    /// Relax a single structure in place. `coords` is the flat `3·n_atoms`
+    /// buffer, updated to the located minimizer.
+    ///
+    /// # Errors
+    /// Returns `Err` if `coords.len()` is not a multiple of three.
+    pub fn run(&self, coords: &mut [F]) -> Result<OptReport, String> {
+        if coords.is_empty() {
+            return Ok(OptReport {
+                converged: true,
+                n_steps: 0,
+                final_energy: 0.0,
+                final_fmax: 0.0,
+            });
+        }
+        if coords.len() % 3 != 0 {
+            return Err(format!(
+                "coords length {} is not a multiple of 3 (expected 3·n_atoms)",
+                coords.len()
+            ));
+        }
+        Ok(self.run_one(coords))
     }
-    #[cfg(not(feature = "rayon"))]
-    {
-        Ok(coords
-            .chunks_mut(stride)
-            .map(|block| minimize_one(potential, block, opts))
-            .collect())
-    }
-}
 
-/// Single-structure minimization without the length check — the batch path
-/// already guarantees `block.len() == 3·n_atoms`.
-fn minimize_one(potential: &dyn Potential, coords: &mut [F], opts: &MinimizeOptions) -> OptReport {
-    let (final_energy, grad, n_steps, converged) = minimize_core(
-        coords,
-        opts.max_steps,
-        Converge::Fmax(opts.fmax),
-        opts.max_step,
-        opts.memory,
-        |c| potential.calc_energy_forces(c),
-    );
-    OptReport {
-        converged,
-        n_steps,
-        final_energy,
-        final_fmax: fmax_from_grad(&grad),
+    /// Relax a homogeneous batch in place, one [`OptReport`] per structure.
+    ///
+    /// All `n_structs` structures share this potential. `coords` is the
+    /// concatenation of `n_structs` flat blocks each of length `3·n_atoms`
+    /// (row-major over the conceptual `(B, N, 3)` array). Each block is optimized
+    /// independently; with the `rayon` feature the blocks run in parallel.
+    ///
+    /// # Errors
+    /// Returns `Err` if `coords.len() != n_structs · n_atoms · 3`, or a
+    /// zero-atom batch.
+    pub fn run_batch(
+        &self,
+        coords: &mut [F],
+        n_atoms: usize,
+        n_structs: usize,
+    ) -> Result<Vec<OptReport>, String> {
+        let stride = n_atoms * 3;
+        let expected = n_structs * stride;
+        if coords.len() != expected {
+            return Err(format!(
+                "coords length {} != n_structs ({}) · n_atoms ({}) · 3 = {}",
+                coords.len(),
+                n_structs,
+                n_atoms,
+                expected
+            ));
+        }
+        if n_structs == 0 {
+            return Ok(Vec::new());
+        }
+        // `chunks_mut(0)` / `par_chunks_mut(0)` panic, so reject a zero-atom
+        // batch explicitly rather than letting it reach the split.
+        if stride == 0 {
+            return Err(format!(
+                "n_atoms must be > 0 for a batch of {n_structs} structures"
+            ));
+        }
+
+        #[cfg(feature = "rayon")]
+        {
+            use rayon::prelude::*;
+            Ok(coords
+                .par_chunks_mut(stride)
+                .map(|block| self.run_one(block))
+                .collect())
+        }
+        #[cfg(not(feature = "rayon"))]
+        {
+            Ok(coords
+                .chunks_mut(stride)
+                .map(|block| self.run_one(block))
+                .collect())
+        }
+    }
+
+    /// Single-structure minimization without the length check — the batch path
+    /// already guarantees `block.len() == 3·n_atoms`.
+    fn run_one(&self, coords: &mut [F]) -> OptReport {
+        let (final_energy, grad, n_steps, converged) = minimize_core(
+            coords,
+            self.cfg.max_steps,
+            Converge::Fmax(self.cfg.fmax),
+            self.cfg.max_step,
+            self.cfg.memory,
+            |c| self.potential.calc_energy_forces(c),
+        );
+        OptReport {
+            converged,
+            n_steps,
+            final_energy,
+            final_fmax: fmax_from_grad(&grad),
+        }
     }
 }
 
@@ -198,8 +209,8 @@ mod tests {
         }
     }
 
-    fn opts() -> MinimizeOptions {
-        MinimizeOptions::default()
+    fn opts() -> LbfgsConfig {
+        LbfgsConfig::default()
     }
 
     #[test]
@@ -207,7 +218,7 @@ mod tests {
         let pot = HarmonicBond { k: 100.0, r0: 1.0 };
         // start stretched to 1.5 Å along x.
         let mut coords = vec![0.0, 0.0, 0.0, 1.5, 0.0, 0.0];
-        let report = minimize(&pot, &mut coords, &opts()).unwrap();
+        let report = LBFGS::new(&pot, opts()).run(&mut coords).unwrap();
         assert!(report.converged, "should converge: {report:?}");
         let r = coords[3] - coords[0];
         assert!(
@@ -227,11 +238,11 @@ mod tests {
         let pot = HarmonicBond { k: 100.0, r0: 1.0 };
         // max_steps = 1 from far away -> not converged, exactly one step.
         let mut coords = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-        let o = MinimizeOptions {
+        let o = LbfgsConfig {
             max_steps: 1,
             ..opts()
         };
-        let r = minimize(&pot, &mut coords, &o).unwrap();
+        let r = LBFGS::new(&pot, o).run(&mut coords).unwrap();
         assert!(!r.converged);
         assert_eq!(r.n_steps, 1);
     }
@@ -240,7 +251,7 @@ mod tests {
     fn idempotent_at_minimum() {
         let pot = HarmonicBond { k: 100.0, r0: 1.0 };
         let mut coords = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]; // already at r0
-        let r = minimize(&pot, &mut coords, &opts()).unwrap();
+        let r = LBFGS::new(&pot, opts()).run(&mut coords).unwrap();
         assert!(r.converged);
         assert!(
             r.n_steps <= 1,
@@ -259,7 +270,7 @@ mod tests {
             }
         }
         let mut coords = vec![0.3, -0.2, 0.1];
-        let r = minimize(&Free, &mut coords, &opts()).unwrap();
+        let r = LBFGS::new(&Free, opts()).run(&mut coords).unwrap();
         assert!(r.converged);
         assert!(r.n_steps <= 1);
     }
@@ -273,7 +284,7 @@ mod tests {
             }
         }
         let mut coords = vec![0.0, 0.0, 0.0, 1.0];
-        assert!(minimize(&Free, &mut coords, &opts()).is_err());
+        assert!(LBFGS::new(&Free, opts()).run(&mut coords).is_err());
     }
 
     #[test]
@@ -285,7 +296,7 @@ mod tests {
             }
         }
         let mut coords: Vec<F> = vec![];
-        let r = minimize(&Free, &mut coords, &opts()).unwrap();
+        let r = LBFGS::new(&Free, opts()).run(&mut coords).unwrap();
         assert!(r.converged);
         assert_eq!(r.n_steps, 0);
     }
@@ -297,12 +308,12 @@ mod tests {
         let pot = HarmonicBond { k: 500.0, r0: 1.0 };
         let mut coords = vec![0.0, 0.0, 0.0, 3.0, 0.0, 0.0];
         let before = coords.clone();
-        let o = MinimizeOptions {
+        let o = LbfgsConfig {
             max_steps: 1,
             max_step: 0.01,
             ..opts()
         };
-        minimize(&pot, &mut coords, &o).unwrap();
+        LBFGS::new(&pot, o).run(&mut coords).unwrap();
         for (a, b) in coords.iter().zip(&before) {
             assert!(
                 (a - b).abs() <= 0.01 + 1e-12,
@@ -318,7 +329,7 @@ mod tests {
         let single_start = vec![0.0, 0.0, 0.0, 1.4, 0.0, 0.0];
 
         let mut single = single_start.clone();
-        let single_report = minimize(&pot, &mut single, &opts()).unwrap();
+        let single_report = LBFGS::new(&pot, opts()).run(&mut single).unwrap();
 
         // 4 identical copies stacked.
         let b = 4;
@@ -326,7 +337,9 @@ mod tests {
         for _ in 0..b {
             batch.extend_from_slice(&single_start);
         }
-        let reports = minimize_batch(&pot, &mut batch, 2, b, &opts()).unwrap();
+        let reports = LBFGS::new(&pot, opts())
+            .run_batch(&mut batch, 2, b)
+            .unwrap();
         assert_eq!(reports.len(), b);
         for (i, rep) in reports.iter().enumerate() {
             assert!((rep.final_energy - single_report.final_energy).abs() < 1e-10);
@@ -342,14 +355,20 @@ mod tests {
     fn batch_rejects_size_mismatch() {
         let pot = HarmonicBond { k: 100.0, r0: 1.0 };
         let mut coords = vec![0.0; 6 * 3 + 1]; // not 3 structs * 2 atoms * 3
-        assert!(minimize_batch(&pot, &mut coords, 2, 3, &opts()).is_err());
+        assert!(
+            LBFGS::new(&pot, opts())
+                .run_batch(&mut coords, 2, 3)
+                .is_err()
+        );
     }
 
     #[test]
     fn batch_zero_structs_is_empty() {
         let pot = HarmonicBond { k: 100.0, r0: 1.0 };
         let mut coords: Vec<F> = vec![];
-        let reports = minimize_batch(&pot, &mut coords, 2, 0, &opts()).unwrap();
+        let reports = LBFGS::new(&pot, opts())
+            .run_batch(&mut coords, 2, 0)
+            .unwrap();
         assert!(reports.is_empty());
     }
 
@@ -358,6 +377,10 @@ mod tests {
         // A (B, 0, 3) batch: n_atoms == 0 -> stride 0 would panic chunks_mut.
         let pot = HarmonicBond { k: 100.0, r0: 1.0 };
         let mut coords: Vec<F> = vec![];
-        assert!(minimize_batch(&pot, &mut coords, 0, 3, &opts()).is_err());
+        assert!(
+            LBFGS::new(&pot, opts())
+                .run_batch(&mut coords, 0, 3)
+                .is_err()
+        );
     }
 }

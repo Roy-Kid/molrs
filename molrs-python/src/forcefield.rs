@@ -21,7 +21,7 @@ use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
 use molrs_ff::potential::{Potentials, extract_coords};
 use molrs_ff::typifier::Typifier;
 use molrs_ff::typifier::mmff::MMFFTypifier;
-use molrs_ff::{MinimizeOptions, OptReport, minimize, minimize_batch};
+use molrs_ff::{LBFGS, LbfgsConfig, OptReport};
 
 use crate::frame::PyFrame;
 use crate::helpers::NpF;
@@ -230,7 +230,7 @@ impl PyPotentials {
         max_step: f64,
         memory: usize,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let opts = MinimizeOptions {
+        let opts = LbfgsConfig {
             fmax,
             max_steps,
             max_step,
@@ -249,7 +249,8 @@ impl PyPotentials {
                         "coords has {n_elem} elements, not a multiple of 3 (expected (N, 3) or (3N,))"
                     )));
                 }
-                let report = minimize(&self.inner, &mut flat, &opts)
+                let report = LBFGS::new(&self.inner, opts)
+                    .run(&mut flat)
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 let out: Bound<'py, PyArray2<NpF>> = Array2::from_shape_vec((n_elem / 3, 3), flat)
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
@@ -276,7 +277,8 @@ impl PyPotentials {
                     )));
                 }
                 let mut flat: Vec<NpF> = arr.iter().copied().collect();
-                let reports = minimize_batch(&self.inner, &mut flat, n, b, &opts)
+                let reports = LBFGS::new(&self.inner, opts)
+                    .run_batch(&mut flat, n, b)
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 let out: Bound<'py, PyArray3<NpF>> = Array3::from_shape_vec((b, n, 3), flat)
                     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
