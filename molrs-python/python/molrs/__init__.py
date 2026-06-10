@@ -79,6 +79,7 @@ from .molrs import (
     Potentials,
     OptReport,
     read_forcefield_xml,
+    read_forcefield_xml_str,
     extract_coords,
     build_mmff_potentials,
     # Field-name convention submodule
@@ -169,6 +170,7 @@ __all__ = [
     "OptReport",
     "build_mmff_potentials",
     "read_forcefield_xml",
+    "read_forcefield_xml_str",
     "extract_coords",
     "signal_acf_fft",
     "signal_apply_window",

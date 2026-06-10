@@ -526,6 +526,36 @@ impl PyForceField {
             .collect()
     }
 
+    /// Compile this force field against a typed :class:`Frame` into
+    /// evaluable :class:`Potentials`.
+    ///
+    /// The frame must carry the topology + ``type`` columns each style
+    /// resolves (``atoms``/``bonds``/``angles``/``dihedrals``/``impropers``/
+    /// ``pairs``), exactly as produced by a typifier or an external emitter.
+    ///
+    /// Parameters
+    /// ----------
+    /// frame : Frame
+    ///     Typed molecular data.
+    ///
+    /// Returns
+    /// -------
+    /// Potentials
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If a style has no registered kernel, a topology block is missing,
+    ///     or a type label is unknown.
+    fn compile(&self, frame: &PyFrame) -> PyResult<PyPotentials> {
+        let core = frame.clone_core_frame()?;
+        let potentials = self
+            .inner
+            .compile(&core)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyPotentials { inner: potentials })
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "ForceField(name='{}', styles={})",
@@ -533,4 +563,14 @@ impl PyForceField {
             self.inner.styles().len()
         )
     }
+}
+
+/// Parse a force-field definition from an XML string (same schema as
+/// :func:`read_forcefield_xml`).
+#[pyfunction]
+#[pyo3(name = "read_forcefield_xml_str")]
+pub fn read_forcefield_xml_str_py(xml: &str) -> PyResult<PyForceField> {
+    let forcefield = molrs_ff::read_forcefield_xml_str(xml)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(PyForceField { inner: forcefield })
 }
