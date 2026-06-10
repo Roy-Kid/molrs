@@ -4,6 +4,7 @@ One row per spec produced by `/molrs-spec`. Newest on top.
 
 | Date | Slug | Status | Owner crate(s) | Summary |
 |---|---|---|---|---|
+| 2026-06-10 | [unit-conversion-system](unit-conversion-system.md) | in-flight | molrs-core | pint-style UnitRegistry + Dimension + Quantity; MD units (kcal/mol, eV, hartree, Å, bohr, °C) |
 
 <!--
 Status values:

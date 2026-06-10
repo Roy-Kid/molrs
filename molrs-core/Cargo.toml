@@ -39,6 +39,7 @@ libm = "0.2"
 criterion = "0.5"
 rand = "0.9"
 tempfile = "3.0"
+ndarray = "0.17"
 
 [[bench]]
 name = "benchmarks"
