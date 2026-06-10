@@ -95,7 +95,15 @@ use crate::block::DType;
 /// take the dtype of their first write. Keep it in sync with molpy's field set.
 pub fn canonical_dtype(key: &str) -> Option<DType> {
     match key {
-        X | Y | Z | CHARGE | ORDER | MASS => Some(DType::Float),
+        // Continuous physical quantities are float-canonical: a value written as
+        // an int (e.g. a velocity `0`) is stored as `0.0` so a later fractional
+        // write is accepted rather than rejected by an int column.
+        X | Y | Z | VX | VY | VZ | CHARGE | ORDER | MASS => Some(DType::Float),
+        // Integer ids and string labels (id/mol_id/res_id/type/element/name/…)
+        // and the UInt relation endpoints (atomi/atomj/…) intentionally take the
+        // dtype of their first write — they are written with a consistent type
+        // at their source, so coercion here would be wrong (endpoints are UInt,
+        // not Int).
         _ => None,
     }
 }
