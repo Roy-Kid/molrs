@@ -1,4 +1,15 @@
-# Spec: OPLS-AA Energy/Force Kernels + molpy→molrs Typed-Frame Seam
+# Spec: OPLS-AA Energy/Force Kernels (+ superseded molpy seam framing)
+
+> **2026-06-10 architecture correction.** The "molpy→molrs typed-frame *seam*"
+> framing below (a molpy-side emitter that builds a ForceField and hands molrs a
+> typed frame) is **superseded** and must not be implemented. Per the durable
+> directive *core sinks to molrs* (memory: `feedback-core-sinks-to-molrs`,
+> roadmap: `project-molrs-core-sink-roadmap`), the FF and its IO live in molrs:
+> molrs reads the OPLS format itself, the typifier sinks to molrs, and
+> `molrs.ForceField.compile(frame)` runs entirely in molrs. **The two kernels in
+> this spec (OPLS dihedral + `coul/cut`) are correct and shipped** — only the
+> molpy-emitter seam (ac-008/ac-009 as written) is retired in favor of the
+> sink-down tracks.
 
 ## Summary
 Add the two force-field kernels molrs-ff is missing to evaluate an OPLS-AA
