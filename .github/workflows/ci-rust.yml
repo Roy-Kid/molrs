@@ -25,8 +25,8 @@ jobs:
         with:
           components: clippy
       - run: |
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo clippy -p molcrafts-molrs --all-targets --features full -- -D warnings
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo clippy -p molcrafts-molrs --all-targets --features full --locked -- -D warnings
 
   test:
     name: test
@@ -48,10 +48,10 @@ jobs:
         run: bash scripts/fetch-test-data.sh
 
       - name: Test (workspace)
-        run: cargo test --workspace --lib --tests --examples
+        run: cargo test --workspace --lib --tests --examples --locked
 
       - name: Test (façade with all sub-systems)
-        run: cargo test -p molcrafts-molrs --lib --tests --features "full filesystem"
+        run: cargo test -p molcrafts-molrs --lib --tests --features "full filesystem" --locked
 
       - name: Benches build (core)
         run: cargo bench -p molcrafts-molrs-core --no-run
