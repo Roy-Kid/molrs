@@ -241,3 +241,52 @@ def test_keys_convention_exposed():
     assert molrs.keys.ELEMENT == "element"
     assert molrs.keys.CHARGE == "charge"
     assert list(molrs.keys.COORDS) == ["x", "y", "z"]
+
+
+# --------------------------------------------------------------------------- #
+# relation enumeration + geometry systems (P0-C)                              #
+# --------------------------------------------------------------------------- #
+
+
+def test_relation_ids_enumerates_handles():
+    """Authoritative enumeration — replaces probing opaque handle ranges."""
+    mol = molrs.Atomistic()
+    a, b, c = mol.spawn(), mol.spawn(), mol.spawn()
+    mol.register_kind("bond", 2)
+    rh1 = mol.add_relation("bond", [a, b])
+    rh2 = mol.add_relation("bond", [b, c])
+    assert set(mol.relation_ids("bond")) == {rh1, rh2}
+    assert mol.n_relations("bond") == 2
+
+
+def test_relation_ids_empty_for_registered_kind():
+    mol = molrs.Atomistic()
+    mol.register_kind("angle", 3)
+    assert mol.relation_ids("angle") == []
+
+
+def test_relation_ids_unregistered_kind_raises():
+    mol = molrs.Atomistic()
+    with pytest.raises(ValueError):
+        mol.relation_ids("nope")
+
+
+def test_scale_about_center():
+    mol = molrs.Atomistic()
+    handles = [mol.spawn() for _ in range(3)]
+    for i, h in enumerate(handles):
+        mol.set(h, "x", float(i))
+        mol.set(h, "y", 0.0)
+        mol.set(h, "z", 0.0)
+    molrs.scale(mol, [2.0, 2.0, 2.0], [1.0, 0.0, 0.0])
+    assert [mol.get(h, "x") for h in handles] == [-1.0, 1.0, 3.0]
+
+
+def test_scale_uniform_about_origin():
+    mol = molrs.Atomistic()
+    h = mol.spawn()
+    mol.set(h, "x", 1.0)
+    mol.set(h, "y", 2.0)
+    mol.set(h, "z", 3.0)
+    molrs.scale(mol, [0.5, 0.5, 0.5])
+    assert (mol.get(h, "x"), mol.get(h, "y"), mol.get(h, "z")) == (0.5, 1.0, 1.5)

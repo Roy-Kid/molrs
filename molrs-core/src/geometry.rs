@@ -27,6 +27,26 @@ pub fn translate(mol: &mut MolGraph, delta: [f64; 3]) {
     }
 }
 
+/// Scale every node that has coordinates by a per-axis `factor` about an
+/// optional center (defaults to the origin). Pass `[s, s, s]` for a uniform
+/// scale. Nodes missing any coordinate are left untouched.
+///
+/// Operates directly on each dense coordinate column (one pass per axis), so
+/// cost is linear in the number of atoms.
+pub fn scale(mol: &mut MolGraph, factor: [f64; 3], about: Option<[f64; 3]>) {
+    let origin = about.unwrap_or([0.0, 0.0, 0.0]);
+    let table = mol.node_table_mut();
+    for (i, key) in keys::COORDS.iter().enumerate() {
+        if let Ok((data, valid)) = table.column_f64_mut(key) {
+            for (row, val) in data.iter_mut().enumerate() {
+                if valid.get(row) {
+                    *val = (*val - origin[i]) * factor[i] + origin[i];
+                }
+            }
+        }
+    }
+}
+
 /// Rotate every node that has coordinates around `axis` by `angle` radians,
 /// optionally about a center point (defaults to the origin). Nodes missing any
 /// coordinate are left untouched.

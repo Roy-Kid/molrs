@@ -65,6 +65,7 @@ from .molrs import (
     # Systems (module-level free functions over a graph)
     translate,
     rotate,
+    scale,
     perceive_aromaticity,
     add_hydrogens,
     find_rings,
@@ -159,6 +160,7 @@ __all__ = [
     "CoarseGrain",
     "translate",
     "rotate",
+    "scale",
     "perceive_aromaticity",
     "add_hydrogens",
     "find_rings",

@@ -296,6 +296,16 @@ macro_rules! graph_world_impl {
                 Ok(self.mol().n_relations(kid))
             }
 
+            /// Live relation handles of `kind`, in row order.
+            ///
+            /// Authoritative enumeration — callers must not probe opaque handle
+            /// ranges. Returns an empty list for a registered kind with no
+            /// relations; errors only if `kind` is unregistered.
+            fn relation_ids(&self, kind: &str) -> PyResult<Vec<u64>> {
+                let kid = kind_id_checked(self.mol(), kind)?;
+                Ok(self.mol().relation_ids(kid).map(relation_to_u64).collect())
+            }
+
             // ---- zero-copy columns ----
 
             /// Zero-copy numpy view of the `f64` component column `key`, aligned to
@@ -703,6 +713,15 @@ pub fn rotate(
     about: Option<[f64; 3]>,
 ) -> PyResult<()> {
     with_world_mut(mol, |g| molrs::geometry::rotate(g, axis, angle, about))
+}
+
+/// Scale node coordinates by a per-axis `factor` about an optional center
+/// (defaults to the origin). Pass `[s, s, s]` for a uniform scale. Generic
+/// geometry system.
+#[pyfunction]
+#[pyo3(signature = (mol, factor, about=None))]
+pub fn scale(mol: &Bound<'_, PyAny>, factor: [f64; 3], about: Option<[f64; 3]>) -> PyResult<()> {
+    with_world_mut(mol, |g| molrs::geometry::scale(g, factor, about))
 }
 
 /// Perceive aromaticity in place; returns the number of aromatic atoms found.

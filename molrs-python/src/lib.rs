@@ -53,7 +53,8 @@ use region::{PyHollowSphere, PyRegion, PySphere};
 pub(crate) mod molgraph;
 use molgraph::{PyAtomistic, PyCoarseGrain, PyGraph};
 use molgraph::{
-    add_hydrogens, compute_gasteiger_charges, find_rings, perceive_aromaticity, rotate, translate,
+    add_hydrogens, compute_gasteiger_charges, find_rings, perceive_aromaticity, rotate, scale,
+    translate,
 };
 
 mod conformer;
@@ -182,6 +183,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Systems = module-level free functions (no algorithm methods on the classes)
     m.add_function(wrap_pyfunction!(translate, m)?)?;
     m.add_function(wrap_pyfunction!(rotate, m)?)?;
+    m.add_function(wrap_pyfunction!(scale, m)?)?;
     m.add_function(wrap_pyfunction!(perceive_aromaticity, m)?)?;
     m.add_function(wrap_pyfunction!(add_hydrogens, m)?)?;
     m.add_function(wrap_pyfunction!(find_rings, m)?)?;
