@@ -442,6 +442,15 @@ impl PyBlock {
         self.inner.clone_block().map_err(ffi_error_to_pyerr)
     }
 
+    /// Insert a Python-facing column from another module in this crate.
+    pub(crate) fn insert_py_column(
+        &mut self,
+        key: &str,
+        array: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<()> {
+        self.insert(key, array)
+    }
+
     /// Run a read-only closure on the underlying `CoreBlock`.
     fn with_block<R>(&self, f: impl FnOnce(&CoreBlock) -> R) -> PyResult<R> {
         self.inner.with(f).map_err(ffi_error_to_pyerr)

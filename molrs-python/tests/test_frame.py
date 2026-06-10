@@ -11,6 +11,39 @@ class TestFrameConstruction:
         assert f.keys() == []
         assert f.simbox is None
 
+    def test_from_dict_blocks_envelope(self):
+        f = Frame.from_dict(
+            {
+                "blocks": {
+                    "atoms": {
+                        "symbol": ["C", "H"],
+                        "x": np.array([0.0, 1.0], dtype=np.float64),
+                    }
+                },
+                "metadata": {"source": "pytest"},
+            }
+        )
+
+        assert sorted(f.keys()) == ["atoms"]
+        assert f["atoms"].nrows == 2
+        assert list(f["atoms"].view("symbol")) == ["C", "H"]
+        np.testing.assert_allclose(f["atoms"].view("x"), [0.0, 1.0])
+        assert f.meta["source"] == "pytest"
+
+    def test_from_dict_direct_block_mapping(self):
+        f = Frame.from_dict(
+            {
+                "atoms": {
+                    "id": np.array([1, 2], dtype=np.int64),
+                    "selected": np.array([True, False], dtype=np.bool_),
+                }
+            }
+        )
+
+        assert sorted(f.keys()) == ["atoms"]
+        np.testing.assert_array_equal(f["atoms"].view("id"), [1, 2])
+        np.testing.assert_array_equal(f["atoms"].view("selected"), [True, False])
+
     def test_repr_empty(self):
         r = repr(Frame())
         assert "Frame" in r

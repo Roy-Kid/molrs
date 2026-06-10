@@ -23,6 +23,7 @@ use crate::block::PyBlock;
 use crate::helpers::molrs_error_to_pyerr;
 use crate::simbox::PyBox;
 use crate::store::ffi_error_to_pyerr;
+use molrs::block::Block as CoreBlock;
 use molrs::frame::Frame as CoreFrame;
 use molrs_ffi::FrameRef;
 use pyo3::exceptions::{PyKeyError, PyTypeError};
@@ -72,6 +73,71 @@ impl PyFrame {
         Self {
             inner: FrameRef::new_standalone(),
         }
+    }
+
+    /// Build a frame from a dictionary of blocks.
+    ///
+    /// Accepts either ``{"blocks": {name: {column: array}}, "metadata": {...}}``
+    /// or a direct ``{name: {column: array}}`` block mapping. Column values use
+    /// the same accepted types as :meth:`Block.insert`.
+    ///
+    /// Parameters
+    /// ----------
+    /// data : dict
+    ///     Frame data in the shared ``to_dict`` / ``from_dict`` exchange shape.
+    ///
+    /// Returns
+    /// -------
+    /// Frame
+    #[staticmethod]
+    fn from_dict(data: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let has_blocks_envelope = data.contains("blocks")?;
+        let blocks = if has_blocks_envelope {
+            data.get_item("blocks")?
+                .expect("checked above")
+                .cast_into::<PyDict>()
+                .map_err(|_| PyTypeError::new_err("'blocks' must be a dict"))?
+        } else {
+            data.clone()
+        };
+
+        let mut frame = Self::new();
+        for (block_name, columns) in blocks.iter() {
+            let name: String = block_name.extract()?;
+            let columns = columns
+                .cast::<PyDict>()
+                .map_err(|_| PyTypeError::new_err(format!("block '{name}' must be a dict")))?;
+
+            let mut block = PyBlock::from_core_block(CoreBlock::new())?;
+            for (column_name, values) in columns.iter() {
+                let key: String = column_name.extract()?;
+                block.insert_py_column(&key, &values)?;
+            }
+
+            let core_block = block.clone_core_block()?;
+            frame
+                .inner
+                .store
+                .borrow_mut()
+                .set_block(frame.inner.id, &name, core_block)
+                .map_err(ffi_error_to_pyerr)?;
+        }
+
+        if has_blocks_envelope {
+            let metadata = if let Some(metadata) = data.get_item("metadata")? {
+                Some(metadata)
+            } else {
+                data.get_item("meta")?
+            };
+            if let Some(metadata) = metadata {
+                let metadata = metadata
+                    .cast::<PyDict>()
+                    .map_err(|_| PyTypeError::new_err("'metadata' must be a dict"))?;
+                frame.set_meta(metadata)?;
+            }
+        }
+
+        Ok(frame)
     }
 
     /// Retrieve a block by name.
