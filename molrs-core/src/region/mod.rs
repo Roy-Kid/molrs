@@ -9,4 +9,4 @@ pub use simbox::SimBox;
 #[allow(clippy::module_inception)]
 pub mod region;
 pub use crate::types::FNx3;
-pub use region::{AndRegion, HollowSphere, NotRegion, OrRegion, Region, Sphere};
+pub use region::{AndRegion, Cuboid, HollowSphere, NotRegion, OrRegion, Region, Sphere};

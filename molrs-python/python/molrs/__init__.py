@@ -57,6 +57,7 @@ from .molrs import (
     # Regions
     Sphere,
     HollowSphere,
+    Cuboid,
     Region,
     # Molecular graph hierarchy
     Graph,
@@ -154,6 +155,7 @@ __all__ = [
     "SmilesIR",
     "Sphere",
     "HollowSphere",
+    "Cuboid",
     "Region",
     "Graph",
     "Atomistic",

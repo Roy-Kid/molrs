@@ -108,6 +108,48 @@ impl Region for Sphere {
     }
 }
 
+/// An axis-aligned cuboid (box) region: a point is inside when
+/// `origin[d] <= p[d] <= origin[d] + lengths[d]` on every axis.
+#[derive(Debug, Clone)]
+pub struct Cuboid {
+    /// Minimum corner (lower bound on each axis).
+    pub origin: F3,
+    /// Edge lengths along x, y, z.
+    pub lengths: F3,
+}
+
+impl Cuboid {
+    /// Creates a cuboid with the given origin (min corner) and edge lengths.
+    pub fn new(origin: F3, lengths: F3) -> Self {
+        Self { origin, lengths }
+    }
+}
+
+impl Region for Cuboid {
+    fn bounds(&self) -> FNx3 {
+        let mut b = Array2::zeros((3, 2));
+        for d in 0..3 {
+            b[[d, 0]] = self.origin[d];
+            b[[d, 1]] = self.origin[d] + self.lengths[d];
+        }
+        b
+    }
+
+    fn contains(&self, points: &FNx3) -> Array1<bool> {
+        assert_eq!(points.ncols(), 3, "points must have shape (N, 3)");
+        let mut mask = Array1::from_elem(points.nrows(), false);
+        for (row, m) in points.rows().into_iter().zip(mask.iter_mut()) {
+            *m = (0..3)
+                .all(|d| row[d] >= self.origin[d] && row[d] <= self.origin[d] + self.lengths[d]);
+        }
+        mask
+    }
+
+    fn contains_point(&self, point: &[F; 3]) -> bool {
+        (0..3).all(|d| point[d] >= self.origin[d] && point[d] <= self.origin[d] + self.lengths[d])
+    }
+}
+
 /// A hollow sphere (spherical shell) region.
 ///
 /// This region represents the space between two concentric spheres:
@@ -318,6 +360,31 @@ impl Region for OrRegion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cuboid_contains_and_bounds() {
+        let c = Cuboid::new(
+            Array1::from_vec(vec![0.0, 0.0, 0.0]),
+            Array1::from_vec(vec![2.0, 2.0, 2.0]),
+        );
+        let pts = Array2::from_shape_vec(
+            (4, 3),
+            vec![
+                1.0, 1.0, 1.0, // inside
+                3.0, 1.0, 1.0, // outside (x > 2)
+                2.0, 2.0, 2.0, // on the max corner (inclusive)
+                -0.1, 0.0, 0.0, // outside (x < 0)
+            ],
+        )
+        .unwrap();
+        let mask = c.contains(&pts);
+        assert_eq!(mask.to_vec(), vec![true, false, true, false]);
+        assert!(c.contains_point(&[0.5, 1.0, 2.0]));
+        assert!(!c.contains_point(&[2.5, 1.0, 1.0]));
+        let b = c.bounds();
+        assert_eq!(b[[0, 0]], 0.0);
+        assert_eq!(b[[0, 1]], 2.0);
+    }
 
     #[test]
     fn sphere_bounds_are_correct() {

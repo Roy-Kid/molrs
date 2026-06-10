@@ -48,7 +48,7 @@ mod molrec;
 use molrec::{PyMolRec, PyObservables, PyScalarObservable, PyTrajectory, PyVectorObservable};
 
 mod region;
-use region::{PyHollowSphere, PyRegion, PySphere};
+use region::{PyCuboid, PyHollowSphere, PyRegion, PySphere};
 
 pub(crate) mod molgraph;
 use molgraph::{PyAtomistic, PyCoarseGrain, PyGraph};
@@ -173,6 +173,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Regions
     m.add_class::<PySphere>()?;
     m.add_class::<PyHollowSphere>()?;
+    m.add_class::<PyCuboid>()?;
     m.add_class::<PyRegion>()?;
 
     // Molecular graph hierarchy (base before subclasses)
