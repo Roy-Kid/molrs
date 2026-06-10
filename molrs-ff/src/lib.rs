@@ -1,6 +1,7 @@
 pub mod forcefield;
 pub mod mmff;
 pub mod molrec_ext;
+pub mod optimize;
 pub mod potential;
 pub mod typifier;
 
@@ -8,3 +9,4 @@ pub mod typifier;
 pub use forcefield::ForceField;
 pub use forcefield::xml::{read_forcefield_xml, read_forcefield_xml_str};
 pub use molrec_ext::{molrec_from_forcefield, set_forcefield_metadata};
+pub use optimize::{MinimizeOptions, OptReport, minimize, minimize_batch};

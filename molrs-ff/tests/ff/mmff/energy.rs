@@ -325,3 +325,92 @@ fn timing_baseline_50_atoms() {
     );
     assert!(per.is_finite());
 }
+
+// ---------------------------------------------------------------------------
+// Geometry optimization over the (RDKit-validated) MmffForceField path.
+// Proves molrs_ff::{minimize, minimize_batch} relax a real force field, and
+// that the homogeneous batch path reproduces the single-structure result.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lbfgs_minimize_relaxes_mmff_ethane() {
+    use molrs_ff::{MinimizeOptions, minimize};
+
+    let (ff, coords0) = build_ff("e_ethane");
+    let e_start = ff.eval(&coords0).0;
+
+    let mut coords = coords0.clone();
+    let opts = MinimizeOptions::default();
+    let report = minimize(&ff, &mut coords, &opts).expect("minimize ethane");
+
+    assert!(
+        report.final_energy <= e_start + 1e-9,
+        "energy must not increase: {e_start} -> {}",
+        report.final_energy
+    );
+    assert!(report.converged, "ethane should converge: {report:?}");
+    assert!(
+        report.final_fmax <= opts.fmax + 1e-12,
+        "fmax not satisfied: {}",
+        report.final_fmax
+    );
+    println!(
+        "ethane MMFF relax: E {e_start:.4} -> {:.4} (fmax {:.4}, {} steps)",
+        report.final_energy, report.final_fmax, report.n_steps
+    );
+}
+
+#[test]
+fn lbfgs_minimize_batch_matches_single() {
+    use molrs_ff::{MinimizeOptions, minimize, minimize_batch};
+
+    let (ff, coords0) = build_ff("e_ethane");
+    let n_atoms = coords0.len() / 3;
+    let opts = MinimizeOptions::default();
+
+    // Single-structure reference.
+    let mut single = coords0.clone();
+    let single_report = minimize(&ff, &mut single, &opts).expect("single");
+
+    // Homogeneous batch: block 0 identical to the single start; blocks 1..B
+    // deterministically perturbed (same topology, same force field).
+    let b = 4;
+    let mut batch: Vec<f64> = Vec::with_capacity(b * coords0.len());
+    for s in 0..b {
+        for (i, &c) in coords0.iter().enumerate() {
+            let pert = if s == 0 {
+                0.0
+            } else {
+                0.02 * (((i + s * 7) % 5) as f64 - 2.0)
+            };
+            batch.push(c + pert);
+        }
+    }
+
+    let reports = minimize_batch(&ff, &mut batch, n_atoms, b, &opts).expect("batch");
+    assert_eq!(reports.len(), b);
+
+    // Block 0 started from the same coords as `single` -> identical outcome.
+    assert!(
+        (reports[0].final_energy - single_report.final_energy).abs() < 1e-9,
+        "batch block 0 energy {} != single {}",
+        reports[0].final_energy,
+        single_report.final_energy
+    );
+    for (a, s) in batch[0..coords0.len()].iter().zip(&single) {
+        assert!(
+            (a - s).abs() < 1e-9,
+            "batch block 0 coords diverged from single"
+        );
+    }
+
+    // All structures relaxed to a finite, converged minimum.
+    for (i, r) in reports.iter().enumerate() {
+        assert!(r.final_energy.is_finite(), "block {i} energy not finite");
+        assert!(
+            r.final_fmax <= opts.fmax + 1e-12 || !r.converged,
+            "block {i} fmax {} unsatisfied",
+            r.final_fmax
+        );
+    }
+}

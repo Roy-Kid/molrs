@@ -58,6 +58,9 @@ pub trait Potential: Send + Sync {
 /// Aggregates multiple potentials; energy/forces are summed.
 pub struct Potentials {
     inner: Vec<Box<dyn Potential>>,
+    /// Number of atoms the kernels were compiled against (`coords.len() / 3`).
+    /// `0` when unknown (e.g. built incrementally via [`Potentials::push`]).
+    n_atoms: usize,
 }
 
 impl std::fmt::Debug for Potentials {
@@ -70,7 +73,10 @@ impl std::fmt::Debug for Potentials {
 
 impl Potentials {
     pub fn new() -> Self {
-        Self { inner: Vec::new() }
+        Self {
+            inner: Vec::new(),
+            n_atoms: 0,
+        }
     }
 
     pub fn push(&mut self, pot: Box<dyn Potential>) {
@@ -79,6 +85,19 @@ impl Potentials {
 
     pub fn len(&self) -> usize {
         self.inner.len()
+    }
+
+    /// Number of atoms the kernels were compiled against, i.e. the expected
+    /// `coords.len() / 3`. Returns `0` if unknown (built via [`push`]).
+    ///
+    /// [`push`]: Potentials::push
+    pub fn n_atoms(&self) -> usize {
+        self.n_atoms
+    }
+
+    /// Record the compiled atom count (used by [`ForceField::compile_with`]).
+    pub fn set_n_atoms(&mut self, n_atoms: usize) {
+        self.n_atoms = n_atoms;
     }
 
     pub fn is_empty(&self) -> bool {
@@ -114,6 +133,15 @@ impl Potentials {
 impl Default for Potentials {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Make the aggregate usable wherever a single [`Potential`] is expected (e.g.
+/// the geometry optimizer in [`crate::optimize`]), forwarding to the summed
+/// evaluation over all kernels.
+impl Potential for Potentials {
+    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+        Potentials::eval(self, coords)
     }
 }
 
@@ -261,6 +289,10 @@ impl ForceField {
             let pot = ctor(&style.params, &type_refs, frame)?;
             pots.push(pot);
         }
+
+        // Record the atom count so callers (e.g. the geometry optimizer's
+        // batch path) can validate coordinate shapes against this topology.
+        pots.set_n_atoms(frame.get("atoms").and_then(|b| b.nrows()).unwrap_or(0));
 
         Ok(pots)
     }
