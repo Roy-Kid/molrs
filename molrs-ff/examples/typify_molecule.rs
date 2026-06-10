@@ -35,7 +35,7 @@
 //!     │
 //!     └─ typifier.build(&mol)          → Potentials (pre-resolved SoA arrays)
 //!           │                                │
-//!           ├─ typify() [internal]     potentials.eval(coords)
+//!           ├─ typify() [internal]     potentials.calc_energy_forces(coords)
 //!           │   ├─ find_rings()                │
 //!           │   ├─ assign_atom_types()   (energy, forces)
 //!           │   ├─ Topology::from_edges()
@@ -262,7 +262,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Built {} potential kernel(s)", potentials.len());
 
             let coords = extract_coords(&frame)?;
-            let (energy, forces) = potentials.eval(&coords);
+            let (energy, forces) = potentials.calc_energy_forces(&coords);
 
             println!("Total energy: {:.4} kcal/mol", energy);
 

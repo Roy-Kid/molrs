@@ -939,6 +939,7 @@ dependencies = [
  "libm",
  "molcrafts-molrs-core",
  "ndarray",
+ "rayon",
  "roxmltree",
  "rustfft",
  "serde_json",

@@ -133,7 +133,7 @@ fn total_energy_matches_rdkit() {
     let mut fails = Vec::new();
     for name in names {
         let (ff, coords) = build_ff(name);
-        let got = ff.eval(&coords).0;
+        let got = ff.calc_energy_forces(&coords).0;
         let want = ref_energy(name);
         let delta = (got - want).abs();
         println!("{name:12} molrs={got:14.6}  rdkit={want:14.6}  d={delta:.3e}");
@@ -161,7 +161,7 @@ fn mmff94s_total_energy_matches_rdkit() {
     let mut fails = Vec::new();
     for name in S_NAMES {
         let (ff, coords) = build_ff_variant(name, MmffVariant::Mmff94s);
-        let got = ff.eval(&coords).0;
+        let got = ff.calc_energy_forces(&coords).0;
         let want = ref_energy_field(name, "mmff94s_total_energy");
         let delta = (got - want).abs();
         println!("{name:20} 94s molrs={got:14.6}  rdkit={want:14.6}  d={delta:.3e}");
@@ -186,12 +186,12 @@ fn mmff94_unchanged_and_differs_from_94s() {
     let mut fails = Vec::new();
     for name in S_NAMES {
         let (ff94, coords) = build_ff_variant(name, MmffVariant::Mmff94);
-        let got94 = ff94.eval(&coords).0;
+        let got94 = ff94.calc_energy_forces(&coords).0;
         let want94 = ref_energy_field(name, "mmff94_total_energy");
         let want94s = ref_energy_field(name, "mmff94s_total_energy");
         let d94 = (got94 - want94).abs();
         let (ff94s, _) = build_ff_variant(name, MmffVariant::Mmff94s);
-        let got94s = ff94s.eval(&coords).0;
+        let got94s = ff94s.calc_energy_forces(&coords).0;
         println!(
             "{name:20} 94 molrs={got94:14.6} rdkit={want94:14.6} | 94s molrs={got94s:14.6} | \
              ref_diff={:.4}",
@@ -222,7 +222,7 @@ fn breakdown_sums_to_total() {
     for name in ["e_ethane", "e_ethylene", "e_benzene", "e_caffeine"] {
         let (ff, coords) = build_ff(name);
         let b = ff.energy_terms(&coords);
-        let total = ff.eval(&coords).0;
+        let total = ff.calc_energy_forces(&coords).0;
         println!(
             "{name:12} bond={:.4} angle={:.4} sb={:.4} oop={:.4} tor={:.4} vdw={:.4} ele={:.4} | total={:.4}",
             b.bond, b.angle, b.stretch_bend, b.oop, b.torsion, b.vdw, b.electrostatic, b.total
@@ -247,15 +247,15 @@ fn analytical_gradient_matches_finite_difference() {
         "e_caffeine",
     ] {
         let (ff, coords) = build_ff(name);
-        let (_, forces) = ff.eval(&coords);
+        let (_, forces) = ff.calc_energy_forces(&coords);
         let mut max_err = 0.0f64;
         for idx in 0..coords.len() {
             let mut cp = coords.clone();
             cp[idx] += h;
-            let ep = ff.eval(&cp).0;
+            let ep = ff.calc_energy_forces(&cp).0;
             let mut cm = coords.clone();
             cm[idx] -= h;
-            let em = ff.eval(&cm).0;
+            let em = ff.calc_energy_forces(&cm).0;
             let fd_grad = (ep - em) / (2.0 * h);
             // forces = -gradient
             let err = (forces[idx] + fd_grad).abs();
@@ -272,7 +272,7 @@ fn analytical_gradient_matches_finite_difference() {
 #[test]
 fn benzene_translation_rotation_invariance() {
     let (ff, coords) = build_ff("e_benzene");
-    let e0 = ff.eval(&coords).0;
+    let e0 = ff.calc_energy_forces(&coords).0;
 
     // translation
     let mut shifted = coords.clone();
@@ -281,7 +281,7 @@ fn benzene_translation_rotation_invariance() {
         shifted[k + 1] -= 1.2;
         shifted[k + 2] += 0.4;
     }
-    let e_t = ff.eval(&shifted).0;
+    let e_t = ff.calc_energy_forces(&shifted).0;
     assert!(
         (e_t - e0).abs() < 1.0e-9,
         "translation changed E by {}",
@@ -296,7 +296,7 @@ fn benzene_translation_rotation_invariance() {
         rotated[k] = c * x - s * y;
         rotated[k + 1] = s * x + c * y;
     }
-    let e_r = ff.eval(&rotated).0;
+    let e_r = ff.calc_energy_forces(&rotated).0;
     assert!(
         (e_r - e0).abs() < 1.0e-9,
         "rotation changed E by {}",
@@ -310,12 +310,12 @@ fn timing_baseline_50_atoms() {
     let (ff, coords) = build_ff("e_big");
     let n = coords.len() / 3;
     // warm up
-    let _ = ff.eval(&coords);
+    let _ = ff.calc_energy_forces(&coords);
     let iters = 200;
     let t0 = Instant::now();
     let mut acc = 0.0;
     for _ in 0..iters {
-        acc += ff.eval(&coords).0;
+        acc += ff.calc_energy_forces(&coords).0;
     }
     let elapsed = t0.elapsed();
     let per = elapsed.as_secs_f64() / iters as f64;
@@ -324,4 +324,97 @@ fn timing_baseline_50_atoms() {
         per * 1.0e6
     );
     assert!(per.is_finite());
+}
+
+// ---------------------------------------------------------------------------
+// Geometry optimization over the (RDKit-validated) MmffForceField path.
+// Proves molrs_ff::{LBFGS} relax a real force field, and
+// that the homogeneous batch path reproduces the single-structure result.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lbfgs_minimize_relaxes_mmff_ethane() {
+    use molrs_ff::{LBFGS, LbfgsConfig};
+
+    let (ff, coords0) = build_ff("e_ethane");
+    let e_start = ff.calc_energy_forces(&coords0).0;
+
+    let mut coords = coords0.clone();
+    let opts = LbfgsConfig::default();
+    let report = LBFGS::new(&ff, opts)
+        .run(&mut coords)
+        .expect("minimize ethane");
+
+    assert!(
+        report.final_energy <= e_start + 1e-9,
+        "energy must not increase: {e_start} -> {}",
+        report.final_energy
+    );
+    assert!(report.converged, "ethane should converge: {report:?}");
+    assert!(
+        report.final_fmax <= opts.fmax + 1e-12,
+        "fmax not satisfied: {}",
+        report.final_fmax
+    );
+    println!(
+        "ethane MMFF relax: E {e_start:.4} -> {:.4} (fmax {:.4}, {} steps)",
+        report.final_energy, report.final_fmax, report.n_steps
+    );
+}
+
+#[test]
+fn lbfgs_minimize_batch_matches_single() {
+    use molrs_ff::{LBFGS, LbfgsConfig};
+
+    let (ff, coords0) = build_ff("e_ethane");
+    let n_atoms = coords0.len() / 3;
+    let opts = LbfgsConfig::default();
+
+    // Single-structure reference.
+    let mut single = coords0.clone();
+    let single_report = LBFGS::new(&ff, opts).run(&mut single).expect("single");
+
+    // Homogeneous batch: block 0 identical to the single start; blocks 1..B
+    // deterministically perturbed (same topology, same force field).
+    let b = 4;
+    let mut batch: Vec<f64> = Vec::with_capacity(b * coords0.len());
+    for s in 0..b {
+        for (i, &c) in coords0.iter().enumerate() {
+            let pert = if s == 0 {
+                0.0
+            } else {
+                0.02 * (((i + s * 7) % 5) as f64 - 2.0)
+            };
+            batch.push(c + pert);
+        }
+    }
+
+    let reports = LBFGS::new(&ff, opts)
+        .run_batch(&mut batch, n_atoms, b)
+        .expect("batch");
+    assert_eq!(reports.len(), b);
+
+    // Block 0 started from the same coords as `single` -> identical outcome.
+    assert!(
+        (reports[0].final_energy - single_report.final_energy).abs() < 1e-9,
+        "batch block 0 energy {} != single {}",
+        reports[0].final_energy,
+        single_report.final_energy
+    );
+    for (a, s) in batch[0..coords0.len()].iter().zip(&single) {
+        assert!(
+            (a - s).abs() < 1e-9,
+            "batch block 0 coords diverged from single"
+        );
+    }
+
+    // All structures relaxed to a finite, converged minimum.
+    for (i, r) in reports.iter().enumerate() {
+        assert!(r.final_energy.is_finite(), "block {i} energy not finite");
+        assert!(
+            r.final_fmax <= opts.fmax + 1e-12 || !r.converged,
+            "block {i} fmax {} unsatisfied",
+            r.final_fmax
+        );
+    }
 }

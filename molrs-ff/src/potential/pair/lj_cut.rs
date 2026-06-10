@@ -31,7 +31,7 @@ impl PairLJCut {
 }
 
 impl Potential for PairLJCut {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let n_atoms = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0; coords.len()];
@@ -131,7 +131,7 @@ mod tests {
         let pot = PairLJCut::new(vec![0], vec![1], vec![0.5], vec![1.0]);
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 1.5, 0.3, 0.1];
 
-        let (e, forces) = pot.eval(&coords);
+        let (e, forces) = pot.calc_energy_forces(&coords);
         assert!(e.is_finite());
 
         for dim in 0..3 {
@@ -144,7 +144,7 @@ mod tests {
     fn test_pair_lj_cut_unknown_label_error() {
         let pot = PairLJCut::new(vec![0], vec![1], vec![1.0], vec![1.0]);
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-        let (e, _) = pot.eval(&coords);
+        let (e, _) = pot.calc_energy_forces(&coords);
         assert!(e.is_finite());
     }
 }

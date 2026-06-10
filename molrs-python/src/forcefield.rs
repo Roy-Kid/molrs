@@ -17,15 +17,72 @@
 use pyo3::prelude::*;
 
 use molrs_ff::ForceField;
+use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
 use molrs_ff::potential::{Potentials, extract_coords};
 use molrs_ff::typifier::Typifier;
 use molrs_ff::typifier::mmff::MMFFTypifier;
+use molrs_ff::{LBFGS, LbfgsConfig, OptReport};
 
 use crate::frame::PyFrame;
 use crate::helpers::NpF;
 use crate::molgraph::PyAtomistic;
 
-use numpy::{PyArray1, ToPyArray};
+use ndarray::{Array2, Array3};
+use numpy::{PyArray1, PyArray2, PyArray3, PyReadonlyArrayDyn, ToPyArray};
+
+/// Outcome of a geometry optimization, exposed to Python as `molrs.OptReport`.
+#[pyclass(name = "OptReport")]
+pub struct PyOptReport {
+    inner: OptReport,
+}
+
+#[pymethods]
+impl PyOptReport {
+    /// Whether ``fmax`` convergence was reached within ``max_steps``.
+    #[getter]
+    fn converged(&self) -> bool {
+        self.inner.converged
+    }
+
+    /// Number of outer L-BFGS iterations performed.
+    #[getter]
+    fn n_steps(&self) -> usize {
+        self.inner.n_steps
+    }
+
+    /// Potential energy at the returned geometry (kcal/mol).
+    #[getter]
+    fn final_energy(&self) -> f64 {
+        self.inner.final_energy
+    }
+
+    /// Maximum per-atom force magnitude at the returned geometry
+    /// (kcal/mol/angstrom).
+    #[getter]
+    fn final_fmax(&self) -> f64 {
+        self.inner.final_fmax
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "OptReport(converged={}, n_steps={}, final_energy={:.6}, final_fmax={:.6})",
+            if self.inner.converged {
+                "True"
+            } else {
+                "False"
+            },
+            self.inner.n_steps,
+            self.inner.final_energy,
+            self.inner.final_fmax
+        )
+    }
+}
+
+impl From<OptReport> for PyOptReport {
+    fn from(inner: OptReport) -> Self {
+        Self { inner }
+    }
+}
 
 /// Compiled force-field potentials for energy and force evaluation.
 ///
@@ -85,13 +142,13 @@ impl PyPotentials {
     /// >>> energy, forces = potentials.eval(coords)
     /// >>> energy
     /// -12.34
-    fn eval<'py>(
+    fn calc_energy_forces<'py>(
         &self,
         py: Python<'py>,
         coords: numpy::PyReadonlyArray1<'_, NpF>,
     ) -> PyResult<(f64, Bound<'py, PyArray1<NpF>>)> {
         let slice = coords.as_slice()?;
-        let (energy, forces) = self.inner.eval(slice);
+        let (energy, forces) = self.inner.calc_energy_forces(slice);
         let forces_arr = forces.to_pyarray(py);
         Ok((energy, forces_arr))
     }
@@ -112,13 +169,134 @@ impl PyPotentials {
     /// ------
     /// ValueError
     ///     If ``coords`` is not contiguous in memory.
-    fn energy(&self, coords: numpy::PyReadonlyArray1<'_, NpF>) -> PyResult<f64> {
+    fn calc_energy(&self, coords: numpy::PyReadonlyArray1<'_, NpF>) -> PyResult<f64> {
         let slice = coords.as_slice()?;
-        Ok(self.inner.energy(slice))
+        Ok(self.inner.calc_energy(slice))
+    }
+
+    /// Compute forces (= -gradient) for the given flat coordinates.
+    ///
+    /// Returns a flat array of the same shape as ``coords`` (kcal/mol/angstrom).
+    fn calc_forces<'py>(
+        &self,
+        py: Python<'py>,
+        coords: numpy::PyReadonlyArray1<'_, NpF>,
+    ) -> PyResult<Bound<'py, PyArray1<NpF>>> {
+        let slice = coords.as_slice()?;
+        Ok(self.inner.calc_forces(slice).to_pyarray(py))
     }
 
     fn __repr__(&self) -> String {
         format!("Potentials(n_kernels={})", self.inner.len())
+    }
+}
+
+/// L-BFGS geometry optimizer, exposed as `molrs.LBFGS`.
+///
+/// Mirrors molpy: construct with the potentials + config, then ``run`` (single
+/// or homogeneous batch, dispatched on the input rank).
+///
+/// Examples
+/// --------
+/// >>> pots = molrs.build_mmff_potentials(mol)
+/// >>> opt = molrs.LBFGS(pots, fmax=0.05)
+/// >>> coords, report = opt.run(coords)         # (N, 3)
+/// >>> batch, reports = opt.run(batch)          # (B, N, 3)
+#[pyclass(name = "LBFGS")]
+pub struct PyLBFGS {
+    potentials: Py<PyPotentials>,
+    cfg: LbfgsConfig,
+}
+
+#[pymethods]
+impl PyLBFGS {
+    #[new]
+    #[pyo3(signature = (potentials, *, fmax = 0.05, max_steps = 500, max_step = 0.2, memory = 8))]
+    fn new(
+        potentials: Py<PyPotentials>,
+        fmax: f64,
+        max_steps: usize,
+        max_step: f64,
+        memory: usize,
+    ) -> Self {
+        Self {
+            potentials,
+            cfg: LbfgsConfig {
+                fmax,
+                max_steps,
+                max_step,
+                memory,
+            },
+        }
+    }
+
+    /// Relax coordinates by L-BFGS. ``(N, 3)`` / ``(3N,)`` -> single structure
+    /// returning ``((N, 3) array, OptReport)``; ``(B, N, 3)`` -> homogeneous
+    /// batch returning ``((B, N, 3) array, list[OptReport])``. Input is not
+    /// mutated.
+    fn run<'py>(
+        &self,
+        py: Python<'py>,
+        coords: PyReadonlyArrayDyn<'_, NpF>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let pots = self.potentials.borrow(py);
+        let arr = coords.as_array();
+        let shape = arr.shape();
+        match shape.len() {
+            1 | 2 => {
+                let mut flat: Vec<NpF> = arr.iter().copied().collect();
+                let n_elem = flat.len();
+                if n_elem % 3 != 0 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "coords has {n_elem} elements, not a multiple of 3 (expected (N, 3) or (3N,))"
+                    )));
+                }
+                let report = LBFGS::new(&pots.inner, self.cfg)
+                    .run(&mut flat)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+                let out: Bound<'py, PyArray2<NpF>> = Array2::from_shape_vec((n_elem / 3, 3), flat)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+                    .to_pyarray(py);
+                Ok((out, PyOptReport::from(report))
+                    .into_pyobject(py)?
+                    .into_any())
+            }
+            3 => {
+                if shape[2] != 3 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "batch coords must be (B, N, 3); trailing axis is {} not 3",
+                        shape[2]
+                    )));
+                }
+                let (b, n) = (shape[0], shape[1]);
+                let expected = pots.inner.n_atoms();
+                if expected != 0 && n != expected {
+                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                        "structure atom count N={n} does not match this Potentials' atom count {expected}"
+                    )));
+                }
+                let mut flat: Vec<NpF> = arr.iter().copied().collect();
+                let reports = LBFGS::new(&pots.inner, self.cfg)
+                    .run_batch(&mut flat, n, b)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+                let out: Bound<'py, PyArray3<NpF>> = Array3::from_shape_vec((b, n, 3), flat)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+                    .to_pyarray(py);
+                let reports: Vec<PyOptReport> =
+                    reports.into_iter().map(PyOptReport::from).collect();
+                Ok((out, reports).into_pyobject(py)?.into_any())
+            }
+            other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "coords must be 1-D (3N,), 2-D (N, 3), or 3-D (B, N, 3); got {other}-D"
+            ))),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "LBFGS(fmax={}, max_steps={}, max_step={}, memory={})",
+            self.cfg.fmax, self.cfg.max_steps, self.cfg.max_step, self.cfg.memory
+        )
     }
 }
 
@@ -274,6 +452,60 @@ pub fn extract_coords_py<'py>(
     Ok(coords.to_pyarray(py))
 }
 
+/// Build ready-to-use MMFF94 potentials for a molecule.
+///
+/// Uses the assembled :rust:`MmffForceField` energy model (the RDKit-validated
+/// MMFF94 path used by conformer generation), wrapped as a :class:`Potentials`
+/// so it can be evaluated and minimized directly. This is the recommended way
+/// to obtain potentials for :meth:`Potentials.minimize`.
+///
+/// Parameters
+/// ----------
+/// mol : Atomistic
+///     Molecular graph with element symbols, bonds, and 3D coordinates.
+/// variant : str, optional
+///     ``"MMFF94"`` (default) or ``"MMFF94s"`` (static variant).
+///
+/// Returns
+/// -------
+/// Potentials
+///     Compiled energy/force evaluator for ``mol``.
+///
+/// Raises
+/// ------
+/// ValueError
+///     If ``variant`` is unknown, or MMFF94 typing / assembly fails.
+///
+/// Examples
+/// --------
+/// >>> mol = molrs.parse_smiles("CCO").to_atomistic()
+/// >>> mol, _ = molrs.Conformer(seed=7).generate(mol)
+/// >>> pots = molrs.build_mmff_potentials(mol)
+/// >>> coords = molrs.extract_coords(molrs.MMFFTypifier().typify(mol)).reshape(-1, 3)
+/// >>> opt, report = pots.minimize(coords, fmax=0.05)
+#[pyfunction]
+#[pyo3(name = "build_mmff_potentials", signature = (mol, variant = "MMFF94"))]
+pub fn build_mmff_potentials_py(mol: &PyAtomistic, variant: &str) -> PyResult<PyPotentials> {
+    let var = match variant.to_ascii_uppercase().as_str() {
+        "MMFF94" => MmffVariant::Mmff94,
+        "MMFF94S" => MmffVariant::Mmff94s,
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unknown MMFF variant '{other}' (expected 'MMFF94' or 'MMFF94s')"
+            )));
+        }
+    };
+    let core = mol.core();
+    let props = MmffMolProperties::compute(core, var)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let ff = MmffForceField::build(core, &props)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let mut pots = Potentials::new();
+    pots.set_n_atoms(core.n_atoms());
+    pots.push(Box::new(ff));
+    Ok(PyPotentials { inner: pots })
+}
+
 /// Read a force-field definition from an XML file.
 #[pyfunction]
 #[pyo3(name = "read_forcefield_xml")]
@@ -298,6 +530,73 @@ impl PyForceField {
             .collect()
     }
 
+    /// Compile this force field against a typed :class:`Frame` into
+    /// evaluable :class:`Potentials`.
+    ///
+    /// The frame must carry the topology + ``type`` columns each style
+    /// resolves (``atoms``/``bonds``/``angles``/``dihedrals``/``impropers``/
+    /// ``pairs``), exactly as produced by a typifier or an external emitter.
+    ///
+    /// Parameters
+    /// ----------
+    /// frame : Frame
+    ///     Typed molecular data.
+    ///
+    /// Returns
+    /// -------
+    /// Potentials
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If a style has no registered kernel, a topology block is missing,
+    ///     or a type label is unknown.
+    fn to_potentials(&self, frame: &PyFrame) -> PyResult<PyPotentials> {
+        let core = frame.clone_core_frame()?;
+        let potentials = self
+            .inner
+            .to_potentials(&core)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyPotentials { inner: potentials })
+    }
+
+    /// Project this force field onto the types a typed :class:`Frame` uses.
+    ///
+    /// Reading a full force field yields every type it defines, but a concrete
+    /// typed structure references only a fraction of them. ``subset`` returns a
+    /// new, smaller :class:`ForceField` restricted to exactly the types named
+    /// in the frame's per-block ``type`` columns
+    /// (``atoms``/``bonds``/``angles``/``dihedrals``/``impropers``), leaving the
+    /// original force field unchanged. A ``PairType`` is kept iff both of its
+    /// endpoint atom types are used; styles left with no types are dropped; type
+    /// names are preserved verbatim (no renumbering).
+    ///
+    /// Parameters
+    /// ----------
+    /// frame : Frame
+    ///     Typed molecular data, as produced by a typifier or an emitter.
+    ///
+    /// Returns
+    /// -------
+    /// ForceField
+    ///     A new force field containing only the types ``frame`` references.
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If the frame's blocks cannot be read.
+    ///
+    /// Examples
+    /// --------
+    /// >>> mini = ff.subset(typed_frame)
+    /// >>> len(mini.style_names()) <= len(ff.style_names())
+    /// True
+    fn subset(&self, frame: &PyFrame) -> PyResult<PyForceField> {
+        let core = frame.clone_core_frame()?;
+        let pruned = self.inner.subset(&core);
+        Ok(PyForceField { inner: pruned })
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "ForceField(name='{}', styles={})",
@@ -305,4 +604,59 @@ impl PyForceField {
             self.inner.styles().len()
         )
     }
+}
+
+/// Parse a force-field definition from an XML string (same schema as
+/// :func:`read_forcefield_xml`).
+#[pyfunction]
+#[pyo3(name = "read_forcefield_xml_str")]
+pub fn read_forcefield_xml_str_py(xml: &str) -> PyResult<PyForceField> {
+    let forcefield = molrs_ff::read_forcefield_xml_str(xml)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(PyForceField { inner: forcefield })
+}
+
+/// Read an OPLS-AA / GROMACS force-field XML file into a :class:`ForceField`.
+///
+/// Parses the OpenMM-style OPLS-AA XML (GROMACS units — nm, kJ/mol,
+/// Ryckaert-Bellemans torsions) and normalizes it to molrs units (Å, kcal/mol,
+/// radians, e): bond/angle/pair conversions plus the RB → OPLS 4-cosine
+/// (``f1..f4``) inversion happen in the reader, so the returned force field is
+/// pure molrs units. Distinct from :func:`read_forcefield_xml`, which reads
+/// molrs's own native schema.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to an ``oplsaa.xml`` (OpenMM/GROMACS layout).
+///
+/// Returns
+/// -------
+/// ForceField
+///
+/// Raises
+/// ------
+/// ValueError
+///     On a malformed document, an unknown section, or a missing/non-numeric
+///     required attribute (reading is total — never a silent skip).
+#[pyfunction]
+#[pyo3(name = "read_opls_xml")]
+pub fn read_opls_xml_py(path: &str) -> PyResult<PyForceField> {
+    use molrs_ff::ForceFieldReader;
+    let forcefield = molrs_ff::OplsXmlReader::new()
+        .read(path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    Ok(PyForceField { inner: forcefield })
+}
+
+/// Parse an OPLS-AA / GROMACS force field from an XML string (same schema and
+/// unit normalization as :func:`read_opls_xml`).
+#[pyfunction]
+#[pyo3(name = "read_opls_xml_str")]
+pub fn read_opls_xml_str_py(xml: &str) -> PyResult<PyForceField> {
+    use molrs_ff::ForceFieldReader;
+    let forcefield = molrs_ff::OplsXmlReader::new()
+        .read_str(xml)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    Ok(PyForceField { inner: forcefield })
 }

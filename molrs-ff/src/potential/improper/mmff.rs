@@ -20,7 +20,7 @@ pub struct MMFFOutOfPlane {
 }
 
 impl Potential for MMFFOutOfPlane {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0 as F; coords.len()];

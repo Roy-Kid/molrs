@@ -21,7 +21,10 @@
 //! assert_eq!(cg.n_bonds(), 1);
 //! ```
 
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
+
+use slotmap::Key;
 
 use crate::atomistic::{Bond, BondId};
 use crate::error::MolRsError;
@@ -34,10 +37,18 @@ pub type BeadId = NodeId;
 /// Coarse-grained molecular graph.
 ///
 /// Invariant: every node has a `"bead_type"` property.
+///
+/// A bead additionally owns a **membership**: the set of underlying atom handles
+/// it groups. Membership is variable-size directed ownership across worlds (the
+/// atoms live in a separate all-atom world), so it is **not** a fixed-arity peer
+/// relation and is stored here as opaque atom handles keyed by bead, not as a
+/// scalar component. Resolving a handle back to an atom view is the caller's job
+/// (it owns the source world); this layer owns only the handle topology.
 #[derive(Debug, Clone)]
 pub struct CoarseGrain {
     graph: MolGraph,
     bond: KindId,
+    members: HashMap<BeadId, Vec<u64>>,
 }
 
 impl Deref for CoarseGrain {
@@ -65,7 +76,11 @@ impl CoarseGrain {
     pub fn new() -> Self {
         let mut graph = MolGraph::new();
         let bond = graph.register_kind("bonds", 2);
-        Self { graph, bond }
+        Self {
+            graph,
+            bond,
+            members: HashMap::new(),
+        }
     }
 
     /// Add a bead with type name and 3D coordinates.
@@ -85,9 +100,39 @@ impl CoarseGrain {
         self.graph.add_node_with(a)
     }
 
-    /// Remove a bead and all incident CG bonds.
+    /// Remove a bead and all incident CG bonds (and its membership).
     pub fn remove_bead(&mut self, id: BeadId) -> Result<Atom, MolRsError> {
+        self.members.remove(&id);
         self.graph.remove_node(id)
+    }
+
+    // ---- bead → atom membership (opaque foreign atom handles) ----
+
+    /// Set the atom handles a bead groups (replaces any existing membership).
+    /// An empty slice clears the membership.
+    pub fn set_bead_members(&mut self, bead: BeadId, atoms: Vec<u64>) {
+        if atoms.is_empty() {
+            self.members.remove(&bead);
+        } else {
+            self.members.insert(bead, atoms);
+        }
+    }
+
+    /// The atom handles a bead groups (empty if none recorded).
+    pub fn bead_members(&self, bead: BeadId) -> &[u64] {
+        self.members.get(&bead).map_or(&[], Vec::as_slice)
+    }
+
+    /// Beads whose membership includes `atom`, in bead-handle order.
+    pub fn beads_of_atom(&self, atom: u64) -> Vec<BeadId> {
+        let mut out: Vec<BeadId> = self
+            .members
+            .iter()
+            .filter(|(_, atoms)| atoms.contains(&atom))
+            .map(|(&bead, _)| bead)
+            .collect();
+        out.sort_by_key(|b| b.data().as_ffi());
+        out
     }
 
     /// Materialize a bead's property bag (owned copy of its set components).
@@ -125,12 +170,21 @@ impl CoarseGrain {
         self.graph.n_relations(self.bond)
     }
 
-    /// Export to a tabular [`Frame`] (`beads` block + a `bonds` block).
+    /// Export to a tabular [`Frame`] (`beads` block + a `cgbonds` block).
     ///
     /// CoarseGrain owns its frame conversion because the central [`Frame`] is a
-    /// domain interface with CG-specific block requirements.
+    /// domain interface with CG-specific block requirements: the generic node
+    /// block is relabeled `atoms`→`beads` and the bond relation block
+    /// `bonds`→`cgbonds` with its `atomi`/`atomj` endpoint columns renamed to
+    /// `ibead`/`jbead`. All relabeling is on the already-materialized numpy
+    /// columns — no data is copied.
     pub fn to_frame(&self) -> Frame {
-        self.graph.to_frame()
+        let mut frame = self.graph.to_frame();
+        frame.rename_block("atoms", "beads");
+        frame.rename_column("bonds", "atomi", "ibead");
+        frame.rename_column("bonds", "atomj", "jbead");
+        frame.rename_block("bonds", "cgbonds");
+        frame
     }
 
     /// Build from a [`Frame`], registering the CG `bonds` kind first so the
@@ -152,7 +206,11 @@ impl CoarseGrain {
             }
         }
         let bond = mol.kind_id("bonds").unwrap_or(KindId(0));
-        Ok(Self { graph: mol, bond })
+        Ok(Self {
+            graph: mol,
+            bond,
+            members: HashMap::new(),
+        })
     }
 
     /// Unwrap to the inner [`MolGraph`] (zero cost).

@@ -38,10 +38,18 @@ use crate::helpers::molrs_error_to_pyerr;
 // Value conversion helpers
 // ---------------------------------------------------------------------------
 
-/// Convert a Python scalar to a [`PropValue`] (int tried before float so a
-/// Python `bool`/`int` doesn't collapse to float).
+/// Convert a Python scalar to a [`PropValue`].
+///
+/// `bool` is tried before `int` because a Python `bool` is a subclass of `int`
+/// (so `extract::<i64>()` would silently collapse `True`→`1`); `int` is tried
+/// before `float` so an integer literal doesn't become a float. Anything that is
+/// not `bool` / `int` / `float` / `str` is rejected fail-fast — non-representable
+/// values (lists, `None`, arbitrary objects) MUST raise, never be stashed.
 fn py_to_prop(value: &Bound<'_, PyAny>) -> PyResult<PropValue> {
-    if let Ok(i) = value.extract::<i64>() {
+    // `extract::<bool>()` matches only a genuine Python `bool`, not an `int`.
+    if let Ok(b) = value.extract::<bool>() {
+        Ok(PropValue::Bool(b))
+    } else if let Ok(i) = value.extract::<i64>() {
         Ok(PropValue::Int(i as i32))
     } else if let Ok(f) = value.extract::<f64>() {
         Ok(PropValue::F64(f))
@@ -49,7 +57,7 @@ fn py_to_prop(value: &Bound<'_, PyAny>) -> PyResult<PropValue> {
         Ok(PropValue::Str(s))
     } else {
         Err(PyTypeError::new_err(
-            "component value must be int, float, or str",
+            "component value must be bool, int, float, or str",
         ))
     }
 }
@@ -68,6 +76,7 @@ fn prop_to_py(py: Python<'_>, value: &PropValue) -> PyResult<Py<PyAny>> {
         PropValue::F64(v) => v.into_pyobject(py)?.into_any().unbind(),
         PropValue::Int(v) => v.into_pyobject(py)?.into_any().unbind(),
         PropValue::Str(s) => s.into_pyobject(py)?.into_any().unbind(),
+        PropValue::Bool(b) => b.into_pyobject(py)?.to_owned().into_any().unbind(),
     })
 }
 
@@ -148,6 +157,15 @@ macro_rules! graph_world_impl {
                 self.mol_mut()
                     .clear_node(node_from_u64(h), key)
                     .map_err(molrs_error_to_pyerr)
+            }
+
+            /// Component keys currently set on entity `h`, in column order.
+            fn node_keys(&self, h: u64) -> Vec<String> {
+                self.mol()
+                    .node_table()
+                    .row_cells(node_from_u64(h))
+                    .map(|(k, _)| k.to_owned())
+                    .collect()
             }
 
             // ---- relations ----
@@ -243,6 +261,24 @@ macro_rules! graph_world_impl {
                     Some(v) => prop_to_py(py, v),
                     None => Ok(py.None()),
                 }
+            }
+
+            /// Property keys currently set on relation `rh` of `kind`.
+            fn relation_keys(&self, kind: &str, rh: u64) -> PyResult<Vec<String>> {
+                let kid = kind_id_checked(self.mol(), kind)?;
+                let rel = self
+                    .mol()
+                    .get_relation(kid, relation_from_u64(rh))
+                    .map_err(molrs_error_to_pyerr)?;
+                Ok(rel.props.keys().map(|k| k.to_owned()).collect())
+            }
+
+            /// Clear property `key` on relation `rh` of `kind` (no-op if absent).
+            fn delete_relation_prop(&mut self, kind: &str, rh: u64, key: &str) -> PyResult<()> {
+                let kid = kind_id_checked(self.mol(), kind)?;
+                self.mol_mut()
+                    .clear_relation_prop(kid, relation_from_u64(rh), key)
+                    .map_err(molrs_error_to_pyerr)
             }
 
             /// Remove relation `rh` of `kind`.
@@ -444,6 +480,25 @@ impl PyAtomistic {
             .map_err(molrs_error_to_pyerr)
     }
 
+    /// Perceive angle and dihedral relations from the bond graph.
+    ///
+    /// Angles are 2-edge paths ``i-j-k`` and proper dihedrals 3-edge paths
+    /// ``i-j-k-l`` over the bonds (graph-theory via the petgraph-backed
+    /// ``Topology``). Idempotent; ``clear_existing`` wipes existing
+    /// angle/dihedral relations first. Returns ``(n_angles_added,
+    /// n_dihedrals_added)``.
+    #[pyo3(signature = (gen_angle=true, gen_dihedral=true, clear_existing=false))]
+    fn generate_topology(
+        &mut self,
+        gen_angle: bool,
+        gen_dihedral: bool,
+        clear_existing: bool,
+    ) -> PyResult<(usize, usize)> {
+        self.inner
+            .generate_topology(gen_angle, gen_dihedral, clear_existing)
+            .map_err(molrs_error_to_pyerr)
+    }
+
     /// Number of atoms.
     #[getter]
     fn n_atoms(&self) -> usize {
@@ -550,6 +605,27 @@ impl PyCoarseGrain {
     #[getter]
     fn n_beads(&self) -> usize {
         self.inner.n_beads()
+    }
+
+    /// Record the atom handles a bead groups (its membership), replacing any
+    /// previous set. An empty list clears the membership. Handles are opaque —
+    /// they belong to the caller's source (all-atom) world.
+    fn set_bead_members(&mut self, bead: u64, atoms: Vec<u64>) {
+        self.inner.set_bead_members(node_from_u64(bead), atoms);
+    }
+
+    /// The atom handles a bead groups (empty if none recorded).
+    fn bead_members(&self, bead: u64) -> Vec<u64> {
+        self.inner.bead_members(node_from_u64(bead)).to_vec()
+    }
+
+    /// Bead handles whose membership includes `atom`, in bead-handle order.
+    fn beads_of_atom(&self, atom: u64) -> Vec<u64> {
+        self.inner
+            .beads_of_atom(atom)
+            .into_iter()
+            .map(node_to_u64)
+            .collect()
     }
 
     /// Export to a tabular [`Frame`] (beads + bonds blocks).

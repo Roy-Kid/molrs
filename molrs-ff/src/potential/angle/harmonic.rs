@@ -42,7 +42,7 @@ impl AngleHarmonic {
 }
 
 impl Potential for AngleHarmonic {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n_atoms = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0; coords.len()];
@@ -180,7 +180,7 @@ mod tests {
         let pot = AngleHarmonic::new(vec![0], vec![1], vec![2], vec![50.0], vec![theta0]);
         let coords: Vec<F> = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
 
-        let (e, _) = pot.eval(&coords);
+        let (e, _) = pot.calc_energy_forces(&coords);
         assert!(e.abs() < 1e-4);
     }
 }

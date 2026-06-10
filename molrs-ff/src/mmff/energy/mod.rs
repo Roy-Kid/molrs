@@ -16,7 +16,7 @@
 //! let props = MmffMolProperties::compute(mol, MmffVariant::Mmff94)?;
 //! let ff = MmffForceField::build(mol, &props)?;
 //! let coords = vec![0.0; 3 * props.len()];
-//! let (energy, forces) = ff.eval(&coords);
+//! let (energy, forces) = ff.calc_energy_forces(&coords);
 //! # let _ = (energy, forces); Ok(())
 //! # }
 //! ```
@@ -181,7 +181,7 @@ impl MmffForceField {
 }
 
 impl Potential for MmffForceField {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let mut grad = vec![0.0f64; coords.len()];
         let mut energy = 0.0;
         for t in &self.bonds {

@@ -6,9 +6,12 @@
 //! into computational [`Potential`](super::potential::Potential) objects via
 //! [`ForceField::compile`].
 
+pub mod readers;
 pub mod xml;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+use molrs::frame::Frame;
 
 // ---------------------------------------------------------------------------
 // Params
@@ -438,7 +441,7 @@ impl Style {
 ///     .def_type("A", &[("epsilon", 0.5), ("sigma", 1.0)]);
 ///
 /// // Compile into Potentials with a Frame containing topology
-/// // let potentials = ff.compile(&frame).unwrap();
+/// // let potentials = ff.to_potentials(&frame).unwrap();
 /// ```
 #[derive(Debug, Clone)]
 pub struct ForceField {
@@ -585,6 +588,129 @@ impl ForceField {
             .flatten()
             .collect()
     }
+
+    pub fn get_dihedraltypes(&self) -> Vec<&DihedralType> {
+        self.styles
+            .iter()
+            .filter_map(|s| match &s.defs {
+                StyleDefs::Dihedral(types) => Some(types.iter()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    pub fn get_impropertypes(&self) -> Vec<&ImproperType> {
+        self.styles
+            .iter()
+            .filter_map(|s| match &s.defs {
+                StyleDefs::Improper(types) => Some(types.iter()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// Project this force field onto the types a typed [`Frame`] actually uses.
+    ///
+    /// Reading a full force field (e.g. OPLS with ~900 atom types) yields a
+    /// large `ForceField`, but a concrete typed structure references only a
+    /// small fraction of those types. `subset` returns a fresh `ForceField`
+    /// restricted to exactly the types named in `frame`'s per-block `type`
+    /// columns, leaving `self` unmodified.
+    ///
+    /// The projection is a pure set operation. For each topology category, the
+    /// used type-name set is read from the matching block's `type` column
+    /// (`atoms`/`bonds`/`angles`/`dihedrals`/`impropers`); a category whose
+    /// block or `type` column is absent contributes an empty set. Each `Style`
+    /// keeps only the `*Type` entries whose `name` is in that set.
+    ///
+    /// Pair types are not keyed by a topology block: a [`PairType`] is kept iff
+    /// **both** of its endpoint atom-type names (`itom` and `jtom`) are in the
+    /// used atom-type set. This one predicate covers self-interaction pairs
+    /// (`itom == jtom`) and explicit cross pairs uniformly.
+    ///
+    /// Styles left with no surviving types are dropped (a `KSpace` style, which
+    /// legitimately carries no per-type defs, is preserved verbatim). Type
+    /// names are copied unchanged — no renumbering.
+    pub fn subset(&self, frame: &Frame) -> ForceField {
+        let used = |block: &str| -> HashSet<String> {
+            frame
+                .get(block)
+                .and_then(|b| b.get_string("type"))
+                .map(|arr| arr.iter().cloned().collect())
+                .unwrap_or_default()
+        };
+        let used_atoms = used("atoms");
+        let used_bonds = used("bonds");
+        let used_angles = used("angles");
+        let used_dihedrals = used("dihedrals");
+        let used_impropers = used("impropers");
+
+        let mut out = ForceField::new(&self.name);
+        for style in &self.styles {
+            let defs = match &style.defs {
+                StyleDefs::Atom(types) => StyleDefs::Atom(
+                    types
+                        .iter()
+                        .filter(|t| used_atoms.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Bond(types) => StyleDefs::Bond(
+                    types
+                        .iter()
+                        .filter(|t| used_bonds.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Angle(types) => StyleDefs::Angle(
+                    types
+                        .iter()
+                        .filter(|t| used_angles.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Dihedral(types) => StyleDefs::Dihedral(
+                    types
+                        .iter()
+                        .filter(|t| used_dihedrals.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Improper(types) => StyleDefs::Improper(
+                    types
+                        .iter()
+                        .filter(|t| used_impropers.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Pair(types) => StyleDefs::Pair(
+                    types
+                        .iter()
+                        .filter(|t| used_atoms.contains(&t.itom) && used_atoms.contains(&t.jtom))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::KSpace => StyleDefs::KSpace,
+            };
+
+            let keep = match &defs {
+                StyleDefs::Atom(t) => !t.is_empty(),
+                StyleDefs::Bond(t) => !t.is_empty(),
+                StyleDefs::Angle(t) => !t.is_empty(),
+                StyleDefs::Dihedral(t) => !t.is_empty(),
+                StyleDefs::Improper(t) => !t.is_empty(),
+                StyleDefs::Pair(t) => !t.is_empty(),
+                StyleDefs::KSpace => true,
+            };
+            if keep {
+                out.styles
+                    .push(Style::new(defs, &style.name, style.params.clone()));
+            }
+        }
+        out
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -594,6 +720,7 @@ impl ForceField {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use molrs::block::Block;
 
     #[test]
     fn test_params() {
@@ -812,5 +939,158 @@ mod tests {
         assert_eq!(ff.get_atomtypes().len(), 2);
         assert_eq!(ff.get_bondtypes().len(), 1);
         assert_eq!(ff.get_pairtypes().len(), 0);
+    }
+
+    // -- subset projection ---------------------------------------------------
+
+    /// A force field spanning more types than any single fixture frame uses:
+    /// atom {CT, HC, OH}, bond {CT-HC, CT-OH}, angle {HC-CT-HC, HC-CT-OH},
+    /// dihedral {HC-CT-CT-HC}, improper {CT-CT-CT-OH}, pair {CT self, HC self,
+    /// OH self, CT-OH cross}.
+    fn full_ff() -> ForceField {
+        let mut ff = ForceField::new("fixture");
+        let a = ff.def_atomstyle("full");
+        a.def_atomtype("CT", &[("mass", 12.011)]);
+        a.def_atomtype("HC", &[("mass", 1.008)]);
+        a.def_atomtype("OH", &[("mass", 15.999)]);
+        let b = ff.def_bondstyle("harmonic");
+        b.def_bondtype("CT", "HC", &[("k0", 340.0), ("r0", 1.09)]);
+        b.def_bondtype("CT", "OH", &[("k0", 320.0), ("r0", 1.41)]);
+        let ang = ff.def_anglestyle("harmonic");
+        ang.def_angletype("HC", "CT", "HC", &[("k0", 33.0), ("theta0", 107.8)]);
+        ang.def_angletype("HC", "CT", "OH", &[("k0", 35.0), ("theta0", 109.5)]);
+        let dih = ff.def_dihedralstyle("opls");
+        dih.def_dihedraltype("HC", "CT", "CT", "HC", &[("k1", 0.0)]);
+        let imp = ff.def_improperstyle("cvff");
+        imp.def_impropertype("CT", "CT", "CT", "OH", &[("k", 1.0)]);
+        let p = ff.def_pairstyle("lj/cut", &[("cutoff", 10.0)]);
+        p.def_pairtype("CT", None, &[("epsilon", 0.066), ("sigma", 3.5)]);
+        p.def_pairtype("HC", None, &[("epsilon", 0.03), ("sigma", 2.5)]);
+        p.def_pairtype("OH", None, &[("epsilon", 0.17), ("sigma", 3.12)]);
+        p.def_pairtype("CT", Some("OH"), &[("epsilon", 0.1), ("sigma", 3.3)]);
+        ff
+    }
+
+    fn type_block(names: &[&str]) -> Block {
+        use ndarray::Array1;
+        let mut block = Block::new();
+        let col: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+        block
+            .insert("type", Array1::from_vec(col).into_dyn())
+            .unwrap();
+        block
+    }
+
+    /// Typed frame using only: atoms {CT, HC}, bonds {CT-HC}, angles {HC-CT-HC},
+    /// no dihedrals/impropers blocks. OH is never referenced.
+    fn partial_frame() -> Frame {
+        let mut frame = Frame::new();
+        frame.insert("atoms", type_block(&["CT", "HC", "CT", "HC"]));
+        frame.insert("bonds", type_block(&["CT-HC"]));
+        frame.insert("angles", type_block(&["HC-CT-HC"]));
+        frame
+    }
+
+    #[test]
+    fn test_subset_does_not_mutate_self() {
+        let ff = full_ff();
+        let n_atoms = ff.get_atomtypes().len();
+        let n_bonds = ff.get_bondtypes().len();
+        let _ = ff.subset(&partial_frame());
+        assert_eq!(ff.get_atomtypes().len(), n_atoms);
+        assert_eq!(ff.get_bondtypes().len(), n_bonds);
+    }
+
+    #[test]
+    fn test_subset_per_category_exact_match() {
+        let mini = full_ff().subset(&partial_frame());
+
+        let atoms: HashSet<&str> = mini
+            .get_atomtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(atoms, HashSet::from(["CT", "HC"]));
+
+        let bonds: HashSet<&str> = mini
+            .get_bondtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(bonds, HashSet::from(["CT-HC"]));
+
+        let angles: HashSet<&str> = mini
+            .get_angletypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(angles, HashSet::from(["HC-CT-HC"]));
+
+        // dihedrals/impropers blocks absent -> empty
+        assert!(mini.get_dihedraltypes().is_empty());
+        assert!(mini.get_impropertypes().is_empty());
+    }
+
+    #[test]
+    fn test_subset_pairtype_both_endpoints_predicate() {
+        let mini = full_ff().subset(&partial_frame());
+        let pairs: HashSet<&str> = mini
+            .get_pairtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        // CT, HC self-pairs survive (both endpoints used); OH self-pair dropped
+        // (OH unused); CT-OH cross dropped (one endpoint unused).
+        assert_eq!(pairs, HashSet::from(["CT", "HC"]));
+    }
+
+    #[test]
+    fn test_subset_drops_empty_styles() {
+        let mini = full_ff().subset(&partial_frame());
+        // dihedral/improper styles end up empty and are dropped entirely.
+        assert!(mini.get_style("dihedral", "opls").is_none());
+        assert!(mini.get_style("improper", "cvff").is_none());
+        // a referenced style survives.
+        assert!(mini.get_style("bond", "harmonic").is_some());
+    }
+
+    #[test]
+    fn test_subset_preserves_names_verbatim() {
+        let mini = full_ff().subset(&partial_frame());
+        assert!(mini.get_atomtypes().iter().any(|t| t.name == "CT"));
+        assert!(mini.get_bondtypes().iter().any(|t| t.name == "CT-HC"));
+    }
+
+    #[test]
+    fn test_subset_zero_overlap_yields_empty() {
+        let mut frame = Frame::new();
+        frame.insert("atoms", type_block(&["XX", "ZZ"]));
+        let mini = full_ff().subset(&frame);
+        assert!(mini.get_atomtypes().is_empty());
+        assert!(mini.get_pairtypes().is_empty());
+        // every style had zero surviving types -> no styles remain.
+        assert!(mini.styles().is_empty());
+    }
+
+    #[test]
+    fn test_subset_missing_block_treated_as_empty() {
+        // frame with atoms only -> bond/angle/etc categories empty, no panic.
+        let mut frame = Frame::new();
+        frame.insert("atoms", type_block(&["CT", "OH"]));
+        let mini = full_ff().subset(&frame);
+        let atoms: HashSet<&str> = mini
+            .get_atomtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(atoms, HashSet::from(["CT", "OH"]));
+        assert!(mini.get_bondtypes().is_empty());
+        // CT, OH self-pairs and CT-OH cross all survive (all endpoints used).
+        let pairs: HashSet<&str> = mini
+            .get_pairtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(pairs, HashSet::from(["CT", "OH", "CT-OH"]));
     }
 }

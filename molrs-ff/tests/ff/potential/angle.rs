@@ -15,7 +15,7 @@ fn equilibrium_right_angle_has_zero_energy() {
     let pot = AngleHarmonic::new(vec![0], vec![1], vec![2], vec![K0], vec![theta0]);
     // i at +x, j at origin (vertex), k at +y -> angle = 90 deg.
     let coords: Vec<F> = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
-    let (e, f) = pot.eval(&coords);
+    let (e, f) = pot.calc_energy_forces(&coords);
     assert!(e.abs() < 1e-9, "energy {e}");
     for fi in f {
         assert!(fi.abs() < 1e-6, "force {fi}");
@@ -28,7 +28,7 @@ fn displaced_angle_matches_closed_form() {
     let theta0 = std::f64::consts::FRAC_PI_3; // 60 deg
     let pot = AngleHarmonic::new(vec![0], vec![1], vec![2], vec![K0], vec![theta0]);
     let coords: Vec<F> = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
-    let (e, _) = pot.eval(&coords);
+    let (e, _) = pot.calc_energy_forces(&coords);
     let dtheta = std::f64::consts::FRAC_PI_2 - theta0; // pi/6
     let expected = 0.5 * K0 * dtheta * dtheta;
     assert!(
@@ -43,8 +43,8 @@ fn forces_match_finite_difference() {
     let pot = AngleHarmonic::new(vec![0], vec![1], vec![2], vec![K0], vec![theta0]);
     // Generic non-collinear, non-right geometry.
     let coords: Vec<F> = vec![1.1, 0.2, -0.1, 0.0, 0.0, 0.0, -0.3, 0.9, 0.2];
-    let (_, analytical) = pot.eval(&coords);
-    let numerical = numerical_forces(|c| pot.energy(c), &coords, 1e-7);
+    let (_, analytical) = pot.calc_energy_forces(&coords);
+    let numerical = numerical_forces(|c| pot.calc_energy(c), &coords, 1e-7);
     for i in 0..coords.len() {
         assert!(
             (analytical[i] - numerical[i]).abs() < 1e-5,
@@ -61,7 +61,7 @@ fn total_force_is_balanced() {
     let theta0 = std::f64::consts::FRAC_PI_3;
     let pot = AngleHarmonic::new(vec![0], vec![1], vec![2], vec![K0], vec![theta0]);
     let coords: Vec<F> = vec![1.1, 0.2, -0.1, 0.0, 0.0, 0.0, -0.3, 0.9, 0.2];
-    let (_, f) = pot.eval(&coords);
+    let (_, f) = pot.calc_energy_forces(&coords);
     for dim in 0..3 {
         let net = f[dim] + f[3 + dim] + f[6 + dim];
         assert!(net.abs() < 1e-9, "dim {dim} net {net}");
@@ -83,7 +83,7 @@ fn compile_path_converts_degrees_to_radians() {
             &["H-O-H"],
         ),
     );
-    let pots = ff.compile(&frame).unwrap();
+    let pots = ff.to_potentials(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
-    assert!(pots.energy(&coords).abs() < 1e-9);
+    assert!(pots.calc_energy(&coords).abs() < 1e-9);
 }

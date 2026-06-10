@@ -25,7 +25,7 @@ pub struct MMFFVdW {
 }
 
 impl Potential for MMFFVdW {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0 as F; coords.len()];
@@ -153,7 +153,7 @@ pub struct MMFFElectrostatic {
 }
 
 impl Potential for MMFFElectrostatic {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0 as F; coords.len()];
@@ -252,7 +252,7 @@ mod tests {
             epsilon: vec![0.02],
         };
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 3.0, 0.0, 0.0];
-        let (e, forces) = pot.eval(&coords);
+        let (e, forces) = pot.calc_energy_forces(&coords);
         assert!(e.is_finite());
         for dim in 0..3 {
             let sum = forces[dim] + forces[3 + dim];
@@ -270,7 +270,7 @@ mod tests {
             scale_14: vec![1.0],
         };
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-        let (e, forces) = pot.eval(&coords);
+        let (e, forces) = pot.calc_energy_forces(&coords);
         assert!(e < 0.0, "opposite charges should give negative energy");
         let sum = forces[0] + forces[3];
         assert!(sum.abs() < 1e-3, "force sum = {}", sum);

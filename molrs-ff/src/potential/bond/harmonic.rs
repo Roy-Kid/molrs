@@ -31,7 +31,7 @@ impl BondHarmonic {
 }
 
 impl Potential for BondHarmonic {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let n_atoms = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0; coords.len()];
@@ -158,7 +158,7 @@ mod tests {
         let pot = BondHarmonic::new(vec![0], vec![1], vec![300.0], vec![1.5]);
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
 
-        let (e, forces) = pot.eval(&coords);
+        let (e, forces) = pot.calc_energy_forces(&coords);
         assert!((e - 37.5).abs() < 1e-3);
         assert!((forces[0] - 150.0).abs() < 1e-3);
         assert!((forces[3] + 150.0).abs() < 1e-3);
@@ -188,9 +188,9 @@ mod tests {
             .unwrap();
         frame.insert("bonds", bonds);
 
-        let pots = ff.compile(&frame).unwrap();
+        let pots = ff.to_potentials(&frame).unwrap();
         let coords = extract_coords(&frame).unwrap();
-        let e = pots.energy(&coords);
+        let e = pots.calc_energy(&coords);
         assert!((e - 37.5).abs() < 1e-3);
     }
 }

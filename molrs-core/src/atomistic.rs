@@ -310,6 +310,91 @@ impl Atomistic {
         self.graph.n_relations(self.dihedral)
     }
 
+    /// Perceive angle and dihedral relations from the bond graph.
+    ///
+    /// Builds a [`Topology`](crate::topology::Topology) (a `petgraph`
+    /// undirected graph) from the current bonds and reuses its
+    /// `angles()` / `dihedrals()` enumeration — angles are 2-edge paths
+    /// `i-j-k` (deduplicated `i < k`), proper dihedrals are 3-edge paths
+    /// `i-j-k-l` (each central edge once). `Atomistic` is just the domain leaf
+    /// that names the graph-theoretic result.
+    ///
+    /// Idempotent: an angle/dihedral already present (by canonical endpoints)
+    /// is not duplicated. With `clear_existing`, all existing angle/dihedral
+    /// relations of the requested kinds are removed first. Returns
+    /// `(n_angles_added, n_dihedrals_added)`.
+    pub fn generate_topology(
+        &mut self,
+        gen_angle: bool,
+        gen_dihedral: bool,
+        clear_existing: bool,
+    ) -> Result<(usize, usize), MolRsError> {
+        use crate::topology::Topology;
+
+        if clear_existing {
+            if gen_angle {
+                let ids: Vec<_> = self.graph.relation_ids(self.angle).collect();
+                for id in ids {
+                    self.graph.remove_relation(self.angle, id)?;
+                }
+            }
+            if gen_dihedral {
+                let ids: Vec<_> = self.graph.relation_ids(self.dihedral).collect();
+                for id in ids {
+                    self.graph.remove_relation(self.dihedral, id)?;
+                }
+            }
+        }
+
+        // Build the petgraph topology from bonds (atoms in node-id order).
+        let atoms: Vec<AtomId> = self.graph.node_ids().collect();
+        let pos: std::collections::HashMap<AtomId, usize> =
+            atoms.iter().enumerate().map(|(i, &a)| (a, i)).collect();
+        let mut edges: Vec<[usize; 2]> = Vec::new();
+        for id in self.graph.relation_ids(self.bond) {
+            let n = self.graph.relation_nodes(self.bond, id)?;
+            if n.len() == 2 {
+                edges.push([pos[&n[0]], pos[&n[1]]]);
+            }
+        }
+        let topo = Topology::from_edges(atoms.len(), &edges);
+
+        let mut n_ang = 0usize;
+        let mut n_dih = 0usize;
+
+        if gen_angle {
+            let mut seen: std::collections::HashSet<Vec<NodeId>> = std::collections::HashSet::new();
+            for id in self.graph.relation_ids(self.angle) {
+                seen.insert(canonical_path(&self.graph.relation_nodes(self.angle, id)?));
+            }
+            for a in topo.angles() {
+                let nodes = [atoms[a[0]], atoms[a[1]], atoms[a[2]]];
+                if seen.insert(canonical_path(&nodes)) {
+                    self.add_angle(nodes[0], nodes[1], nodes[2])?;
+                    n_ang += 1;
+                }
+            }
+        }
+
+        if gen_dihedral {
+            let mut seen: std::collections::HashSet<Vec<NodeId>> = std::collections::HashSet::new();
+            for id in self.graph.relation_ids(self.dihedral) {
+                seen.insert(canonical_path(
+                    &self.graph.relation_nodes(self.dihedral, id)?,
+                ));
+            }
+            for d in topo.dihedrals() {
+                let nodes = [atoms[d[0]], atoms[d[1]], atoms[d[2]], atoms[d[3]]];
+                if seen.insert(canonical_path(&nodes)) {
+                    self.add_dihedral(nodes[0], nodes[1], nodes[2], nodes[3])?;
+                    n_dih += 1;
+                }
+            }
+        }
+
+        Ok((n_ang, n_dih))
+    }
+
     // ---- impropers ----
 
     /// Add an improper dihedral (i-j-k-l; i conventionally central).
@@ -421,6 +506,17 @@ impl Atomistic {
     // [`crate::aromaticity::perceive_aromaticity`]. No algorithm method here.
 }
 
+/// Canonical (orientation-independent) key for an angle/dihedral endpoint
+/// sequence: the lexicographically smaller of the sequence and its reverse.
+/// Matches the canonicalization in
+/// [`MolGraph::paths_of_length`](crate::molgraph::MolGraph::paths_of_length).
+fn canonical_path(nodes: &[NodeId]) -> Vec<NodeId> {
+    let fwd = nodes.to_vec();
+    let mut rev = fwd.clone();
+    rev.reverse();
+    if fwd <= rev { fwd } else { rev }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,6 +540,62 @@ mod tests {
         let atom = mol.get_atom(o).unwrap();
         assert_eq!(atom.get_str("element"), Some("O"));
         assert_eq!(atom.get_f64("x"), Some(0.0));
+    }
+
+    /// Ethane (C2H6): C0-C1 plus 3 H on each carbon. 7 bonds.
+    fn ethane() -> Atomistic {
+        let mut mol = Atomistic::new();
+        let atoms: Vec<AtomId> = ["C", "C", "H", "H", "H", "H", "H", "H"]
+            .iter()
+            .map(|e| mol.add_atom_bare(e))
+            .collect();
+        for (i, j) in [(0, 1), (0, 2), (0, 3), (0, 4), (1, 5), (1, 6), (1, 7)] {
+            mol.add_bond(atoms[i], atoms[j]).unwrap();
+        }
+        mol
+    }
+
+    #[test]
+    fn generate_topology_ethane_counts() {
+        let mut mol = ethane();
+        let (n_ang, n_dih) = mol.generate_topology(true, true, false).unwrap();
+        // Angles: C0 centre C(1,2,3) -> C(4,2,3)... 2 C-centres each with 4
+        // neighbours -> 2*C(4,2)=12. Dihedrals across the C0-C1 bond: 3*3 = 9.
+        assert_eq!(n_ang, 12, "ethane angles");
+        assert_eq!(n_dih, 9, "ethane dihedrals");
+        assert_eq!(mol.n_angles(), 12);
+        assert_eq!(mol.n_dihedrals(), 9);
+    }
+
+    #[test]
+    fn generate_topology_is_idempotent() {
+        let mut mol = ethane();
+        mol.generate_topology(true, true, false).unwrap();
+        // Second call adds nothing (already present).
+        let (n_ang, n_dih) = mol.generate_topology(true, true, false).unwrap();
+        assert_eq!((n_ang, n_dih), (0, 0));
+        assert_eq!(mol.n_angles(), 12);
+        assert_eq!(mol.n_dihedrals(), 9);
+    }
+
+    #[test]
+    fn generate_topology_clear_existing_regenerates() {
+        let mut mol = ethane();
+        mol.generate_topology(true, true, false).unwrap();
+        let (n_ang, n_dih) = mol.generate_topology(true, true, true).unwrap();
+        // clear_existing wipes then regenerates the identical set.
+        assert_eq!((n_ang, n_dih), (12, 9));
+        assert_eq!(mol.n_angles(), 12);
+        assert_eq!(mol.n_dihedrals(), 9);
+    }
+
+    #[test]
+    fn generate_topology_selective() {
+        let mut mol = ethane();
+        let (n_ang, n_dih) = mol.generate_topology(true, false, false).unwrap();
+        assert_eq!(n_ang, 12);
+        assert_eq!(n_dih, 0);
+        assert_eq!(mol.n_dihedrals(), 0);
     }
 
     #[test]
