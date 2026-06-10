@@ -1,6 +1,6 @@
 # molrs — Evolving Decisions
 
-Short-lived working notes captured by `/molrs-note`. Stable entries are
+Short-lived working notes captured by `/mol:note`. Stable entries are
 promoted into `CLAUDE.md` and removed from here.
 
 Format per entry:
@@ -12,7 +12,7 @@ Format per entry:
 **Status:** provisional | hardening | promoted (→ CLAUDE.md §section)
 ```
 
-Run `/molrs-note sweep` monthly to surface stale entries (> 90 days without
+Run `/mol:note sweep` monthly to surface stale entries (> 90 days without
 status change) and conflicts with `CLAUDE.md`.
 
 ---

@@ -1,3 +1,24 @@
+---
+mol_project:
+  name: molrs
+  language: rust
+  stage: experimental
+  build:
+    install: "cargo build && bash scripts/fetch-test-data.sh"
+    check: "cargo fmt --all --check && cargo clippy -- -D warnings && cargo check"
+    test: "cargo test --all-features"
+    test_single: "cargo test {path}"
+  arch:
+    style: crate-graph
+    rules_section: "## Workspace Crates & Dependency Flow"
+  doc:
+    style: rustdoc
+  science:
+    required: true
+  notes_path: .claude/notes/notes.md
+  specs_path: .claude/specs/
+---
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -173,33 +194,33 @@ CXX bridge to Atomiverse C++. Zero-copy I/O via `FrameView` (borrowed) into exis
 Packmol-port specific conventions (gradient sign, two-scale contract, LEFT
 rotation multiplication) now live in the molpack repo's CLAUDE.md.
 
-## Development Skills & Agents
+## Development Workflow (mol plugin)
 
-Reference skills (the WHAT — standards) and agents (the HOW — executors) are
-paired by domain. Reference skills are loaded by their paired agent and are
-not user-invocable workflows.
-
-| Domain | Reference skill | Agent |
-|---|---|---|
-| Architecture | `molrs-arch` | `molrs-architect` |
-| Performance | `molrs-perf` | `molrs-optimizer` |
-| Documentation (rustdoc) | `molrs-doc` | `molrs-documenter` |
-| Testing | `molrs-test` | `molrs-tester` |
-| Scientific correctness | `molrs-science` | `molrs-scientist` |
-| FFI safety | `molrs-ffi` | `molrs-ffi-safety` |
-| Documentation (docs system) | `molrs-docs` (workflow) | `molrs-docs-engineer` |
+Process workflows come from the molcrafts `mol` plugin; project-specific
+standards live in `.claude/notes/` topic pages (see next section).
 
 Workflow skills (user-invocable):
 
-- `/molrs-impl <feature>` — orchestrator for new feature work; Plan → TDD → Implement → Verify → Document.
-- `/molrs-spec <requirement>` — NL requirement → spec in `.claude/specs/` with an index entry.
-- `/molrs-review [path]` — parallel multi-axis review; aggregates all agents above.
-- `/molrs-fix <bug>` — minimal-diff bug fix, regression test first.
-- `/molrs-refactor <scope>` — in-place restructure without behavior change; enforces hot-path extraction discipline.
-- `/molrs-debug <symptom>` — read-only diagnosis; never edits.
-- `/molrs-docs <kind>` — docs-system operations (Zensical, `.pyi`, READMEs, `docs.yml`).
-- `/molrs-note <decision> | sweep | promote <slug>` — capture evolving decisions into `.claude/NOTES.md`; promote stable entries into this CLAUDE.md.
+- `/mol:spec <requirement>` — NL requirement → spec + acceptance contract in `.claude/specs/`.
+- `/mol:impl <spec>` — orchestrator for new feature work; spec → TDD → implement → verify → simplify → close.
+- `/mol:review [path]` — parallel multi-axis review (architecture, performance, science, FFI via `--axis=ffi`, …).
+- `/mol:fix <bug>` — minimal-diff bug fix, regression test first.
+- `/mol:refactor <scope>` — in-place restructure without behavior change; enforces hot-path extraction discipline (see `.claude/notes/performance.md`).
+- `/mol:debug <symptom>` — read-only diagnosis; never edits.
+- `/mol:docs <kind>` — docs work (rustdoc, Zensical site, `.pyi`, READMEs, `docs.yml`); site rules in `.claude/notes/docs.md`.
+- `/mol:note <decision> | sweep | promote <slug>` — capture evolving decisions into `.claude/notes/notes.md`; promote stable entries into this CLAUDE.md.
 
-Evolving decisions live in `.claude/NOTES.md`; specs live in `.claude/specs/`
-indexed by `.claude/specs/INDEX.md`. See `.claude/skills/` and
-`.claude/agents/` for the full text of each.
+Agent mapping by domain (plugin agents read the notes pages below):
+
+| Domain | Standard (notes page) | Agent |
+|---|---|---|
+| Architecture | `.claude/notes/architecture-rules.md` | `mol:architect` |
+| Performance | `.claude/notes/performance.md` | `mol:optimizer` |
+| Documentation (rustdoc) | `.claude/notes/docs.md` (Part A) | `mol:documenter` |
+| Documentation (docs system) | `.claude/notes/docs.md` (Part B) | `mol:documenter` |
+| Testing | `.claude/notes/testing.md` | `mol:tester` |
+| Scientific correctness | `.claude/notes/science.md` | `mol:scientist` |
+| FFI safety | `.claude/notes/ffi.md` | `mol:ffi-guard` (`/mol:review --axis=ffi`) |
+
+Evolving decisions live in `.claude/notes/notes.md`; specs live in
+`.claude/specs/` indexed by `.claude/specs/INDEX.md`.
