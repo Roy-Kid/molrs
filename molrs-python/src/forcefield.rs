@@ -551,7 +551,7 @@ impl PyForceField {
         let core = frame.clone_core_frame()?;
         let potentials = self
             .inner
-            .compile(&core)
+            .to_potentials(&core)
             .map_err(pyo3::exceptions::PyValueError::new_err)?;
         Ok(PyPotentials { inner: potentials })
     }

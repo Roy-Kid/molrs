@@ -188,7 +188,7 @@ mod tests {
             .unwrap();
         frame.insert("bonds", bonds);
 
-        let pots = ff.compile(&frame).unwrap();
+        let pots = ff.to_potentials(&frame).unwrap();
         let coords = extract_coords(&frame).unwrap();
         let e = pots.calc_energy(&coords);
         assert!((e - 37.5).abs() < 1e-3);

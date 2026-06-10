@@ -440,7 +440,7 @@ impl Style {
 ///     .def_type("A", &[("epsilon", 0.5), ("sigma", 1.0)]);
 ///
 /// // Compile into Potentials with a Frame containing topology
-/// // let potentials = ff.compile(&frame).unwrap();
+/// // let potentials = ff.to_potentials(&frame).unwrap();
 /// ```
 #[derive(Debug, Clone)]
 pub struct ForceField {

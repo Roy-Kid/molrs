@@ -71,7 +71,7 @@ fn compile_path_resolves_type_labels() {
         "bonds",
         topo_block(&[("atomi", &[0]), ("atomj", &[1])], &["CT-CT"]),
     );
-    let pots = ff.compile(&frame).unwrap();
+    let pots = ff.to_potentials(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
     assert!((pots.calc_energy(&coords) - 37.5).abs() < 1e-9);
 }
@@ -86,6 +86,6 @@ fn compile_unknown_bond_label_errors() {
         "bonds",
         topo_block(&[("atomi", &[0]), ("atomj", &[1])], &["XX-YY"]),
     );
-    let err = ff.compile(&frame).expect_err("unknown bond type");
+    let err = ff.to_potentials(&frame).expect_err("unknown bond type");
     assert!(err.contains("unknown bond type"), "{err}");
 }

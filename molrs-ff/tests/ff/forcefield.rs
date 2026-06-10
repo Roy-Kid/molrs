@@ -1,42 +1,14 @@
-//! End-to-end tests for `forcefield` (mod + xml): parse / build a `ForceField`,
-//! resolve kernels through the `KernelRegistry`, and `compile` against a Frame.
+//! End-to-end tests for `forcefield` (mod + xml): parse / build a `ForceField`
+//! and turn it into evaluable `Potentials` via `to_potentials` against a Frame.
 
 use crate::helpers::{atoms_frame, flat_coords, topo_block};
 use molrs::types::F;
 use molrs_ff::ForceField;
-use molrs_ff::potential::{KernelRegistry, extract_coords};
+use molrs_ff::potential::extract_coords;
 use molrs_ff::read_forcefield_xml_str;
 
 // ---------------------------------------------------------------------------
-// Registry wiring (public KernelRegistry surface)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn registry_exposes_all_builtin_kernels() {
-    let reg = KernelRegistry::default();
-    for (cat, name) in [
-        ("bond", "harmonic"),
-        ("angle", "harmonic"),
-        ("pair", "lj/cut"),
-        ("bond", "mmff_bond"),
-        ("angle", "mmff_angle"),
-        ("angle", "mmff_stbn"),
-        ("dihedral", "mmff_torsion"),
-        ("improper", "mmff_oop"),
-        ("pair", "mmff_vdw"),
-        ("pair", "mmff_ele"),
-        ("kspace", "pme"),
-    ] {
-        assert!(
-            reg.get(cat, name).is_some(),
-            "missing builtin kernel ({cat}, {name})"
-        );
-    }
-    assert!(reg.get("pair", "does-not-exist").is_none());
-}
-
-// ---------------------------------------------------------------------------
-// In-code ForceField → compile → eval
+// In-code ForceField → to_potentials → calc
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -52,7 +24,7 @@ fn compile_bond_then_eval_matches_analytical_energy() {
         topo_block(&[("atomi", &[0]), ("atomj", &[1])], &["CT-CT"]),
     );
 
-    let pots = ff.compile(&frame).unwrap();
+    let pots = ff.to_potentials(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
     let (e, _) = pots.calc_energy_forces(&coords);
     assert!((e - 37.5).abs() < 1e-9, "energy {e}");
@@ -79,7 +51,7 @@ fn compile_multi_style_sums_independent_contributions() {
         topo_block(&[("atomi", &[0]), ("atomj", &[1])], &["A"]),
     );
 
-    let pots = ff.compile(&frame).unwrap();
+    let pots = ff.to_potentials(&frame).unwrap();
     assert_eq!(pots.len(), 2);
     let coords = flat_coords(&coords_xyz);
     let (e, _) = pots.calc_energy_forces(&coords);
@@ -92,11 +64,13 @@ fn compile_multi_style_sums_independent_contributions() {
 }
 
 #[test]
-fn compile_unsupported_style_is_strict_error() {
+fn atom_style_is_skipped() {
+    // An atom style carries types/charges, not a pairwise kernel — to_potentials
+    // skips it rather than erroring.
     let ff = ForceField::new("test").with_atomstyle("full");
     let frame = atoms_frame(&[[0.0, 0.0, 0.0]]);
-    let err = ff.compile(&frame).expect_err("atom style has no kernel");
-    assert!(err.contains("No kernel registered"), "{err}");
+    let pots = ff.to_potentials(&frame).unwrap();
+    assert_eq!(pots.len(), 0);
 }
 
 #[test]
@@ -106,7 +80,7 @@ fn compile_missing_topology_block_is_error() {
         .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)]);
     // No "pairs" block in the frame.
     let frame = atoms_frame(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
-    let err = ff.compile(&frame).expect_err("missing pairs block");
+    let err = ff.to_potentials(&frame).expect_err("missing pairs block");
     assert!(err.contains("pairs"), "{err}");
 }
 
@@ -135,7 +109,7 @@ fn parse_generic_xml_then_compile_and_eval() {
         "bonds",
         topo_block(&[("atomi", &[0]), ("atomj", &[1])], &["CT-CT"]),
     );
-    let pots = ff.compile(&frame).unwrap();
+    let pots = ff.to_potentials(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
     assert!((pots.calc_energy(&coords) - 37.5).abs() < 1e-9);
 }

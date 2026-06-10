@@ -83,7 +83,7 @@ fn compile_path_converts_degrees_to_radians() {
             &["H-O-H"],
         ),
     );
-    let pots = ff.compile(&frame).unwrap();
+    let pots = ff.to_potentials(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
     assert!(pots.calc_energy(&coords).abs() < 1e-9);
 }

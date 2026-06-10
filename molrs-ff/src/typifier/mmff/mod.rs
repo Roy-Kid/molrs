@@ -87,7 +87,7 @@ impl MMFFTypifier {
     /// typing depends on element symbols, bond orders, and ring membership.
     pub fn build(&self, mol: &Atomistic) -> Result<Potentials, String> {
         let frame = self.typify(mol)?;
-        self.ff.compile(&frame)
+        self.ff.to_potentials(&frame)
     }
 
     /// Assign MMFF94 atom types to all atoms.

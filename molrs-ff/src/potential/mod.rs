@@ -2,7 +2,7 @@
 //!
 //! A [`Potential`] stores pre-resolved topology indices and parameters.
 //! Callers pass only flat coordinates — no [`Frame`] in the hot loop.
-//! Construction from a [`Frame`] happens once via [`ForceField::compile`].
+//! Construction from a [`Frame`] happens once via [`ForceField::to_potentials`].
 
 pub mod geometry;
 
@@ -19,8 +19,6 @@ pub mod kernels {
     pub use super::bond::harmonic::{BondHarmonic, bond_harmonic_ctor};
     pub use super::pair::lj_cut::{PairLJCut as PairLJ126, pair_lj_cut_ctor as pair_lj126_ctor};
 }
-
-use std::collections::HashMap;
 
 use crate::forcefield::{ForceField, Params};
 use molrs::frame::Frame;
@@ -103,7 +101,7 @@ impl Potentials {
         self.n_atoms
     }
 
-    /// Record the compiled atom count (used by [`ForceField::compile_with`]).
+    /// Record the compiled atom count (used by [`ForceField::to_potentials`]).
     pub fn set_n_atoms(&mut self, n_atoms: usize) {
         self.n_atoms = n_atoms;
     }
@@ -156,71 +154,58 @@ impl Potential for Potentials {
 }
 
 // ---------------------------------------------------------------------------
-// Kernel registry
+// Style -> Potential construction (OOP — replaces the kernel-registry free-fn map)
 // ---------------------------------------------------------------------------
 
-/// Constructor signature: takes style-level params, per-type params, and a
-/// Frame (for topology resolution). Returns a boxed Potential with pre-resolved
-/// indices — the Frame is NOT retained.
-pub type KernelConstructor = fn(
-    style_params: &Params,
-    type_params: &[(&str, &Params)],
-    frame: &Frame,
-) -> Result<Box<dyn Potential>, String>;
-
-/// Registry mapping `(category, style_name)` -> [`KernelConstructor`].
-pub struct KernelRegistry {
-    map: HashMap<(String, String), KernelConstructor>,
-}
-
-impl KernelRegistry {
-    pub fn new() -> Self {
-        let mut reg = Self {
-            map: HashMap::new(),
+impl crate::forcefield::Style {
+    /// Build this style's molecule-bound [`Potential`] by **expanding** its type
+    /// parameters against `frame`'s topology — each bond/angle/… row's string
+    /// type label is resolved to its parameters and stored as per-element
+    /// arrays, so the resulting potential evaluates from coordinates alone.
+    ///
+    /// Returns `Ok(None)` for a style that carries no pairwise kernel (an atom
+    /// style — types/charges only), `Err` for an unknown `(category, name)`.
+    pub fn to_potential(&self, frame: &Frame) -> Result<Option<Box<dyn Potential>>, String> {
+        let category = self.category();
+        if category == "atom" {
+            return Ok(None);
+        }
+        let type_params = self.defs.collect_type_params();
+        if type_params.is_empty() {
+            return Err(format!(
+                "Style '{}' ({}) has no type definitions",
+                self.name, category
+            ));
+        }
+        let type_refs: Vec<(&str, &Params)> = type_params
+            .iter()
+            .map(|(name, params)| (name.as_str(), params))
+            .collect();
+        let sp = &self.params;
+        let pot = match (category, self.name.as_str()) {
+            ("bond", "harmonic") => bond::harmonic::bond_harmonic_ctor(sp, &type_refs, frame)?,
+            ("angle", "harmonic") => angle::harmonic::angle_harmonic_ctor(sp, &type_refs, frame)?,
+            ("dihedral", "opls") => dihedral::opls::dihedral_opls_ctor(sp, &type_refs, frame)?,
+            ("pair", "lj/cut") => pair::lj_cut::pair_lj_cut_ctor(sp, &type_refs, frame)?,
+            ("pair", "coul/cut") => pair::coul_cut::pair_coul_cut_ctor(sp, &type_refs, frame)?,
+            ("bond", "mmff_bond") => bond::mmff::mmff_bond_ctor(sp, &type_refs, frame)?,
+            ("angle", "mmff_angle") => angle::mmff::mmff_angle_ctor(sp, &type_refs, frame)?,
+            ("angle", "mmff_stbn") => angle::mmff::mmff_stbn_ctor(sp, &type_refs, frame)?,
+            ("dihedral", "mmff_torsion") => {
+                dihedral::mmff::mmff_torsion_ctor(sp, &type_refs, frame)?
+            }
+            ("improper", "mmff_oop") => improper::mmff::mmff_oop_ctor(sp, &type_refs, frame)?,
+            ("pair", "mmff_vdw") => pair::mmff::mmff_vdw_ctor(sp, &type_refs, frame)?,
+            ("pair", "mmff_ele") => pair::mmff::mmff_ele_ctor(sp, &type_refs, frame)?,
+            ("kspace", "pme") => kspace::pme::pme_ctor(sp, &type_refs, frame)?,
+            _ => {
+                return Err(format!(
+                    "no kernel for style category '{}' name '{}'",
+                    category, self.name
+                ));
+            }
         };
-        reg.register_builtins();
-        reg
-    }
-
-    pub fn register(&mut self, category: &str, name: &str, ctor: KernelConstructor) {
-        self.map
-            .insert((category.to_owned(), name.to_owned()), ctor);
-    }
-
-    /// Look up a constructor by category and name.
-    pub fn get(&self, category: &str, name: &str) -> Option<&KernelConstructor> {
-        self.map.get(&(category.to_owned(), name.to_owned()))
-    }
-
-    fn register_builtins(&mut self) {
-        // Generic kernels
-        self.register("bond", "harmonic", bond::harmonic::bond_harmonic_ctor);
-        self.register("angle", "harmonic", angle::harmonic::angle_harmonic_ctor);
-        self.register("dihedral", "opls", dihedral::opls::dihedral_opls_ctor);
-        self.register("pair", "lj/cut", pair::lj_cut::pair_lj_cut_ctor);
-        self.register("pair", "coul/cut", pair::coul_cut::pair_coul_cut_ctor);
-
-        // MMFF94 kernels
-        self.register("bond", "mmff_bond", bond::mmff::mmff_bond_ctor);
-        self.register("angle", "mmff_angle", angle::mmff::mmff_angle_ctor);
-        self.register("angle", "mmff_stbn", angle::mmff::mmff_stbn_ctor);
-        self.register(
-            "dihedral",
-            "mmff_torsion",
-            dihedral::mmff::mmff_torsion_ctor,
-        );
-        self.register("improper", "mmff_oop", improper::mmff::mmff_oop_ctor);
-        self.register("pair", "mmff_vdw", pair::mmff::mmff_vdw_ctor);
-        self.register("pair", "mmff_ele", pair::mmff::mmff_ele_ctor);
-
-        // K-space kernels
-        self.register("kspace", "pme", kspace::pme::pme_ctor);
-    }
-}
-
-impl Default for KernelRegistry {
-    fn default() -> Self {
-        Self::new()
+        Ok(Some(pot))
     }
 }
 
@@ -265,53 +250,26 @@ pub fn extract_coords(frame: &Frame) -> Result<Vec<F>, String> {
 }
 
 impl ForceField {
-    /// Compile all styles into [`Potential`] objects using the given registry
-    /// and a [`Frame`] for topology resolution.
+    /// Build evaluable [`Potentials`] by expanding every style against a
+    /// typed [`Frame`].
     ///
-    /// The Frame is read once to resolve type labels into flat index arrays.
-    /// The resulting Potentials do NOT retain the Frame.
-    pub fn compile_with(
-        &self,
-        registry: &KernelRegistry,
-        frame: &Frame,
-    ) -> Result<Potentials, String> {
+    /// Each style's `to_potential` resolves its string type labels to per-element
+    /// parameter arrays (see [`Style::to_potential`](crate::forcefield::Style::to_potential)),
+    /// so the resulting potentials are **molecule-bound**: they retain no Frame
+    /// and evaluate from coordinates alone. Styles with no kernel (atom styles)
+    /// are skipped. This is the molpy-style `ForceField → Potentials` conversion;
+    /// there is no separate "compile" step.
+    pub fn to_potentials(&self, frame: &Frame) -> Result<Potentials, String> {
         let mut pots = Potentials::new();
-
         for style in self.styles() {
-            let category = style.category();
-            let ctor = registry.get(category, &style.name).ok_or_else(|| {
-                format!(
-                    "No kernel registered for style category '{}' with name '{}'",
-                    category, style.name
-                )
-            })?;
-
-            let type_params = style.defs.collect_type_params();
-            if type_params.is_empty() {
-                return Err(format!(
-                    "Style '{}' ({}) has no type definitions",
-                    style.name, category
-                ));
+            if let Some(pot) = style.to_potential(frame)? {
+                pots.push(pot);
             }
-
-            let type_refs: Vec<(&str, &Params)> = type_params
-                .iter()
-                .map(|(name, params)| (name.as_str(), params))
-                .collect();
-            let pot = ctor(&style.params, &type_refs, frame)?;
-            pots.push(pot);
         }
-
-        // Record the atom count so callers (e.g. the geometry optimizer's
-        // batch path) can validate coordinate shapes against this topology.
+        // Record the atom count so callers (e.g. the geometry optimizer's batch
+        // path) can validate coordinate shapes against this topology.
         pots.set_n_atoms(frame.get("atoms").and_then(|b| b.nrows()).unwrap_or(0));
-
         Ok(pots)
-    }
-
-    /// Compile using the built-in kernel registry.
-    pub fn compile(&self, frame: &Frame) -> Result<Potentials, String> {
-        self.compile_with(&KernelRegistry::default(), frame)
     }
 }
 
@@ -388,21 +346,23 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_builtins() {
-        let reg = KernelRegistry::default();
-        assert!(reg.get("bond", "harmonic").is_some());
-        assert!(reg.get("angle", "harmonic").is_some());
-        assert!(reg.get("pair", "lj/cut").is_some());
-        assert!(reg.get("kspace", "pme").is_some());
-        assert!(reg.get("pair", "nonexistent").is_none());
+    fn unknown_style_kernel_is_error() {
+        // A style whose (category, name) has no kernel -> Err from to_potential.
+        let mut ff = ForceField::new("test");
+        ff.def_bondstyle("nonexistent")
+            .def_type("A-A", &[("k", 1.0)]);
+        let frame = make_lj_frame();
+        let err = ff.to_potentials(&frame).unwrap_err();
+        assert!(err.contains("no kernel"), "{err}");
     }
 
     #[test]
-    fn test_compile_is_strict_for_unsupported_style() {
+    fn atom_style_is_skipped() {
+        // Atom styles carry types/charges, not a pairwise kernel -> skipped.
         let ff = ForceField::new("test").with_atomstyle("full");
         let frame = make_atoms_only_frame();
-        let err = ff.compile(&frame).expect_err("expected compile to fail");
-        assert!(err.contains("No kernel registered"));
+        let pots = ff.to_potentials(&frame).unwrap();
+        assert_eq!(pots.len(), 0);
     }
 
     #[test]
@@ -410,7 +370,9 @@ mod tests {
         let mut ff = ForceField::new("test");
         ff.def_bondstyle("harmonic");
         let frame = make_atoms_only_frame();
-        let err = ff.compile(&frame).expect_err("expected compile to fail");
+        let err = ff
+            .to_potentials(&frame)
+            .expect_err("expected compile to fail");
         assert!(err.contains("has no type definitions"));
     }
 
@@ -421,7 +383,7 @@ mod tests {
             .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)]);
 
         let frame = make_lj_frame();
-        let pots = ff.compile(&frame).unwrap();
+        let pots = ff.to_potentials(&frame).unwrap();
         let coords = extract_coords(&frame).unwrap();
 
         let (energy, _) = pots.calc_energy_forces(&coords);
@@ -436,7 +398,7 @@ mod tests {
             .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)]);
 
         let frame = make_lj_frame();
-        let pots = ff.compile(&frame).unwrap();
+        let pots = ff.to_potentials(&frame).unwrap();
         let coords = extract_coords(&frame).unwrap();
 
         let (_, forces) = pots.calc_energy_forces(&coords);
@@ -451,7 +413,7 @@ mod tests {
     fn test_compile_empty_ff() {
         let ff = ForceField::new("test");
         let frame = make_lj_frame();
-        let pots = ff.compile(&frame).unwrap();
+        let pots = ff.to_potentials(&frame).unwrap();
         let coords = extract_coords(&frame).unwrap();
 
         let (energy, forces) = pots.calc_energy_forces(&coords);
@@ -467,7 +429,7 @@ mod tests {
             .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)]);
 
         let frame = make_atoms_only_frame();
-        let err = ff.compile(&frame).unwrap_err();
+        let err = ff.to_potentials(&frame).unwrap_err();
         assert!(err.contains("pairs"));
     }
 }

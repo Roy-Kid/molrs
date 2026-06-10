@@ -91,7 +91,7 @@ fn compile_path_resolves_self_pair_type() {
         "pairs",
         topo_block(&[("atomi", &[0]), ("atomj", &[1])], &["Ar"]),
     );
-    let pots = ff.compile(&frame).unwrap();
+    let pots = ff.to_potentials(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
     let expected = 4.0 * (1.0 / 4096.0 - 1.0 / 64.0);
     assert!((pots.calc_energy(&coords) - expected).abs() < 1e-12);

@@ -10,7 +10,6 @@
 use crate::helpers::{atoms_block, flat_coords, numerical_forces, topo_block};
 use molrs::frame::Frame;
 use molrs::types::F;
-use molrs_ff::potential::KernelRegistry;
 use molrs_ff::{ForceField, MinimizeOptions, minimize, minimize_batch};
 
 /// A 4-atom chain (butane-like backbone) with one of each OPLS term.
@@ -79,19 +78,12 @@ fn start_coords() -> [[F; 3]; 4] {
 }
 
 #[test]
-fn registry_resolves_opls_and_coul() {
-    let reg = KernelRegistry::default();
-    assert!(reg.get("dihedral", "opls").is_some());
-    assert!(reg.get("pair", "coul/cut").is_some());
-}
-
-#[test]
 fn opls_assembly_compiles_and_force_matches_finite_difference() {
     let ff = opls_chain_ff();
     let xyz = start_coords();
     let frame = opls_chain_frame(&xyz);
 
-    let pots = ff.compile(&frame).expect("compile OPLS frame");
+    let pots = ff.to_potentials(&frame).expect("compile OPLS frame");
     // bond + angle + dihedral + lj/cut + coul/cut = 5 kernels.
     assert_eq!(pots.len(), 5);
 
@@ -115,7 +107,7 @@ fn opls_minimize_single_and_batch() {
     let ff = opls_chain_ff();
     let xyz = start_coords();
     let frame = opls_chain_frame(&xyz);
-    let pots = ff.compile(&frame).expect("compile");
+    let pots = ff.to_potentials(&frame).expect("compile");
 
     let start = flat_coords(&xyz);
     let e_start = pots.calc_energy(&start);
