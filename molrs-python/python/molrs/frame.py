@@ -113,7 +113,9 @@ class Block(_RsBlock, MutableMapping[str, np.ndarray]):
 
             return {k: _row(v) for k, v in self._as_dict().items()}
         elif isinstance(key, slice):
-            return Block({k: v[key] for k, v in self._as_dict().items()})
+            # Row slice -> Rust-native gather (no per-column NumPy slicing).
+            indices = list(range(*key.indices(self.nrows)))
+            return Block.from_dict(_RsBlock.select_rows(self._backing(), indices))
         elif isinstance(key, list):
             if not key:
                 raise KeyError("Empty list not allowed for indexing")
@@ -137,7 +139,19 @@ class Block(_RsBlock, MutableMapping[str, np.ndarray]):
         elif isinstance(key, tuple):
             return np.array([self[k] for k in key])
         elif isinstance(key, np.ndarray):
-            return Block({k: self._view_array(k)[key] for k in self.keys()})
+            # Boolean mask or integer fancy-index -> Rust-native row gather.
+            n = self.nrows
+            if key.dtype == bool:
+                if key.shape[0] != n:
+                    raise IndexError(
+                        f"boolean index did not match block: block has {n} "
+                        f"rows but mask has length {key.shape[0]}"
+                    )
+                idx = np.nonzero(key)[0]
+            else:
+                idx = key
+            indices = [int(i) % n if n and int(i) < 0 else int(i) for i in idx]
+            return Block.from_dict(_RsBlock.select_rows(self._backing(), indices))
         elif callable(key):
             # Duck-typed selector: any callable that filters/derives from a Block.
             return key(self)
