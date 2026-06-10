@@ -509,6 +509,19 @@ impl PyAtomistic {
             .map_err(molrs_error_to_pyerr)
     }
 
+    /// Single-source shortest-path (BFS) distances over the bond graph from
+    /// `source` (a node handle), as `(node_handle, hops)` pairs for every atom
+    /// reachable from `source` (including `source` itself at distance 0).
+    /// Unreachable atoms (a different connected component) are omitted; an
+    /// unknown `source` handle yields an empty list.
+    fn topo_distances(&self, source: u64) -> Vec<(u64, i64)> {
+        self.inner
+            .topo_distances(node_from_u64(source))
+            .into_iter()
+            .map(|(a, d)| (node_to_u64(a), d))
+            .collect()
+    }
+
     /// Number of atoms.
     #[getter]
     fn n_atoms(&self) -> usize {

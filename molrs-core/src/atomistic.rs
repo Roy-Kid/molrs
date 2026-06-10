@@ -395,6 +395,41 @@ impl Atomistic {
         Ok((n_ang, n_dih))
     }
 
+    /// Build the bond-graph [`Topology`](crate::topology::Topology) over the
+    /// atoms in node-id (row) order. The Topology's contiguous indices map to
+    /// `self.node_ids()` in order.
+    pub fn bond_topology(&self) -> crate::topology::Topology {
+        let atoms: Vec<AtomId> = self.graph.node_ids().collect();
+        let pos: std::collections::HashMap<AtomId, usize> =
+            atoms.iter().enumerate().map(|(i, &a)| (a, i)).collect();
+        let mut edges: Vec<[usize; 2]> = Vec::new();
+        for id in self.graph.relation_ids(self.bond) {
+            if let Ok(n) = self.graph.relation_nodes(self.bond, id) {
+                if n.len() == 2 {
+                    edges.push([pos[&n[0]], pos[&n[1]]]);
+                }
+            }
+        }
+        crate::topology::Topology::from_edges(atoms.len(), &edges)
+    }
+
+    /// BFS shortest-path distances over the bond graph from `source`, as
+    /// `(atom_id, hops)` pairs for every atom reachable from `source`
+    /// (including `source` at distance 0). Unreachable atoms are omitted; an
+    /// unknown `source` yields an empty vector.
+    pub fn topo_distances(&self, source: AtomId) -> Vec<(AtomId, i64)> {
+        let atoms: Vec<AtomId> = self.graph.node_ids().collect();
+        let Some(src_idx) = atoms.iter().position(|&a| a == source) else {
+            return Vec::new();
+        };
+        self.bond_topology()
+            .distances(src_idx)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, d)| if d >= 0 { Some((atoms[i], d)) } else { None })
+            .collect()
+    }
+
     // ---- impropers ----
 
     /// Add an improper dihedral (i-j-k-l; i conventionally central).

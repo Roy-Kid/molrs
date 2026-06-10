@@ -222,6 +222,35 @@ impl Topology {
         labels
     }
 
+    /// Single-source shortest-path distances (BFS over the unweighted bond
+    /// graph).
+    ///
+    /// Returns a `Vec<i64>` of length `n_atoms`: the hop count from `source` to
+    /// each atom, or `-1` for atoms unreachable from `source` (a different
+    /// connected component). `source` itself has distance 0. An out-of-range
+    /// `source` yields an all-`-1` vector.
+    pub fn distances(&self, source: usize) -> Vec<i64> {
+        let n = self.graph.node_count();
+        let mut dist = vec![-1i64; n];
+        if source >= n {
+            return dist;
+        }
+        dist[source] = 0;
+        let mut queue = VecDeque::new();
+        queue.push_back(NodeIndex::new(source));
+        while let Some(current) = queue.pop_front() {
+            let d = dist[current.index()];
+            for neighbor in self.graph.neighbors(current) {
+                let ni = neighbor.index();
+                if dist[ni] < 0 {
+                    dist[ni] = d + 1;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        dist
+    }
+
     /// Number of connected components.
     pub fn n_components(&self) -> usize {
         petgraph::algo::connected_components(&self.graph)
@@ -568,6 +597,18 @@ mod tests {
         let topo = Topology::new();
         assert_eq!(topo.n_atoms(), 0);
         assert_eq!(topo.n_bonds(), 0);
+    }
+
+    #[test]
+    fn test_distances_path_and_disconnected() {
+        // Path 0-1-2-3 plus an isolated atom 4.
+        let topo = Topology::from_edges(5, &[[0, 1], [1, 2], [2, 3]]);
+        assert_eq!(topo.distances(0), vec![0, 1, 2, 3, -1]);
+        assert_eq!(topo.distances(3), vec![3, 2, 1, 0, -1]);
+        // Isolated atom: only itself reachable.
+        assert_eq!(topo.distances(4), vec![-1, -1, -1, -1, 0]);
+        // Out-of-range source -> all unreachable.
+        assert_eq!(topo.distances(9), vec![-1; 5]);
     }
 
     #[test]
