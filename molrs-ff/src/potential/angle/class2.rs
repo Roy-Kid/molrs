@@ -1,0 +1,188 @@
+//! Class2 (quartic) angle potential:
+//! E = k2*(theta-theta0)^2 + k3*(theta-theta0)^3 + k4*(theta-theta0)^4
+//!
+//! The COMPASS/class2 anharmonic angle core term (cross-terms bb/ba are
+//! separate styles, not implemented here). Parameters per type: `theta0`
+//! (degrees, converted to radians at construction), `k2`, `k3`, `k4`.
+
+use std::collections::HashMap;
+
+use crate::forcefield::Params;
+use crate::potential::Potential;
+use crate::potential::geometry::{compute_angle, validate_coords};
+use molrs::frame::Frame;
+use molrs::types::F;
+
+/// Class2 quartic angle potential. `theta0` is stored in radians.
+pub struct AngleClass2 {
+    atom_i: Vec<usize>,
+    atom_j: Vec<usize>,
+    atom_k: Vec<usize>,
+    theta0: Vec<F>,
+    k2: Vec<F>,
+    k3: Vec<F>,
+    k4: Vec<F>,
+}
+
+impl AngleClass2 {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        atom_i: Vec<usize>,
+        atom_j: Vec<usize>,
+        atom_k: Vec<usize>,
+        theta0: Vec<F>,
+        k2: Vec<F>,
+        k3: Vec<F>,
+        k4: Vec<F>,
+    ) -> Self {
+        let n = atom_i.len();
+        assert_eq!(atom_j.len(), n);
+        assert_eq!(atom_k.len(), n);
+        assert_eq!(theta0.len(), n);
+        assert_eq!(k2.len(), n);
+        assert_eq!(k3.len(), n);
+        assert_eq!(k4.len(), n);
+        Self {
+            atom_i,
+            atom_j,
+            atom_k,
+            theta0,
+            k2,
+            k3,
+            k4,
+        }
+    }
+}
+
+impl Potential for AngleClass2 {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
+        let _n_atoms = validate_coords(coords);
+        let mut energy: F = 0.0;
+        let mut forces = vec![0.0; coords.len()];
+
+        for idx in 0..self.atom_i.len() {
+            let (i, j, k) = (self.atom_i[idx], self.atom_j[idx], self.atom_k[idx]);
+            let (k2, k3, k4) = (self.k2[idx], self.k3[idx], self.k4[idx]);
+            let theta0 = self.theta0[idx];
+
+            let theta = compute_angle(coords, i, j, k);
+            let dt = theta - theta0;
+            let dt2 = dt * dt;
+            energy += k2 * dt2 + k3 * dt2 * dt + k4 * dt2 * dt2;
+
+            // dE/dtheta = 2 k2 dt + 3 k3 dt^2 + 4 k4 dt^3
+            let de_dtheta = 2.0 * k2 * dt + 3.0 * k3 * dt2 + 4.0 * k4 * dt2 * dt;
+            super::accumulate_angle_forces(coords, i, j, k, de_dtheta, &mut forces);
+        }
+
+        (energy, forces)
+    }
+}
+
+/// Construct an [`AngleClass2`] from style params, type params, and Frame topology.
+pub fn angle_class2_ctor(
+    _style_params: &Params,
+    type_params: &[(&str, &Params)],
+    frame: &Frame,
+) -> Result<Box<dyn Potential>, String> {
+    let type_map: HashMap<&str, &Params> = type_params.iter().copied().collect();
+
+    let block = frame
+        .get("angles")
+        .ok_or_else(|| "AngleClass2: frame missing \"angles\" block".to_string())?;
+    let i_col = block
+        .get_uint("atomi")
+        .ok_or_else(|| "AngleClass2: angles block missing \"atomi\" column".to_string())?;
+    let j_col = block
+        .get_uint("atomj")
+        .ok_or_else(|| "AngleClass2: angles block missing \"atomj\" column".to_string())?;
+    let k_col = block
+        .get_uint("atomk")
+        .ok_or_else(|| "AngleClass2: angles block missing \"atomk\" column".to_string())?;
+    let type_col = block
+        .get_string("type")
+        .ok_or_else(|| "AngleClass2: angles block missing \"type\" column".to_string())?;
+
+    let (mut ai, mut aj, mut ak) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut t0, mut k2, mut k3, mut k4) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let need = |p: &Params, key: &str, label: &str| -> Result<F, String> {
+        p.get(key)
+            .ok_or_else(|| format!("AngleClass2 type '{}': missing '{}'", label, key))
+            .map(|v| v as F)
+    };
+    for idx in 0..i_col.len() {
+        let label = &type_col[idx];
+        let p = type_map
+            .get(label.as_str())
+            .ok_or_else(|| format!("AngleClass2: unknown angle type '{}'", label))?;
+        ai.push(i_col[idx] as usize);
+        aj.push(j_col[idx] as usize);
+        ak.push(k_col[idx] as usize);
+        t0.push(need(p, "theta0", label)?.to_radians());
+        k2.push(need(p, "k2", label)?);
+        k3.push(need(p, "k3", label)?);
+        k4.push(need(p, "k4", label)?);
+    }
+
+    Ok(Box::new(AngleClass2::new(ai, aj, ak, t0, k2, k3, k4)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn numerical_forces(pot: &AngleClass2, coords: &[F]) -> Vec<F> {
+        let h = 1e-6;
+        let mut num = vec![0.0; coords.len()];
+        for k in 0..coords.len() {
+            let mut cp = coords.to_vec();
+            let mut cm = coords.to_vec();
+            cp[k] += h;
+            cm[k] -= h;
+            num[k] = -(pot.calc_energy(&cp) - pot.calc_energy(&cm)) / (2.0 * h);
+        }
+        num
+    }
+
+    #[test]
+    fn energy_zero_at_equilibrium() {
+        let theta0: F = std::f64::consts::FRAC_PI_2;
+        let pot = AngleClass2::new(
+            vec![0],
+            vec![1],
+            vec![2],
+            vec![theta0],
+            vec![50.0],
+            vec![10.0],
+            vec![5.0],
+        );
+        let coords: Vec<F> = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        assert!(pot.calc_energy(&coords).abs() < 1e-9);
+    }
+
+    #[test]
+    fn forces_match_finite_difference() {
+        let theta0: F = 1.9;
+        let pot = AngleClass2::new(
+            vec![0],
+            vec![1],
+            vec![2],
+            vec![theta0],
+            vec![50.0],
+            vec![10.0],
+            vec![5.0],
+        );
+        // bent, off-axis geometry
+        let coords: Vec<F> = vec![1.0, 0.2, 0.0, 0.0, 0.0, 0.1, -0.3, 1.0, 0.0];
+        let (_, analytical) = pot.calc_energy_forces(&coords);
+        let numerical = numerical_forces(&pot, &coords);
+        for k in 0..coords.len() {
+            assert!(
+                (analytical[k] - numerical[k]).abs() < 1e-5,
+                "k={k} a={} n={}",
+                analytical[k],
+                numerical[k]
+            );
+        }
+    }
+}

@@ -187,6 +187,7 @@ impl crate::forcefield::Style {
             ("bond", "class2") => bond::class2::bond_class2_ctor(sp, &type_refs, frame)?,
             ("bond", "morse") => bond::morse::bond_morse_ctor(sp, &type_refs, frame)?,
             ("angle", "harmonic") => angle::harmonic::angle_harmonic_ctor(sp, &type_refs, frame)?,
+            ("angle", "class2") => angle::class2::angle_class2_ctor(sp, &type_refs, frame)?,
             ("dihedral", "opls") => dihedral::opls::dihedral_opls_ctor(sp, &type_refs, frame)?,
             ("pair", "lj/cut") => pair::lj_cut::pair_lj_cut_ctor(sp, &type_refs, frame)?,
             ("pair", "lj/class2") => pair::lj_class2::pair_lj_class2_ctor(sp, &type_refs, frame)?,
