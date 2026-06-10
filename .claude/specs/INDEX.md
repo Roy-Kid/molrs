@@ -2,6 +2,9 @@
 
 One row per spec produced by `/molrs-spec`. Newest on top.
 
+| 2026-06-10 | [topology-paths-molgraph-01](topology-paths-molgraph-01.md) | draft | molrs-core, molrs-python | 下沉 #1：角/二面角=键图里的 k-边路径，图论原语 `MolGraph::paths_of_length(kind,k)`（领域无关）+ `Atomistic::generate_topology`（领域叶子）；吸收 topology.rs，退掉 molpy Python 枚举 |
+| 2026-06-10 | [ff-potentials-oop-01](ff-potentials-oop-01.md) | draft | molrs-ff, molrs-python, molrs-conformer | 下沉 #2：镜像 molpy OOP — `Style::to_potential`/`ForceField::to_potentials`(无 frame)/`Potentials::calc_energy\|calc_forces(frame)` + `LBFGS` 优化器类(`new(pot,cfg).run(frame)`)；删 compile/eval/自由 minimize/自由 ctor；ETKDG 用私有引擎不变 |
+| 2026-06-10 | [ff-format-readers-01](ff-format-readers-01.md) | draft | molrs-ff, molrs-python | 下沉 #3：molrs 直接读力场格式 → molrs.ForceField（单位归一化在 reader）；首个 OplsXmlReader（GROMACS nm/kJ→Å/kcal，RB→OPLS f1..f4）；对照 molpy numpy OPLS |
 | 2026-06-10 | [opls-ef-01-kernels-seam](opls-ef-01-kernels-seam.md) | code-complete | molrs-ff | OPLS-AA E/F：补 OPLS 4-cosine 二面角 + 通用 coul/cut 库仑 kernel（bond/angle 复用 harmonic），定义 molpy SMARTS-typify→typed Frame→molrs compile→minimize 接缝；排除/1-4 scaling/几何组合规则在 molpy 侧烘焙进 pairs 块，kernel 拓扑无关；对照 molpy numpy OPLS。typifier 不下沉（B线） |
 | 2026-06-10 | [geometry-optimizer-01-generic-batch](geometry-optimizer-01-generic-batch.md) | code-complete | molrs-ff, molrs-conformer, molrs-python | 通用几何优化器下沉：把 ETKDG 私有 L-BFGS 抽进 molrs-ff 成 force-field-agnostic minimize（fmax 收敛，复用 two-loop+line search）+ 同构体系批量 minimize_batch（rayon par_chunks，(B,N,3)）+ PyO3 暴露 Potentials.minimize/minimize_batch；ETKDG 行为不变；对照 molpy numpy-LBFGS & RDKit MMFFOptimize |
 | 2026-06-08 | [molgraph-ecs-01-core](molgraph-ecs-01-core.md) | draft | molrs-core | MolGraph→ECS：图实例即 world(纯数据,无全局/scheduler/手创)；system 即吃 world 的自由函数(perceive_aromaticity(mol)…)；component=共享行序对齐稠密列+null 掩码(零拷贝/对齐/O(1)/句柄稳定)；零硬编码字段=引用内置 key 约定+直接访问+错即报错。chain molgraph-ecs 1/3(inversion 量级,breaking molrs) |
