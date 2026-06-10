@@ -34,7 +34,7 @@ fn two_ion_energy_approaches_vacuum_coulomb() {
     );
     let c = box_l / 2.0;
     let coords: Vec<F> = vec![c, c, c, c + r, c, c];
-    let e = pme.energy(&coords);
+    let e = pme.calc_energy(&coords);
     // q_i q_j / r with coulomb=1, opposite unit charges -> -1/r, plus small
     // periodic-image correction.
     let e_vacuum = -1.0 / r;
@@ -51,7 +51,7 @@ fn newtons_third_law_total_force_balances() {
         vec![[0, 1], [2, 3]],
     );
     let coords: Vec<F> = vec![1.0, 2.0, 3.0, 4.0, 2.5, 3.5, 6.0, 7.0, 2.0, 8.0, 7.5, 2.5];
-    let (_, forces) = pme.eval(&coords);
+    let (_, forces) = pme.calc_energy_forces(&coords);
     for dim in 0..3 {
         let sum: F = (0..4).map(|a| forces[a * 3 + dim]).sum();
         assert!(sum.abs() < 0.1, "dim {dim} net {sum}");
@@ -68,14 +68,14 @@ fn forces_match_finite_difference() {
         vec![[0, 1]],
     );
     let coords: Vec<F> = vec![2.0, 3.0, 4.0, 5.0, 3.5, 4.5, 7.0, 6.0, 5.0];
-    let forces = pme.forces(&coords);
+    let forces = pme.calc_forces(&coords);
     let eps: F = 1e-3;
     for idx in 0..coords.len() {
         let mut cp = coords.clone();
         let mut cm = coords.clone();
         cp[idx] += eps;
         cm[idx] -= eps;
-        let numerical = -(pme.energy(&cp) - pme.energy(&cm)) / (2.0 * eps);
+        let numerical = -(pme.calc_energy(&cp) - pme.calc_energy(&cm)) / (2.0 * eps);
         assert!(
             (forces[idx] - numerical).abs() < 1.0,
             "idx={idx} analytical={} numerical={}",
@@ -89,6 +89,6 @@ fn forces_match_finite_difference() {
 fn neutral_system_energy_is_finite() {
     // Single charge: only self energy + reciprocal; must be finite, no NaN.
     let pme = PmePotential::new(params(0.3, 4.5, 4), vec![1.0], cubic_box(10.0), vec![]);
-    let e = pme.energy(&[5.0, 5.0, 5.0]);
+    let e = pme.calc_energy(&[5.0, 5.0, 5.0]);
     assert!(e.is_finite(), "energy {e}");
 }

@@ -153,7 +153,7 @@ fn minimize_one(potential: &dyn Potential, coords: &mut [F], opts: &MinimizeOpti
         Converge::Fmax(opts.fmax),
         opts.max_step,
         opts.memory,
-        |c| potential.eval(c),
+        |c| potential.calc_energy_forces(c),
     );
     OptReport {
         converged,
@@ -175,7 +175,7 @@ mod tests {
     }
 
     impl Potential for HarmonicBond {
-        fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+        fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
             // atoms 0 and 1, vector from 0 -> 1.
             let d = [
                 coords[3] - coords[0],
@@ -254,7 +254,7 @@ mod tests {
         // A lone atom with no forces: fmax is already 0.
         struct Free;
         impl Potential for Free {
-            fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+            fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
                 (0.0, vec![0.0; coords.len()])
             }
         }
@@ -268,7 +268,7 @@ mod tests {
     fn rejects_non_multiple_of_three() {
         struct Free;
         impl Potential for Free {
-            fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+            fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
                 (0.0, vec![0.0; coords.len()])
             }
         }
@@ -280,7 +280,7 @@ mod tests {
     fn empty_coords_is_converged_noop() {
         struct Free;
         impl Potential for Free {
-            fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+            fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
                 (0.0, vec![0.0; coords.len()])
             }
         }

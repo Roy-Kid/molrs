@@ -148,7 +148,7 @@ impl PyPotentials {
         coords: numpy::PyReadonlyArray1<'_, NpF>,
     ) -> PyResult<(f64, Bound<'py, PyArray1<NpF>>)> {
         let slice = coords.as_slice()?;
-        let (energy, forces) = self.inner.eval(slice);
+        let (energy, forces) = self.inner.calc_energy_forces(slice);
         let forces_arr = forces.to_pyarray(py);
         Ok((energy, forces_arr))
     }
@@ -171,7 +171,7 @@ impl PyPotentials {
     ///     If ``coords`` is not contiguous in memory.
     fn energy(&self, coords: numpy::PyReadonlyArray1<'_, NpF>) -> PyResult<f64> {
         let slice = coords.as_slice()?;
-        Ok(self.inner.energy(slice))
+        Ok(self.inner.calc_energy(slice))
     }
 
     /// Relax structures by L-BFGS energy minimization. Single or batch,

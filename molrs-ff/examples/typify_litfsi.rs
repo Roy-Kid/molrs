@@ -124,7 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match typifier.build(&mol) {
         Ok(potentials) => {
             let coords = molrs_ff::potential::extract_coords(&frame)?;
-            let (energy, _) = potentials.eval(&coords);
+            let (energy, _) = potentials.calc_energy_forces(&coords);
             println!(
                 "Built {} kernel(s), energy = {:.4} kcal/mol",
                 potentials.len(),

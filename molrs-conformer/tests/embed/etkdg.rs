@@ -210,7 +210,7 @@ fn mmff_energy(mol: &Atomistic, coords: &[[f64; 3]]) -> Option<f64> {
     let props = MmffMolProperties::compute(mol, MmffVariant::Mmff94).ok()?;
     let ff = MmffForceField::build(mol, &props).ok()?;
     let flat: Vec<f64> = coords.iter().flat_map(|c| [c[0], c[1], c[2]]).collect();
-    Some(ff.eval(&flat).0)
+    Some(ff.calc_energy_forces(&flat).0)
 }
 
 fn opts_seeded() -> ConformerOptions {

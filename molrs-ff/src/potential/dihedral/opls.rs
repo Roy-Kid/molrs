@@ -28,7 +28,7 @@ pub struct DihedralOPLS {
 }
 
 impl Potential for DihedralOPLS {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0 as F; coords.len()];
@@ -146,16 +146,16 @@ mod tests {
         // φ at the reference geometry: l=(1, cos φ, sin φ) gives dihedral = φ.
         let at = |c: &[F]| compute_dihedral(c, 0, 1, 2, 3);
         // F1 term: E(0)=F1, E(π)=0.
-        let e0 = single(2.0, 0.0, 0.0, 0.0).eval(&quad(0.0)).0;
+        let e0 = single(2.0, 0.0, 0.0, 0.0).calc_energy_forces(&quad(0.0)).0;
         let epi = single(2.0, 0.0, 0.0, 0.0)
-            .eval(&quad(std::f64::consts::PI))
+            .calc_energy_forces(&quad(std::f64::consts::PI))
             .0;
         assert!((e0 - 2.0).abs() < 1e-9, "F1 E(0) got {e0}");
         assert!(epi.abs() < 1e-9, "F1 E(pi) got {epi}");
         // F2 term: E(0)=0, E(π/2)=F2.
         let c = quad(std::f64::consts::FRAC_PI_2);
         assert!((at(&c) - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
-        let e = single(0.0, 3.0, 0.0, 0.0).eval(&c).0;
+        let e = single(0.0, 3.0, 0.0, 0.0).calc_energy_forces(&c).0;
         assert!((e - 3.0).abs() < 1e-9, "F2 E(pi/2) got {e}");
     }
 
@@ -164,15 +164,15 @@ mod tests {
         let pot = single(1.3, -0.7, 0.9, 0.4);
         // A generic, non-degenerate geometry.
         let coords: Vec<F> = vec![0.1, 1.0, 0.2, 0.0, 0.0, 0.0, 1.0, 0.0, -0.1, 1.2, -0.8, 0.5];
-        let (_, forces) = pot.eval(&coords);
+        let (_, forces) = pot.calc_energy_forces(&coords);
         let h = 1e-6;
         for d in 0..coords.len() {
             let mut cp = coords.clone();
             let mut cm = coords.clone();
             cp[d] += h;
             cm[d] -= h;
-            let ep = pot.eval(&cp).0;
-            let em = pot.eval(&cm).0;
+            let ep = pot.calc_energy_forces(&cp).0;
+            let em = pot.calc_energy_forces(&cm).0;
             let fd = -(ep - em) / (2.0 * h); // force = -dE/dx
             assert!(
                 (forces[d] - fd).abs() < 1e-5,
@@ -186,7 +186,7 @@ mod tests {
     fn newtons_third_law() {
         let pot = single(1.0, 0.5, 0.3, 0.2);
         let coords: Vec<F> = vec![0.1, 1.0, 0.2, 0.0, 0.0, 0.0, 1.0, 0.0, -0.1, 1.2, -0.8, 0.5];
-        let (_, f) = pot.eval(&coords);
+        let (_, f) = pot.calc_energy_forces(&coords);
         for dim in 0..3 {
             let s: F = (0..4).map(|a| f[a * 3 + dim]).sum();
             assert!(s.abs() < 1e-9, "dim {dim} force sum {s}");

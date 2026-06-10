@@ -21,7 +21,7 @@ pub struct MMFFBondStretch {
 }
 
 impl Potential for MMFFBondStretch {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0 as F; coords.len()];
@@ -114,7 +114,7 @@ mod tests {
             r0: vec![1.508],
         };
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 1.508, 0.0, 0.0];
-        let (e, _) = pot.eval(&coords);
+        let (e, _) = pot.calc_energy_forces(&coords);
         assert!(
             e.abs() < 1e-6,
             "energy at equilibrium should be ~0, got {}",
@@ -131,7 +131,7 @@ mod tests {
             r0: vec![1.508],
         };
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 1.608, 0.0, 0.0];
-        let (e, forces) = pot.eval(&coords);
+        let (e, forces) = pot.calc_energy_forces(&coords);
         assert!(e > 0.0, "stretched bond should have positive energy");
         for dim in 0..3 {
             let sum = forces[dim] + forces[3 + dim];

@@ -96,12 +96,12 @@ fn opls_assembly_compiles_and_force_matches_finite_difference() {
     assert_eq!(pots.len(), 5);
 
     let coords = flat_coords(&xyz);
-    let (energy, forces) = pots.eval(&coords);
+    let (energy, forces) = pots.calc_energy_forces(&coords);
     assert!(energy.is_finite());
     assert!(forces.iter().all(|f| f.is_finite()));
 
     // Whole-potential analytic force vs central finite difference.
-    let fd = numerical_forces(|c| pots.energy(c), &coords, 1e-6);
+    let fd = numerical_forces(|c| pots.calc_energy(c), &coords, 1e-6);
     for (d, (a, n)) in forces.iter().zip(&fd).enumerate() {
         assert!(
             (a - n).abs() < 1e-5,
@@ -118,7 +118,7 @@ fn opls_minimize_single_and_batch() {
     let pots = ff.compile(&frame).expect("compile");
 
     let start = flat_coords(&xyz);
-    let e_start = pots.energy(&start);
+    let e_start = pots.calc_energy(&start);
 
     // Single relax.
     let mut single = start.clone();

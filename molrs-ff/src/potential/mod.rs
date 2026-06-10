@@ -32,22 +32,30 @@ use molrs::types::F;
 
 /// Interface for computing potential energy and forces.
 ///
-/// Implementations store pre-resolved atom indices and parameters.
-/// The `eval()` method computes both energy and forces in a single pass,
-/// avoiding redundant geometry computation.
+/// A `Potential` is **molecule-bound**: its per-element parameters are expanded
+/// against the molecule's topology once at [`ForceField::to_potentials`] (string
+/// type labels resolved to per-bond/angle/… arrays). Evaluation therefore takes
+/// only coordinates — there is no per-call topology resolution.
+///
+/// Implementors provide [`calc_energy_forces`](Potential::calc_energy_forces)
+/// (both in one pass, avoiding redundant geometry); [`calc_energy`] and
+/// [`calc_forces`] default to it.
+///
+/// [`calc_energy`]: Potential::calc_energy
+/// [`calc_forces`]: Potential::calc_forces
 pub trait Potential: Send + Sync {
     /// Compute energy and forces (= -gradient) in one pass.
     /// Returns `(energy, forces)` where forces has length `coords.len()`.
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>);
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>);
 
-    /// Compute total potential energy.
-    fn energy(&self, coords: &[F]) -> F {
-        self.eval(coords).0
+    /// Compute total potential energy (kcal/mol).
+    fn calc_energy(&self, coords: &[F]) -> F {
+        self.calc_energy_forces(coords).0
     }
 
-    /// Compute forces (= -gradient) and return a length-3N vector.
-    fn forces(&self, coords: &[F]) -> Vec<F> {
-        self.eval(coords).1
+    /// Compute forces (= -gradient), a length-3N vector.
+    fn calc_forces(&self, coords: &[F]) -> Vec<F> {
+        self.calc_energy_forces(coords).1
     }
 }
 
@@ -105,13 +113,13 @@ impl Potentials {
     }
 
     /// Compute total energy and forces in one pass over all potentials.
-    pub fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    pub fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let n = coords.len();
         let mut total_e: F = 0.0;
         let mut total_f = vec![0.0; n];
 
         for p in &self.inner {
-            let (e, f) = p.eval(coords);
+            let (e, f) = p.calc_energy_forces(coords);
             total_e += e;
             for (t, fi) in total_f.iter_mut().zip(f.iter()) {
                 *t += fi;
@@ -121,12 +129,14 @@ impl Potentials {
         (total_e, total_f)
     }
 
-    pub fn energy(&self, coords: &[F]) -> F {
-        self.eval(coords).0
+    /// Total potential energy (kcal/mol).
+    pub fn calc_energy(&self, coords: &[F]) -> F {
+        self.calc_energy_forces(coords).0
     }
 
-    pub fn forces(&self, coords: &[F]) -> Vec<F> {
-        self.eval(coords).1
+    /// Total forces (= -gradient), length 3N.
+    pub fn calc_forces(&self, coords: &[F]) -> Vec<F> {
+        self.calc_energy_forces(coords).1
     }
 }
 
@@ -140,8 +150,8 @@ impl Default for Potentials {
 /// the geometry optimizer in [`crate::optimize`]), forwarding to the summed
 /// evaluation over all kernels.
 impl Potential for Potentials {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
-        Potentials::eval(self, coords)
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
+        Potentials::calc_energy_forces(self, coords)
     }
 }
 
@@ -321,7 +331,7 @@ mod tests {
     }
 
     impl Potential for DummyPotential {
-        fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+        fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
             (self.value, vec![self.value; coords.len()])
         }
     }
@@ -369,9 +379,9 @@ mod tests {
         assert_eq!(pots.len(), 2);
 
         let coords: Vec<F> = vec![0.0; 6];
-        assert!((pots.energy(&coords) - 3.0).abs() < 1e-5);
+        assert!((pots.calc_energy(&coords) - 3.0).abs() < 1e-5);
 
-        let forces = pots.forces(&coords);
+        let forces = pots.calc_forces(&coords);
         for f in &forces {
             assert!((*f - 3.0).abs() < 1e-5);
         }
@@ -414,7 +424,7 @@ mod tests {
         let pots = ff.compile(&frame).unwrap();
         let coords = extract_coords(&frame).unwrap();
 
-        let (energy, _) = pots.eval(&coords);
+        let (energy, _) = pots.calc_energy_forces(&coords);
         let expected: F = 4.0 * (1.0 / 4096.0 - 1.0 / 64.0);
         assert!((energy - expected).abs() < 1e-5);
     }
@@ -429,7 +439,7 @@ mod tests {
         let pots = ff.compile(&frame).unwrap();
         let coords = extract_coords(&frame).unwrap();
 
-        let (_, forces) = pots.eval(&coords);
+        let (_, forces) = pots.calc_energy_forces(&coords);
 
         for dim in 0..3 {
             let sum = forces[dim] + forces[3 + dim];
@@ -444,7 +454,7 @@ mod tests {
         let pots = ff.compile(&frame).unwrap();
         let coords = extract_coords(&frame).unwrap();
 
-        let (energy, forces) = pots.eval(&coords);
+        let (energy, forces) = pots.calc_energy_forces(&coords);
         assert!(energy.abs() < 1e-5);
         assert_eq!(forces.len(), 6);
         assert!(forces.iter().all(|x| x.abs() < 1e-5));

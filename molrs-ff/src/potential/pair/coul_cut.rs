@@ -44,7 +44,7 @@ impl PairCoulCut {
 }
 
 impl Potential for PairCoulCut {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let n_atoms = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0; coords.len()];
@@ -138,7 +138,7 @@ mod tests {
         // Unit positive charges 2 Å apart: E = k_e / 2.
         let pot = PairCoulCut::new(vec![0], vec![1], vec![1.0], F::INFINITY);
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-        let (e, forces) = pot.eval(&coords);
+        let (e, forces) = pot.calc_energy_forces(&coords);
         assert!((e - COULOMB_CONSTANT / 2.0).abs() < 1e-9, "E got {e}");
         // Like charges repel: force on j (+x atom) points +x (away from i).
         assert!(
@@ -148,7 +148,7 @@ mod tests {
         );
         // Unlike charges attract.
         let pot2 = PairCoulCut::new(vec![0], vec![1], vec![-1.0], F::INFINITY);
-        let (_, f2) = pot2.eval(&coords);
+        let (_, f2) = pot2.calc_energy_forces(&coords);
         assert!(f2[3] < 0.0, "unlike charges should attract, fxj={}", f2[3]);
     }
 
@@ -157,10 +157,10 @@ mod tests {
         let pot = PairCoulCut::new(vec![0], vec![1], vec![1.0], 1.5);
         // 2 Å apart, cutoff 1.5 -> excluded, E=0.
         let far: Vec<F> = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-        assert_eq!(pot.eval(&far).0, 0.0);
+        assert_eq!(pot.calc_energy_forces(&far).0, 0.0);
         // Coincident atoms -> skipped, finite.
         let zero: Vec<F> = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let (e, f) = pot.eval(&zero);
+        let (e, f) = pot.calc_energy_forces(&zero);
         assert_eq!(e, 0.0);
         assert!(f.iter().all(|x| x.is_finite()));
     }
@@ -169,14 +169,14 @@ mod tests {
     fn numerical_gradient() {
         let pot = PairCoulCut::new(vec![0], vec![1], vec![0.8], F::INFINITY);
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 1.7, 0.3, -0.4];
-        let (_, forces) = pot.eval(&coords);
+        let (_, forces) = pot.calc_energy_forces(&coords);
         let h = 1e-6;
         for d in 0..coords.len() {
             let mut cp = coords.clone();
             let mut cm = coords.clone();
             cp[d] += h;
             cm[d] -= h;
-            let fd = -(pot.eval(&cp).0 - pot.eval(&cm).0) / (2.0 * h);
+            let fd = -(pot.calc_energy_forces(&cp).0 - pot.calc_energy_forces(&cm).0) / (2.0 * h);
             assert!(
                 (forces[d] - fd).abs() < 1e-5,
                 "comp {d}: analytic {} vs fd {fd}",

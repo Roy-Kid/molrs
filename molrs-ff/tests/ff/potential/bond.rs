@@ -19,7 +19,7 @@ fn energy_matches_closed_form() {
     let pot = single_bond();
     // r = 2.0 -> dr = 0.5 -> E = 0.5*300*0.25 = 37.5
     let coords: Vec<F> = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-    let (e, _) = pot.eval(&coords);
+    let (e, _) = pot.calc_energy_forces(&coords);
     assert!((e - 37.5).abs() < 1e-9, "energy {e}");
 }
 
@@ -27,7 +27,7 @@ fn energy_matches_closed_form() {
 fn at_equilibrium_energy_and_force_vanish() {
     let pot = single_bond();
     let coords: Vec<F> = vec![0.0, 0.0, 0.0, R0, 0.0, 0.0];
-    let (e, f) = pot.eval(&coords);
+    let (e, f) = pot.calc_energy_forces(&coords);
     assert!(e.abs() < 1e-12, "energy {e}");
     for fi in f {
         assert!(fi.abs() < 1e-9);
@@ -39,7 +39,7 @@ fn newtons_third_law() {
     let pot = single_bond();
     // Off-axis geometry to exercise all three components.
     let coords: Vec<F> = vec![0.0, 0.0, 0.0, 1.2, 0.7, -0.4];
-    let (_, f) = pot.eval(&coords);
+    let (_, f) = pot.calc_energy_forces(&coords);
     for dim in 0..3 {
         assert!((f[dim] + f[3 + dim]).abs() < 1e-9, "dim {dim}");
     }
@@ -49,8 +49,8 @@ fn newtons_third_law() {
 fn forces_match_finite_difference() {
     let pot = single_bond();
     let coords: Vec<F> = vec![0.1, -0.2, 0.05, 1.3, 0.6, -0.3];
-    let (_, analytical) = pot.eval(&coords);
-    let numerical = numerical_forces(|c| pot.energy(c), &coords, 1e-7);
+    let (_, analytical) = pot.calc_energy_forces(&coords);
+    let numerical = numerical_forces(|c| pot.calc_energy(c), &coords, 1e-7);
     for i in 0..coords.len() {
         assert!(
             (analytical[i] - numerical[i]).abs() < 1e-6,
@@ -73,7 +73,7 @@ fn compile_path_resolves_type_labels() {
     );
     let pots = ff.compile(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
-    assert!((pots.energy(&coords) - 37.5).abs() < 1e-9);
+    assert!((pots.calc_energy(&coords) - 37.5).abs() < 1e-9);
 }
 
 #[test]

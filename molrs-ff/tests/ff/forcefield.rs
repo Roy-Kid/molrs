@@ -54,7 +54,7 @@ fn compile_bond_then_eval_matches_analytical_energy() {
 
     let pots = ff.compile(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
-    let (e, _) = pots.eval(&coords);
+    let (e, _) = pots.calc_energy_forces(&coords);
     assert!((e - 37.5).abs() < 1e-9, "energy {e}");
 }
 
@@ -82,7 +82,7 @@ fn compile_multi_style_sums_independent_contributions() {
     let pots = ff.compile(&frame).unwrap();
     assert_eq!(pots.len(), 2);
     let coords = flat_coords(&coords_xyz);
-    let (e, _) = pots.eval(&coords);
+    let (e, _) = pots.calc_energy_forces(&coords);
 
     // bond: 0.5*100*(2-1)^2 = 50.0
     let e_bond: F = 50.0;
@@ -137,7 +137,7 @@ fn parse_generic_xml_then_compile_and_eval() {
     );
     let pots = ff.compile(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
-    assert!((pots.energy(&coords) - 37.5).abs() < 1e-9);
+    assert!((pots.calc_energy(&coords) - 37.5).abs() < 1e-9);
 }
 
 #[test]

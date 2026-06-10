@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ---- 4. Evaluate: coords → (energy, forces) ----
     let coords = extract_coords(&frame)?;
-    let (energy, forces) = potentials.eval(&coords);
+    let (energy, forces) = potentials.calc_energy_forces(&coords);
 
     println!("\nEnergy: {:.6} kcal/mol", energy);
     let labels = ["O", "H1", "H2"];

@@ -91,7 +91,7 @@ fn ethane_build_currently_fails_on_stretch_bend_params() {
     // When the defect is fixed, replace the above with:
     //   let pots = typifier().build(&mol).expect("build potentials");
     //   let coords = /* flat positions */;
-    //   let (e, forces) = pots.eval(&coords);
+    //   let (e, forces) = pots.calc_energy_forces(&coords);
     //   assert!(e.is_finite());
     //   assert!(forces.iter().all(|f| f.is_finite()));
 }

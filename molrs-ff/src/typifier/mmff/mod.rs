@@ -12,7 +12,7 @@
 //!
 //! let typifier = MMFFTypifier::from_xml_str(MMFF94_XML)?;
 //! let potentials = typifier.build(&mol)?;
-//! let (energy, forces) = potentials.eval(&coords);
+//! let (energy, forces) = potentials.calc_energy_forces(&coords);
 //! ```
 
 #![allow(clippy::type_complexity)]

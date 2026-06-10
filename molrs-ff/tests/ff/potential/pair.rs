@@ -19,7 +19,7 @@ fn energy_matches_closed_form() {
     let pot = single_pair();
     // r = 2.0, sigma = 1.0 -> 4*((1/2)^12 - (1/2)^6) = 4*(1/4096 - 1/64).
     let coords: Vec<F> = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
-    let (e, _) = pot.eval(&coords);
+    let (e, _) = pot.calc_energy_forces(&coords);
     let expected = 4.0 * (1.0 / 4096.0 - 1.0 / 64.0);
     assert!((e - expected).abs() < 1e-12, "energy {e}");
 }
@@ -29,7 +29,7 @@ fn energy_is_zero_at_sigma() {
     let pot = single_pair();
     // r = sigma -> (sigma/r)^12 - (sigma/r)^6 = 1 - 1 = 0.
     let coords: Vec<F> = vec![0.0, 0.0, 0.0, SIGMA, 0.0, 0.0];
-    let (e, _) = pot.eval(&coords);
+    let (e, _) = pot.calc_energy_forces(&coords);
     assert!(e.abs() < 1e-12, "energy {e}");
 }
 
@@ -39,7 +39,7 @@ fn minimum_at_r_min() {
     let pot = single_pair();
     let r_min = 2.0_f64.powf(1.0 / 6.0) * SIGMA;
     let coords: Vec<F> = vec![0.0, 0.0, 0.0, r_min, 0.0, 0.0];
-    let (e, f) = pot.eval(&coords);
+    let (e, f) = pot.calc_energy_forces(&coords);
     assert!((e + EPS).abs() < 1e-9, "energy at minimum {e}");
     // Force along the bond axis vanishes at the minimum.
     assert!(f[0].abs() < 1e-6, "fx {}", f[0]);
@@ -49,7 +49,7 @@ fn minimum_at_r_min() {
 fn newtons_third_law() {
     let pot = single_pair();
     let coords: Vec<F> = vec![0.0, 0.0, 0.0, 1.5, 0.3, 0.1];
-    let (_, f) = pot.eval(&coords);
+    let (_, f) = pot.calc_energy_forces(&coords);
     for dim in 0..3 {
         assert!((f[dim] + f[3 + dim]).abs() < 1e-9, "dim {dim}");
     }
@@ -59,8 +59,8 @@ fn newtons_third_law() {
 fn forces_match_finite_difference() {
     let pot = PairLJCut::new(vec![0], vec![1], vec![0.5], vec![1.2]);
     let coords: Vec<F> = vec![0.1, -0.1, 0.0, 1.4, 0.5, -0.2];
-    let (_, analytical) = pot.eval(&coords);
-    let numerical = numerical_forces(|c| pot.energy(c), &coords, 1e-7);
+    let (_, analytical) = pot.calc_energy_forces(&coords);
+    let numerical = numerical_forces(|c| pot.calc_energy(c), &coords, 1e-7);
     for i in 0..coords.len() {
         assert!(
             (analytical[i] - numerical[i]).abs() < 1e-5,
@@ -76,7 +76,7 @@ fn overlapping_atoms_are_skipped() {
     // Zero distance -> kernel skips the pair (no NaN / inf).
     let pot = single_pair();
     let coords: Vec<F> = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let (e, f) = pot.eval(&coords);
+    let (e, f) = pot.calc_energy_forces(&coords);
     assert!(e.abs() < 1e-12, "energy {e}");
     assert!(f.iter().all(|x| x.abs() < 1e-12));
 }
@@ -94,5 +94,5 @@ fn compile_path_resolves_self_pair_type() {
     let pots = ff.compile(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
     let expected = 4.0 * (1.0 / 4096.0 - 1.0 / 64.0);
-    assert!((pots.energy(&coords) - expected).abs() < 1e-12);
+    assert!((pots.calc_energy(&coords) - expected).abs() < 1e-12);
 }
