@@ -22,7 +22,7 @@ molrs = { workspace = true }
 ndarray = "0.17"
 rand = "0.9"
 rustfft = "6"
-molrs-signal = { path = "../molrs-signal", package = "molcrafts-molrs-signal", version = "0.0.18" }
+molrs-signal = { path = "../molrs-signal", package = "molcrafts-molrs-signal", version = "0.1.0" }
 rayon = { version = "1.10", optional = true }
 
 [dev-dependencies]

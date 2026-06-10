@@ -40,7 +40,7 @@ blas        = ["molrs_core/blas"]
 # named `molrs` makes external integration tests unlinkable (E0464 — two
 # `--extern molrs` candidates). It is re-exported at the top-level `molrs::`
 # namespace in lib.rs, so the public surface is unchanged for downstream users.
-molrs_core    = { path = "../molrs-core", version = "0.0.18", package = "molcrafts-molrs-core", default-features = false }
+molrs_core    = { path = "../molrs-core", version = "0.1.0", package = "molcrafts-molrs-core", default-features = false }
 molrs_io      = { workspace = true, optional = true }
 molrs_compute = { workspace = true, optional = true }
 molrs_ff      = { workspace = true, optional = true }
