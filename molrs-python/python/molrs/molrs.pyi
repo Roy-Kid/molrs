@@ -521,10 +521,43 @@ class ForceField:
     def name(self) -> str: ...
     def style_names(self) -> list[str]: ...
 
+class OptReport:
+    """Outcome of a geometry optimization (energy minimization)."""
+
+    @property
+    def converged(self) -> bool: ...
+    @property
+    def n_steps(self) -> int: ...
+    @property
+    def final_energy(self) -> float: ...
+    @property
+    def final_fmax(self) -> float: ...
+
 class Potentials:
     def __len__(self) -> int: ...
     def eval(self, coords: ArrayF) -> tuple[float, ArrayF]: ...
     def energy(self, coords: ArrayF) -> float: ...
+    # (N, 3) or (3N,) -> single structure; (B, N, 3) -> homogeneous batch.
+    @overload
+    def minimize(
+        self,
+        coords: ArrayF,
+        *,
+        fmax: float = 0.05,
+        max_steps: int = 500,
+        max_step: float = 0.2,
+        memory: int = 8,
+    ) -> tuple[ArrayF, OptReport]: ...
+    @overload
+    def minimize(
+        self,
+        coords: ArrayF,
+        *,
+        fmax: float = 0.05,
+        max_steps: int = 500,
+        max_step: float = 0.2,
+        memory: int = 8,
+    ) -> tuple[ArrayF, list[OptReport]]: ...
 
 class MMFFTypifier:
     def __init__(self) -> None: ...
@@ -534,6 +567,7 @@ class MMFFTypifier:
 
 def read_forcefield_xml(path: str) -> ForceField: ...
 def extract_coords(frame: Frame) -> ArrayF: ...
+def build_mmff_potentials(mol: Atomistic, variant: str = "MMFF94") -> Potentials: ...
 
 # ---------------------------------------------------------------------------
 # MolRec / Trajectory / Observables

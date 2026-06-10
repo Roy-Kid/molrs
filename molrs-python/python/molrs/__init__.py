@@ -77,8 +77,10 @@ from .molrs import (
     MMFFTypifier,
     ForceField,
     Potentials,
+    OptReport,
     read_forcefield_xml,
     extract_coords,
+    build_mmff_potentials,
     # Field-name convention submodule
     keys,
     # Signal processing (low-level FFT helpers)
@@ -164,6 +166,8 @@ __all__ = [
     "MMFFTypifier",
     "ForceField",
     "Potentials",
+    "OptReport",
+    "build_mmff_potentials",
     "read_forcefield_xml",
     "extract_coords",
     "signal_acf_fft",
