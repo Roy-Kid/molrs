@@ -5,6 +5,19 @@ use std::ops::{Div, Mul};
 
 /// Exponents over the 7 SI base dimensions, in order:
 /// `[length, mass, time, current, temperature, amount, luminous intensity]`.
+///
+/// `Mul`/`Div` add/subtract exponents, so dimensions compose algebraically.
+///
+/// # Examples
+///
+/// ```
+/// use molrs_core::units::Dimension;
+///
+/// // Energy = M·L²·T⁻²
+/// let derived = Dimension::MASS * Dimension::LENGTH.pow(2) / Dimension::TIME.pow(2);
+/// assert_eq!(derived, Dimension::ENERGY);
+/// assert!((Dimension::ENERGY / Dimension::ENERGY).is_dimensionless());
+/// ```
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Dimension([i32; 7]);
 
@@ -166,5 +179,13 @@ mod tests {
         set.insert(Dimension::ENERGY);
         let derived = Dimension::MASS * Dimension::LENGTH.pow(2) / Dimension::TIME.pow(2);
         assert!(set.contains(&derived));
+    }
+
+    #[test]
+    fn display_renders_exponents() {
+        // Order follows the base-dimension array: L, M, T, ...
+        assert_eq!(Dimension::ENERGY.to_string(), "L^2·M·T^-2");
+        assert_eq!(Dimension::LENGTH.to_string(), "L");
+        assert_eq!(Dimension::DIMENSIONLESS.to_string(), "dimensionless");
     }
 }

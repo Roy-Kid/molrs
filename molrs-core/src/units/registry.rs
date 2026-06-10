@@ -11,6 +11,11 @@ use super::quantity::Quantity;
 use super::unit::Unit;
 
 /// A single unit definition added to a [`UnitRegistry`].
+///
+/// Conversion to SI base is `si = value * factor + offset`, where `factor`
+/// and `offset` are expressed in the SI base units of `dimension` (e.g.
+/// `angstrom` has `factor = 1e-10` metres, `degC` has `offset = 273.15`
+/// kelvin).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UnitDef {
     /// Canonical name, e.g. `"calorie"`.
@@ -19,9 +24,10 @@ pub struct UnitDef {
     pub aliases: Vec<String>,
     /// Preferred display symbol.
     pub symbol: String,
-    /// Multiplicative factor to SI base.
+    /// Multiplicative factor to SI base (SI base units per one of this unit).
     pub factor: F,
-    /// Additive offset to SI base (non-zero only for affine units).
+    /// Additive offset to SI base, in SI base units (non-zero only for
+    /// affine units such as `degC`).
     pub offset: F,
     /// Dimension of the unit.
     pub dimension: Dimension,
@@ -57,6 +63,29 @@ const PREFIXES: &[(&str, F)] = &[
 ];
 
 /// A registry of unit definitions and the SI prefix table.
+///
+/// The registry resolves unit names (canonical name, symbol, or alias,
+/// optionally with one SI prefix) and parses compound expressions into
+/// self-contained [`Unit`] values. Preload factors are SI-2019 exact or
+/// CODATA 2018 recommended values; each entry in the preload tables below
+/// cites its source.
+///
+/// # Examples
+///
+/// End-to-end: build a registry, parse units, convert a quantity.
+///
+/// ```
+/// use molrs_core::units::{UnitRegistry, UnitsError};
+///
+/// let reg = UnitRegistry::new();
+///
+/// // A force gradient of 2 kcal/(mol·Å), converted to kJ/(mol·nm).
+/// let g = reg.quantity(2.0, "kcal/mol/angstrom")?;
+/// let target = reg.parse("kJ/mol/nm")?;
+/// let converted = g.to(&target)?;
+/// assert!((converted.value() - 83.68).abs() < 1e-9);
+/// # Ok::<(), UnitsError>(())
+/// ```
 pub struct UnitRegistry {
     defs: Vec<UnitDef>,
     /// Canonical name, symbol, and every alias → index into `defs`.
@@ -67,6 +96,11 @@ static GLOBAL_REGISTRY: OnceLock<UnitRegistry> = OnceLock::new();
 
 impl UnitRegistry {
     /// Preloaded with SI + molecular-simulation units.
+    ///
+    /// Covers the SI base set plus the MD working set: `angstrom`, `bohr`,
+    /// `calorie`/`kcal`, `electron_volt`, `hartree`, `dalton`/`amu`, `bar`,
+    /// `atmosphere`, `degC`, `radian`/`degree`, `elementary_charge`, `debye`,
+    /// and all prefixable SI derivatives (`nm`, `fs`, `kJ`, ...).
     pub fn new() -> UnitRegistry {
         let mut r = UnitRegistry::empty();
         for def in md_defs() {
@@ -97,7 +131,31 @@ impl UnitRegistry {
         GLOBAL_REGISTRY.get_or_init(UnitRegistry::new)
     }
 
-    /// Define a unit. `Err(Redefinition)` on name/alias collision.
+    /// Define a unit, registering its name, symbol, and all aliases.
+    ///
+    /// # Errors
+    ///
+    /// [`UnitsError::Redefinition`] if the name, symbol, or any alias is
+    /// already registered.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use molrs_core::units::{Dimension, UnitDef, UnitRegistry, UnitsError};
+    ///
+    /// let mut reg = UnitRegistry::empty();
+    /// reg.define(UnitDef {
+    ///     name: "smoot".to_string(),
+    ///     aliases: vec![],
+    ///     symbol: "smoot".to_string(),
+    ///     factor: 1.7018, // metres per smoot
+    ///     offset: 0.0,
+    ///     dimension: Dimension::LENGTH,
+    ///     prefixable: false,
+    /// })?;
+    /// assert!(reg.parse("smoot").is_ok());
+    /// # Ok::<(), UnitsError>(())
+    /// ```
     pub fn define(&mut self, def: UnitDef) -> Result<(), UnitsError> {
         let mut keys: Vec<&str> = Vec::with_capacity(2 + def.aliases.len());
         keys.push(&def.name);
@@ -126,11 +184,28 @@ impl UnitRegistry {
     }
 
     /// Parse a compound unit expression (`"kcal/mol/angstrom"`, `"m s^-2"`).
+    ///
+    /// Supports `*`, `/`, `·`, whitespace (implicit multiplication),
+    /// parentheses, `^`/`**` integer exponents, numeric factors, and one SI
+    /// prefix per atom. Affine units (`degC`) are only legal as a single
+    /// bare atom, never inside a compound expression.
+    ///
+    /// # Errors
+    ///
+    /// - [`UnitsError::UnknownUnit`] — an atom resolves to no definition.
+    /// - [`UnitsError::Parse`] — malformed expression (empty input, bad
+    ///   exponent, unbalanced parentheses, trailing tokens).
+    /// - [`UnitsError::AffineUnit`] — an affine unit appears in a compound
+    ///   expression.
     pub fn parse(&self, expr: &str) -> Result<Unit, UnitsError> {
         super::parse::parse_expr(self, expr)
     }
 
     /// Convenience: `registry.quantity(1.5, "kcal/mol")`.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`UnitRegistry::parse`].
     pub fn quantity(&self, value: F, expr: &str) -> Result<Quantity, UnitsError> {
         Ok(Quantity::new(value, self.parse(expr)?))
     }
@@ -385,6 +460,44 @@ mod tests {
         let r = UnitRegistry::new();
         let q = r.quantity(1.5, "kcal").unwrap();
         assert_eq!(q.value(), 1.5);
+    }
+
+    #[test]
+    fn defined_unit_converts_correctly() {
+        // define() must yield correct conversions, not merely parse success.
+        // 1 smoot = 1.7018 m (MIT bridge convention).
+        let mut r = UnitRegistry::empty();
+        let mut def = custom_def("smoot", &[]);
+        def.factor = 1.7018;
+        r.define(def).unwrap();
+        let smoot = r.parse("smoot").unwrap();
+        let meter = r.parse("m").unwrap();
+        let factor = smoot.factor_to(&meter).unwrap();
+        assert!(
+            ((factor - 1.7018) / 1.7018).abs() <= 1e-15,
+            "smoot->m factor = {factor}"
+        );
+        // and through the Quantity path
+        let q = r.quantity(2.0, "smoot").unwrap().to(&meter).unwrap();
+        assert!(
+            ((q.value() - 3.4036) / 3.4036).abs() <= 1e-15,
+            "2 smoot = {} m",
+            q.value()
+        );
+    }
+
+    #[test]
+    fn defined_prefixable_unit_accepts_prefix() {
+        let mut r = UnitRegistry::empty();
+        let mut def = custom_def("blip", &[]);
+        def.factor = 2.0;
+        def.dimension = Dimension::TIME;
+        def.prefixable = true;
+        r.define(def).unwrap();
+        let kblip = r.parse("kblip").unwrap();
+        let blip = r.parse("blip").unwrap();
+        assert_eq!(kblip.factor_to(&blip).unwrap(), 1000.0);
+        assert_eq!(kblip.dimension(), Dimension::TIME);
     }
 
     #[test]

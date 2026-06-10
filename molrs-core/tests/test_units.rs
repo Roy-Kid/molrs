@@ -371,6 +371,85 @@ fn display_parse_roundtrip() {
 }
 
 // ---------------------------------------------------------------------------
+// Spec-mandated error paths and remaining preloaded factors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ev_to_kj_per_mol_direct_is_dimension_mismatch() {
+    // Spec § Integration Tests: eV (ENERGY) → kJ/mol (ENERGY/AMOUNT) must be
+    // rejected as a direct `to`; the molar path goes through try_mul(N_A).
+    let err = qty(1.0, "eV").to(&unit("kJ/mol")).unwrap_err();
+    assert!(
+        matches!(err, UnitsError::DimensionMismatch { .. }),
+        "got {:?}",
+        err
+    );
+}
+
+#[test]
+fn dalton_to_kg_codata() {
+    // 1 Da = 1.660_539_066_60e-27 kg (CODATA 2018).
+    let q = qty(1.0, "Da").to(&unit("kg")).unwrap();
+    assert!(
+        rel(q.value(), 1.660_539_066_60e-27) <= TOL,
+        "got {}",
+        q.value()
+    );
+    // dalton is prefixable: kDa must parse with MASS dimension.
+    assert_eq!(unit("kDa").dimension(), Dimension::MASS);
+}
+
+#[test]
+fn degree_to_radian_pi() {
+    // degree = π/180 rad (exact definition).
+    let q = qty(180.0, "deg").to(&unit("rad")).unwrap();
+    assert!(
+        rel(q.value(), std::f64::consts::PI) <= TOL,
+        "got {}",
+        q.value()
+    );
+}
+
+#[test]
+fn hour_to_minute_exact() {
+    let q = qty(1.0, "h").to(&unit("min")).unwrap();
+    assert!(rel(q.value(), 60.0) <= TOL, "got {}", q.value());
+}
+
+#[test]
+fn gas_constant_matches_codata() {
+    // R = N_A·k_B = 8.314 462 618 153 24 J/(mol·K) (exact, SI-2019).
+    assert!(
+        rel(constants::GAS_CONSTANT, 8.314_462_618_153_24) <= TOL,
+        "got {}",
+        constants::GAS_CONSTANT
+    );
+}
+
+#[test]
+fn molrs_error_wraps_units_error() {
+    use molrs_core::MolRsError;
+    let units_err = reg().parse("zorp").unwrap_err();
+    let wrapped: MolRsError = units_err.clone().into();
+    assert!(matches!(wrapped, MolRsError::Units(ref e) if *e == units_err));
+    // Display nests the inner message.
+    assert!(wrapped.to_string().contains("unknown unit: zorp"));
+}
+
+// Regression test (review phase 4, 2026-06-10): numeric literals must be
+// preserved in the canonical display name so the Display round-trip contract
+// holds for expressions containing a NUMBER (e.g. "2 m" → "2 * m").
+#[test]
+fn numeric_literal_display_roundtrip() {
+    let u = unit("2 m");
+    let reparsed = unit(&u.to_string());
+    assert_eq!(
+        u, reparsed,
+        "display round-trip lost the numeric factor (display: '{u}')"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Send + Sync compile-time assertions
 // ---------------------------------------------------------------------------
 
