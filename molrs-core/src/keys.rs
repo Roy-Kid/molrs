@@ -51,3 +51,20 @@ pub const MOL_ID: &str = "mol_id";
 pub const SYMBOL: &str = "symbol";
 /// Human-readable name.
 pub const NAME: &str = "name";
+
+use crate::block::DType;
+
+/// Canonical storage dtype for a known field, if any.
+///
+/// Component/relation-property writers coerce a value to this dtype so a field's
+/// column type is stable regardless of the literal a caller passed — e.g. a bond
+/// `order` written as the int `1` is stored as `1.0`, so a later `1.5` write is
+/// accepted instead of being rejected by an `i32` column. This registry is the
+/// single source of truth for canonical field dtypes; fields not listed here
+/// take the dtype of their first write. Keep it in sync with molpy's field set.
+pub fn canonical_dtype(key: &str) -> Option<DType> {
+    match key {
+        X | Y | Z | CHARGE | ORDER | MASS => Some(DType::Float),
+        _ => None,
+    }
+}

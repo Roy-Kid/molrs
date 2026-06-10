@@ -1,5 +1,13 @@
 # Spec: Graph-theoretic topology in molgraph; Atomistic.generate_topology
 
+> **Implementation note (2026-06-10).** Per the directive "use petgraph like
+> molpy, don't reinvent": instead of a new hand-rolled `MolGraph::paths_of_length`
+> DFS, `Atomistic::generate_topology` **reuses the existing petgraph-backed
+> `molrs-core/src/topology.rs` `Topology`** (`from_edges(...).angles()/.dihedrals()`).
+> The graph-theory lives in `topology.rs` (petgraph); `Atomistic` is the domain
+> leaf that builds it from bonds and names the result. The "molgraph
+> paths_of_length primitive" sections below are superseded by this reuse.
+
 ## Summary
 Move angle/dihedral generation out of the standalone `topology.rs` `Topology`
 struct and into `molgraph` as a **generic graph-theory primitive** (enumerate

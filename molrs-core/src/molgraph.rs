@@ -72,6 +72,7 @@ pub enum PropValue {
     F64(f64),
     Str(String),
     Int(I),
+    Bool(bool),
 }
 
 impl PropValue {
@@ -79,12 +80,13 @@ impl PropValue {
     ///
     /// Use this for quantities that are conceptually numeric but may be stored
     /// as either type depending on the producer — e.g. a bond `"order"` written
-    /// as `2` (Int) vs `2.0` (F64). Returns `None` for non-numeric (`Str`).
+    /// as `2` (Int) vs `2.0` (F64). Returns `None` for non-numeric (`Str`,
+    /// `Bool`).
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             PropValue::F64(v) => Some(*v),
             PropValue::Int(v) => Some(*v as f64),
-            PropValue::Str(_) => None,
+            PropValue::Str(_) | PropValue::Bool(_) => None,
         }
     }
 }
@@ -104,9 +106,25 @@ impl From<&str> for PropValue {
         PropValue::Str(v.to_owned())
     }
 }
+impl From<bool> for PropValue {
+    fn from(v: bool) -> Self {
+        PropValue::Bool(v)
+    }
+}
 impl From<String> for PropValue {
     fn from(v: String) -> Self {
         PropValue::Str(v)
+    }
+}
+
+/// Coerce a value to the canonical dtype registered for `key` (if any) so a
+/// field's column type stays stable across writers. Currently the only canonical
+/// dtype is `Float`, so an `Int` written to a float field (e.g. `x` / `charge` /
+/// bond `order` as `1`) is widened to `F64`; everything else passes through.
+fn coerce_canonical(key: &str, pv: PropValue) -> PropValue {
+    match (keys::canonical_dtype(key), pv) {
+        (Some(crate::block::DType::Float), PropValue::Int(v)) => PropValue::F64(v as f64),
+        (_, pv) => pv,
     }
 }
 
@@ -478,10 +496,11 @@ impl MolGraph {
         key: &str,
         val: impl Into<PropValue>,
     ) -> Result<(), MolRsError> {
-        match val.into() {
+        match coerce_canonical(key, val.into()) {
             PropValue::F64(v) => self.nodes.set_f64(id, key, v),
             PropValue::Int(v) => self.nodes.set_i32(id, key, v),
             PropValue::Str(s) => self.nodes.set_str(id, key, &s),
+            PropValue::Bool(v) => self.nodes.set_bool(id, key, v),
         }
     }
 
@@ -518,10 +537,11 @@ impl MolGraph {
     /// Write an [`Atom`]'s properties into node `id`'s columns.
     fn write_atom(&mut self, id: NodeId, atom: &Atom) {
         for (key, val) in atom.iter() {
-            let r = match val {
-                PropValue::F64(v) => self.nodes.set_f64(id, key, *v),
-                PropValue::Int(v) => self.nodes.set_i32(id, key, *v),
-                PropValue::Str(s) => self.nodes.set_str(id, key, s),
+            let r = match coerce_canonical(key, val.clone()) {
+                PropValue::F64(v) => self.nodes.set_f64(id, key, v),
+                PropValue::Int(v) => self.nodes.set_i32(id, key, v),
+                PropValue::Str(s) => self.nodes.set_str(id, key, &s),
+                PropValue::Bool(v) => self.nodes.set_bool(id, key, v),
             };
             debug_assert!(r.is_ok(), "component type conflict writing '{key}'");
             let _ = r;
@@ -536,7 +556,7 @@ impl MolGraph {
                 Cell::F64(v) => atom.set(key, v),
                 Cell::I32(v) => atom.set(key, v),
                 Cell::Str(s) => atom.set(key, s),
-                Cell::Bool(_) => {}
+                Cell::Bool(v) => atom.set(key, v),
             }
         }
         atom
@@ -655,10 +675,11 @@ impl MolGraph {
                 format!("RelationId {:?}", id),
             ));
         }
-        match val.into() {
+        match coerce_canonical(key, val.into()) {
             PropValue::F64(v) => k.props.set_f64(id, key, v),
             PropValue::Int(v) => k.props.set_i32(id, key, v),
             PropValue::Str(s) => k.props.set_str(id, key, &s),
+            PropValue::Bool(v) => k.props.set_bool(id, key, v),
         }
     }
 
@@ -728,7 +749,7 @@ impl MolGraph {
                 Cell::F64(v) => PropValue::F64(v),
                 Cell::I32(v) => PropValue::Int(v),
                 Cell::Str(s) => PropValue::Str(s.to_owned()),
-                Cell::Bool(_) => continue,
+                Cell::Bool(v) => PropValue::Bool(v),
             };
             props.insert(key.to_owned(), pv);
         }
@@ -744,10 +765,11 @@ impl MolGraph {
     ) {
         let k = &mut self.kinds[kind.0 as usize];
         for (key, val) in props {
-            let r = match val {
-                PropValue::F64(v) => k.props.set_f64(id, key, *v),
-                PropValue::Int(v) => k.props.set_i32(id, key, *v),
-                PropValue::Str(s) => k.props.set_str(id, key, s),
+            let r = match coerce_canonical(key, val.clone()) {
+                PropValue::F64(v) => k.props.set_f64(id, key, v),
+                PropValue::Int(v) => k.props.set_i32(id, key, v),
+                PropValue::Str(s) => k.props.set_str(id, key, &s),
+                PropValue::Bool(v) => k.props.set_bool(id, key, v),
             };
             let _ = r;
         }
