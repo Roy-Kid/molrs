@@ -372,3 +372,17 @@ class TestMolpyParity:
     def test_to_dict_parity(self):
         b = Block({"x": [1.0, 2.0]})
         assert set(b.to_dict()) == {"x"}
+
+
+def test_setitem_scalar_column_raises():
+    """A scalar (0-D) column is rejected fail-fast, not silently dropped.
+
+    The Rust Store only holds >=1-D columns. Previously Block.__setitem__
+    silently ``return``ed on a 0-D array, so ``block["q"] = 1.0`` quietly did
+    nothing; now it raises so the mistake surfaces.
+    """
+    b = Block({"x": np.array([1.0, 2.0])})
+    with pytest.raises(ValueError, match="at least 1-D"):
+        b["q"] = 1.0
+    # the column was not created
+    assert "q" not in b

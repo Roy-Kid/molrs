@@ -150,7 +150,12 @@ class Block(_RsBlock, MutableMapping[str, np.ndarray]):
     def __setitem__(self, key: str, value: Any) -> None:  # type: ignore[override]
         arr = np.asarray(value)
         if arr.ndim == 0:
-            return  # skip scalar columns (Rust Store requires >=1D)
+            raise ValueError(
+                f"Block column '{key}' must be at least 1-D; got a scalar "
+                f"({value!r}). Wrap it in a sequence (e.g. [{value!r}]) or "
+                "broadcast it to the column length — scalar columns are not "
+                "stored silently."
+            )
         if key in _RsBlock.keys(self._backing()):
             _RsBlock.remove(self._backing(), key)
         _RsBlock.insert(self._backing(), key, arr)
