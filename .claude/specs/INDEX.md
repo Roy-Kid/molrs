@@ -23,6 +23,7 @@ One row per spec produced by `/molrs-spec`. Newest on top.
 | 2026-05-17 | [vibrational-spectra](vibrational-spectra.md) | approved | molrs-compute, molrs-signal | 功率谱 (VDOS)、红外、拉曼光谱 — ndarray 输入，复用 ACF/窗函数/频率网格 |
 | Date | Slug | Status | Owner crate(s) | Summary |
 |---|---|---|---|---|
+| 2026-06-10 | [unit-conversion-system](unit-conversion-system.md) | shipped | molrs-core | pint-style UnitRegistry + Dimension + Quantity; MD units (kcal/mol, eV, hartree, Å, bohr, °C) |
 
 <!--
 Status values:

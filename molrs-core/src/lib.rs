@@ -59,6 +59,7 @@ pub mod smarts;
 pub mod stereo;
 pub mod topology;
 pub mod types;
+pub mod units;
 
 // Other top-level modules
 pub mod error;
@@ -86,6 +87,7 @@ pub use stereo::{
     chiral_volume, find_chiral_centers,
 };
 pub use topology::{Topology, TopologyRingInfo};
+pub use units::{Dimension, Quantity, Unit, UnitDef, UnitRegistry, UnitsError};
 
 pub use molrec::{
     MolRec, ObservableData, ObservableKind, ObservableRecord, SchemaValue, Trajectory,

@@ -4,12 +4,16 @@ use std::fmt;
 use std::io;
 
 use crate::block::BlockError;
+use crate::units::UnitsError;
 
 /// Main error type for the molrs library.
 #[derive(Debug)]
 pub enum MolRsError {
     /// Error from Block operations
     Block(BlockError),
+
+    /// Error from the units subsystem
+    Units(UnitsError),
 
     /// IO error (file reading/writing)
     Io(io::Error),
@@ -50,6 +54,7 @@ impl fmt::Display for MolRsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MolRsError::Block(e) => write!(f, "Block error: {}", e),
+            MolRsError::Units(e) => write!(f, "Units error: {}", e),
             MolRsError::Io(e) => write!(f, "IO error: {}", e),
             MolRsError::Parse {
                 line: Some(line),
@@ -81,6 +86,7 @@ impl std::error::Error for MolRsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             MolRsError::Block(e) => Some(e),
+            MolRsError::Units(e) => Some(e),
             MolRsError::Io(e) => Some(e),
             _ => None,
         }
@@ -91,6 +97,12 @@ impl std::error::Error for MolRsError {
 impl From<BlockError> for MolRsError {
     fn from(err: BlockError) -> Self {
         MolRsError::Block(err)
+    }
+}
+
+impl From<UnitsError> for MolRsError {
+    fn from(err: UnitsError) -> Self {
+        MolRsError::Units(err)
     }
 }
 
