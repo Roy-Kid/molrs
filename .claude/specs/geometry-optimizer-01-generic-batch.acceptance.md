@@ -58,7 +58,7 @@ criteria:
   - id: ac-007
     summary: Analytical force matches finite difference through the optimizer path
     type: code
-    evaluator_hint: "molrs-test gradient standard, h=1e-5."
+    evaluator_hint: ".claude/notes/testing.md gradient standard, h=1e-5."
     pass_when: |
       For a ~30-atom MMFF94 system at a perturbed geometry, the analytical forces consumed by minimize (= -gradient) match central finite difference of the energy (step 1e-5 Å) with max absolute component error < 1e-5 kcal/mol/Å. This guards the force-sign convention end-to-end.
     status: pending
@@ -115,7 +115,7 @@ criteria:
 
 Binding contract for `geometry-optimizer-01-generic-batch.md`. Each criterion
 flips to `verified` only when observed to pass (unit/integration via
-`molrs-test`; scientific/performance via the bench repo where configured).
+the testing standard in `.claude/notes/testing.md`; scientific/performance via the bench repo where configured).
 
 **Status (2026-06-10):** code-complete. Verified: ac-001..006, ac-008, ac-009
 (Rust unit + integration tests and Python end-to-end). Deferred to the bench

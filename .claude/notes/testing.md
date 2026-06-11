@@ -1,28 +1,27 @@
----
-name: molrs-test
-description: Testing standards for molrs Rust workspace — numerical gradient verification, reference comparison, PBC edge cases, round-trip I/O. Reference document only; no procedural workflow.
----
+# Testing Standards
 
-Reference standard for molrs testing. The `molrs-tester` agent applies these rules; this file defines them.
+Project standard for molrs testing. Applied by the `mol:tester` agent,
+`/mol:test`, and `/mol:impl`.
 
 ## Test Organization
 
 ```
-molrs-<crate>/tests/         # Integration tests
+molrs-<crate>/tests/           # Integration tests
 molrs-<crate>/src/**/tests.rs  # Unit tests (inline #[cfg(test)] modules)
-molrs-<crate>/benches/       # Criterion benchmarks
+molrs-<crate>/benches/         # Criterion benchmarks
 ```
 
-Each workspace crate (`molrs-core`, `molrs-io`, `molrs-compute`, `molrs-smiles`, `molrs-ff`, `molrs-embed`, `molrs-pack`, `molrs-cxxapi`) follows the same pattern.
+Each workspace crate (`molrs-core`, `molrs-io`, `molrs-signal`,
+`molrs-compute`, `molrs-ff`, `molrs-conformer`, `molrs-cxxapi`, `molrs`)
+follows the same pattern.
 
 ### Running Tests
 
 ```bash
-cargo test --all-features                    # all tests
-cargo test -p molrs-core                     # single crate
-cargo test -p molrs-core test_name           # single test
-cargo test --features slow-tests             # expensive tests
-cargo test -p molrs-pack --test examples_batch -- --ignored  # batch validation
+cargo test --all-features                              # all tests
+cargo test -p molcrafts-molrs-core                     # single crate (-p takes the package name)
+cargo test -p molcrafts-molrs-core test_name           # single test
+cargo test --features slow-tests                       # expensive tests
 ```
 
 ### Test Data
@@ -30,10 +29,14 @@ cargo test -p molrs-pack --test examples_batch -- --ignored  # batch validation
 Real test data must be fetched once:
 
 ```bash
-bash scripts/fetch-test-data.sh   # clones to molrs-core/target/tests-data/
+bash scripts/fetch-test-data.sh   # clones to <root>/tests-data/ (binding-neutral)
 ```
 
-**IO testing rule (MANDATORY)**: format readers/writers MUST be tested against every real file in `tests-data/<format>/` — never against synthetic strings. See `CLAUDE.md` "IO Testing Rules" for the full policy.
+**IO testing rule (MANDATORY)**: format readers/writers MUST be tested against
+every real file in `tests-data/<format>/` — never against synthetic strings.
+See `CLAUDE.md` "IO Testing Rules" for the full policy. Synthetic
+`let content = "..."; read_from_str(content)` is permitted ONLY for
+malformed-input edge cases, never for happy paths.
 
 ## Molecular Simulation Test Patterns
 
@@ -102,11 +105,14 @@ assert!((simbox.calc_distance_impl(&r1, &r2) - 1.0).abs() < 1e-6);
 
 ### 5. Constraint Gradient Sign
 
-Constraints accumulate TRUE gradient (`∂V/∂x`) with `+=`; numerical gradient must match.
+Constraints accumulate TRUE gradient (`∂V/∂x`) with `+=`; numerical gradient
+must match. (Packing constraints now live in the molpack repo.)
 
 ### 6. Rotation Convention (multi-atom MUST)
 
-LEFT multiplication: `R_new = δR * R_old`. Single-atom tests CANNOT catch LEFT/RIGHT mult bugs (rotation gradient is zero) — use ≥ 3 atoms with non-collinear positions.
+LEFT multiplication: `R_new = δR * R_old`. Single-atom tests CANNOT catch
+LEFT/RIGHT mult bugs (rotation gradient is zero) — use ≥ 3 atoms with
+non-collinear positions.
 
 ### 7. Round-Trip I/O
 
@@ -130,6 +136,9 @@ assert_eq!(frame.get("atoms").unwrap().nrows(), frame2.get("atoms").unwrap().nro
 #[cfg(feature = "slow-tests")]
 fn test_huge_system() { /* 10K+ atoms */ }
 ```
+
+Anything in `molrs-cxxapi` additionally needs FFI handle-lifecycle tests
+(see `.claude/notes/ffi.md`).
 
 ## Coverage Target
 

@@ -1,6 +1,6 @@
 # ETKDGv3 Spec — Architect Review Findings
 
-Review of `docs/etkdgv3-port-spec.md` against the `molrs-arch` skill, performed by the `molrs-architect` agent at the start of session 1.
+Review of `docs/etkdgv3-port-spec.md` against the architecture rules (now `.claude/notes/architecture-rules.md`), performed by the architect agent at the start of session 1.
 
 This document captures findings that were **not resolved in session 1** because their fix belongs to a later session (typically the session that adds the relevant inter-crate edge or module). Findings that WERE addressed in session 1 are crossed out.
 
@@ -8,10 +8,10 @@ This document captures findings that were **not resolved in session 1** because 
 
 ### C1. Undocumented inter-crate edges violate the arch DAG
 
-Spec §4/§5.2 has `molrs-embed` depend on both `molrs-ff` (UFF table) and `molrs-smiles` (SMARTS matcher). The arch skill only permits sibling edges `molrs-ff → molrs-io` and `molrs-cxxapi → molrs-core, molrs-io`; everything else may depend on `molrs-core` only.
+Spec §4/§5.2 has `molrs-embed` depend on both `molrs-ff` (UFF table) and `molrs-smiles` (SMARTS matcher). The architecture rules only permit sibling edges `molrs-ff → molrs-io` and `molrs-cxxapi → molrs-core, molrs-io`; everything else may depend on `molrs-core` only.
 
 **Fix required before wiring the deps**: in the same PR that adds `molrs-ff` and `molrs-smiles` to `molrs-embed/Cargo.toml`, update:
-- `.claude/skills/molrs-arch/SKILL.md` lines 23–29 (dependency rules)
+- `.claude/notes/architecture-rules.md` § Crate Dependency Rules
 - `CLAUDE.md` workspace-crates section (lines ~90–100) — add `molrs-embed → molrs-ff` and `molrs-embed → molrs-smiles` to the DAG diagram
 
 Non-compliance on day one if not done.
@@ -112,6 +112,6 @@ Spec's module trees for `molrs-ff` and `molrs-embed` do not show `build.rs`, tho
 
 Bare `chirality.rs` and `stereo.rs` at the same level as `bounds/`, `embed/`, `minimize/`, `torsions/` directories is asymmetric. **Fix**: either nest as `etkdg/verify/{chirality,stereo}.rs` or flatten the rest. Pick one.
 
-## Skill amendment scheduled
+## Architecture-rules amendment scheduled
 
-The arch skill (`.claude/skills/molrs-arch/SKILL.md` lines 23–29, 33–42) must be updated in the same PR as C1: add `molrs-embed` sibling edges to ff and smiles, and list `uff`, `etkdg`, SMARTS `matcher`/`predicate`/`compile`/`recursive` under Module Ownership.
+The architecture rules (`.claude/notes/architecture-rules.md` § Crate Dependency Rules and § Module Ownership) must be updated in the same PR as C1: add `molrs-embed` sibling edges to ff and smiles, and list `uff`, `etkdg`, SMARTS `matcher`/`predicate`/`compile`/`recursive` under Module Ownership.

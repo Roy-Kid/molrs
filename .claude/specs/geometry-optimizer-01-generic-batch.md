@@ -305,7 +305,7 @@ Wolfe `c2=0.9`), history size = `memory`:
 
 ### Numerical Validation
 
-11. **Gradient check** (reuses `molrs-test` standard): finite-difference
+11. **Gradient check** (reuses the `.claude/notes/testing.md` standard): finite-difference
     gradient (`h = 1e-5 Å`) of the energy the optimizer sees matches the
     analytical `-forces` to max-component error `< 1e-5 kcal/mol/Å` (guards the
     sign convention end-to-end).

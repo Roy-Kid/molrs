@@ -566,7 +566,7 @@ ETKDG conformers are sometimes polished with MMFF94 via RDKit. We are not bundli
 
 ---
 
-## 12. Implementation Order (advisory — handed to `/molrs-impl`)
+## 12. Implementation Order (advisory — handed to `/mol:impl`)
 
 1. SMARTS matcher foundation: reorganize `molrs-smiles`, add `chem/` module, build predicate evaluator, wire to petgraph, test.
 2. UFF parameter table port and `uff/bonds` helper, test against RDKit reference values.

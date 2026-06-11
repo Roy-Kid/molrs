@@ -31,7 +31,7 @@ is the Rust `///` comment; PyO3 and wasm-bindgen propagate it downstream.
   - `molrs-wasm` — audit wasm-bindgen doc comments (TSDoc tags).
   - No changes to `molrs-core`, `molrs-io`, `molrs-compute`, `molrs-smiles`,
     `molrs-ff`, `molrs-embed`, `molrs-cxxapi` beyond routine rustdoc audits covered
-    by the existing `molrs-doc` skill.
+    by the rustdoc standard in `.claude/notes/docs.md`.
 - **Traits extended / created**: none.
 - **Data structures**: none; the hand-maintained `molrs.pyi` is the one
   authored artifact, and the `.d.ts` / HTML are generated.
@@ -91,7 +91,7 @@ pub fn parse_smiles(smiles: &str) -> PyResult<SmilesIR> { ... }
 pub fn parse_smiles(smiles: &str) -> Result<SmilesIR, JsValue> { ... }
 ```
 
-**3. Rust public items** — unchanged; follow the existing `molrs-doc` skill.
+**3. Rust public items** — unchanged; follow the rustdoc standard in `.claude/notes/docs.md`.
 
 ### Data Flow
 

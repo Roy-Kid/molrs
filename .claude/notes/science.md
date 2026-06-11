@@ -1,9 +1,7 @@
----
-name: molrs-science
-description: Scientific correctness standards for molrs — force-field equations, integration algorithms, units, physical invariants, reference citations. Reference document only; no procedural workflow.
----
+# Scientific Correctness Standards
 
-Reference standard for molrs scientific correctness. The `molrs-scientist` agent applies these rules; this file defines them.
+Project standard for molrs scientific correctness. Applied by the
+`mol:scientist` agent and `/mol:review`.
 
 ## Domain Coverage
 
@@ -28,7 +26,8 @@ Reference standard for molrs scientific correctness. The `molrs-scientist` agent
 | Charge | e | elementary |
 | Temperature | K | |
 
-Precision: `F = f64` throughout (always). The `f64` feature flag is deprecated and ignored.
+Precision: `F = f64` throughout (always). The `f64` feature flag is deprecated
+and ignored.
 
 ### Key constants & conversions
 
@@ -49,7 +48,10 @@ Harmonic angle:  V = (kθ/2) (θ - θ₀)²                              [rad]
 Periodic torsion: V = (1/2) Σₙ Vₙ [1 + cos(n·φ - δₙ)]
 ```
 
-Always cite the reference equation + paper / book / source code line in the rustdoc.
+Always cite the reference equation + paper / book / source code line in the
+rustdoc. Watch parameter conventions — some references use `K = k/2`, others
+`K = k`. When a paper and a reference implementation disagree, report both and
+flag the ambiguity — do not silently pick one.
 
 ## Physical Invariants (MUST hold)
 
@@ -62,27 +64,30 @@ Always cite the reference equation + paper / book / source code line in the rust
 | Total energy conserved | NVE MD (within numerical precision) |
 | Temperature equilibrates to target | NVT MD |
 | Minimum image consistent with cutoff | PBC-using code |
-| Constraint gradient: TRUE `∂V/∂x` accumulated with `+=` | every constraint in `molrs-pack` |
+| Constraint gradient: TRUE `∂V/∂x` accumulated with `+=` | every constraint (packing constraints now in molpack) |
 
 ## Numerical Stability Hazards
 
 - **Division by zero**: pair distance `r → 0`, denominator in MMFF bond stretch.
 - **Overflow**: `(σ/r)¹²` when `r → 0`; clamp or use cutoff guard.
-- **Catastrophic cancellation**: subtracting near-equal energies in conservation tests — use double precision and compare `drift / mean`.
-- **Loss of precision in long simulations**: Verlet integrator drift (use Kahan summation or careful ordering only when required).
+- **Catastrophic cancellation**: subtracting near-equal energies in
+  conservation tests — use double precision and compare `drift / mean`.
+- **Loss of precision in long simulations**: Verlet integrator drift (use
+  Kahan summation or careful ordering only when required).
 
 ## Reference Implementations to Cross-Check
 
 - **MMFF94**: RDKit `Code/ForceField/MMFF`, OpenBabel `src/forcefields/forcefieldmmff94.cpp`
 - **LJ / Coulomb**: LAMMPS `src/MOLECULE/`, GROMACS `src/gromacs/mdlib/`
-- **Packing**: Packmol Fortran source (see `learn-packmol` skill for the discipline)
+- **Packing**: Packmol Fortran source (packing now lives in the molpack repo)
 - **3D coordinate generation**: RDKit ETKDG (`Code/DistGeom/`, `Code/GraphMol/DistGeomHelpers/`)
 - **Stereochemistry**: RDKit `Code/GraphMol/Chirality.cpp`
 
 ## Severity Bands for Findings
 
 - **ERROR** — wrong physics, wrong equation, wrong sign, wrong units. Block merge.
-- **WARNING** — ambiguous reference, missing citation, untested edge case (e.g., cutoff discontinuity).
+- **WARNING** — ambiguous reference, missing citation, untested edge case
+  (e.g., cutoff discontinuity).
 - **PASS** — equation matches reference, units consistent, invariants verified.
 
 ## Compliance Checklist

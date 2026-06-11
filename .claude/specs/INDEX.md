@@ -1,6 +1,6 @@
 # molrs — Spec Index
 
-One row per spec produced by `/molrs-spec`. Newest on top.
+One row per spec produced by `/mol:spec`. Newest on top.
 
 | 2026-06-10 | [topology-paths-molgraph-01](topology-paths-molgraph-01.md) | draft | molrs-core, molrs-python | 下沉 #1：角/二面角=键图里的 k-边路径，图论原语 `MolGraph::paths_of_length(kind,k)`（领域无关）+ `Atomistic::generate_topology`（领域叶子）；吸收 topology.rs，退掉 molpy Python 枚举 |
 | 2026-06-10 | [ff-potentials-oop-01](ff-potentials-oop-01.md) | code-complete | molrs-ff, molrs-python, molrs-conformer | 下沉 #2：镜像 molpy OOP — `Style::to_potential`/`ForceField::to_potentials`(无 frame)/`Potentials::calc_energy\|calc_forces(frame)` + `LBFGS` 优化器类(`new(pot,cfg).run(frame)`)；删 compile/eval/自由 minimize/自由 ctor；ETKDG 用私有引擎不变 |
@@ -28,7 +28,7 @@ One row per spec produced by `/molrs-spec`. Newest on top.
 <!--
 Status values:
   draft      — spec written, not yet implemented
-  in-flight  — /molrs-impl started against this spec
+  in-flight  — /mol:impl started against this spec
   shipped    — merged to master
   superseded — replaced by a later spec (link it in Summary)
 -->
