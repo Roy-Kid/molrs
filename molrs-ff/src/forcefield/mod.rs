@@ -11,7 +11,7 @@ pub mod xml;
 
 use std::collections::{HashMap, HashSet};
 
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 
 // ---------------------------------------------------------------------------
 // Params
@@ -890,7 +890,7 @@ impl ForceField {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use molrs::block::Block;
+    use molrs::store::block::Block;
 
     #[test]
     fn test_params() {

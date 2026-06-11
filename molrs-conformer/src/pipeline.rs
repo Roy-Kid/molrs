@@ -9,9 +9,9 @@ use super::options::{ConformerAlgorithm, ConformerOptions, ForceFieldKind};
 use super::report::{ConformerReport, ConformerStageReport, StageKind};
 use super::rotor_search;
 use super::stereo_guard;
-use molrs::atomistic::Atomistic;
+use molrs::chem::hydrogens::add_hydrogens;
 use molrs::error::MolRsError;
-use molrs::hydrogens::add_hydrogens;
+use molrs::system::atomistic::Atomistic;
 
 pub(crate) fn generate_3d_impl(
     mol: &Atomistic,

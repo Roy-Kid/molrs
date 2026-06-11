@@ -23,8 +23,8 @@ use crate::frame::PyFrame;
 use crate::helpers::NpF;
 use crate::linkedcell::PyNeighborList;
 
-use molrs::frame::Frame as CoreFrame;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame::Frame as CoreFrame;
 use molrs::types::F;
 use molrs_compute::{
     COMResult, CenterOfMass, Cluster, ClusterCenters, ClusterCentersResult, ClusterResult, Compute,
@@ -53,7 +53,7 @@ fn clone_frames(frames: &Bound<'_, PyAny>) -> PyResult<Vec<CoreFrame>> {
 // Collect &NeighborList references from a single wrapper or a list.
 fn collect_nlists<'py>(
     arg: &'py Bound<'py, PyAny>,
-) -> PyResult<Vec<molrs::neighbors::NeighborList>> {
+) -> PyResult<Vec<molrs::spatial::neighbors::NeighborList>> {
     if let Ok(single) = arg.extract::<PyRef<'_, PyNeighborList>>() {
         return Ok(vec![single.inner.clone()]);
     }

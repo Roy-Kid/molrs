@@ -32,7 +32,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use molrs::frame_access::FrameAccess;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
 use crate::error::ComputeError;

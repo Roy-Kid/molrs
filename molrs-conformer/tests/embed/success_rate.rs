@@ -25,7 +25,7 @@ use std::panic;
 use std::path::{Path, PathBuf};
 
 use molrs::Atomistic;
-use molrs::molgraph::{Atom, PropValue};
+use molrs::system::molgraph::{Atom, PropValue};
 use molrs_conformer::{Conformer, ConformerOptions};
 
 fn problems_dir() -> PathBuf {

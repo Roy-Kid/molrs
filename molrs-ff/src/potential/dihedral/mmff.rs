@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::{accumulate_dihedral_forces, compute_dihedral, validate_coords};
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 pub struct MMFFTorsion {

@@ -14,7 +14,7 @@
 //! ## Faithful port (this replaces the former representative subset)
 //!
 //! Every torsion assignment now flows through the **full** three-table data
-//! set and the project SMARTS engine ([`molrs::smarts::SmartsPattern`]). For
+//! set and the project SMARTS engine ([`molrs::chem::smarts::SmartsPattern`]). For
 //! each rotatable bond we reproduce RDKit's exact selection:
 //!
 //! 1. The three tables are matched in RDKit concatenation order — v2, then
@@ -35,9 +35,9 @@
 
 use std::collections::HashMap;
 
-use molrs::atomistic::{AtomId, Atomistic};
-use molrs::molgraph::PropValue;
-use molrs::smarts::SmartsPattern;
+use molrs::chem::smarts::SmartsPattern;
+use molrs::system::atomistic::{AtomId, Atomistic};
+use molrs::system::molgraph::PropValue;
 
 use super::perceive::Perceived;
 use super::torsion_tables::{self, TorsionRow};
@@ -126,7 +126,7 @@ fn compile_all() -> Vec<CompiledPattern> {
 /// Build a working copy of `mol` whose atoms / bonds carry the `is_aromatic`
 /// flag from the project perception, so the SMARTS engine's `a` / `c` / `:`
 /// queries agree with RDKit (the engine reads `is_aromatic`, see
-/// `molrs::smarts` aromaticity convention).
+/// `molrs::chem::smarts` aromaticity convention).
 fn aromatic_working_copy(mol: &Atomistic, p: &Perceived) -> Atomistic {
     let mut g = mol.clone();
     for (i, &aid) in p.atom_ids.iter().enumerate() {

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use molrs::Atomistic;
-use molrs::molgraph::{Atom, PropValue};
+use molrs::system::molgraph::{Atom, PropValue};
 use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
 use molrs_ff::potential::Potential;
 use serde_json::Value;

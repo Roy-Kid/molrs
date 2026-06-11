@@ -4,8 +4,8 @@ mod result;
 pub use properties::{ClusterProperties, ClusterPropertiesResult};
 pub use result::ClusterResult;
 
-use molrs::frame_access::FrameAccess;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 use ndarray::Array1;
 
 use crate::error::ComputeError;
@@ -181,9 +181,9 @@ impl Compute for Cluster {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use molrs::types::F;
     use ndarray::{Array1 as A1, array};
 

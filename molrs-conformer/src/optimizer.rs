@@ -12,10 +12,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::geom::{add, cross, dot, norm, normalize, scale, sub};
-use molrs::atomistic::{AtomId, Atomistic};
-use molrs::element::Element;
+use molrs::chem::stereo::{TetrahedralStereo, assign_stereo_from_3d, find_chiral_centers};
 use molrs::error::MolRsError;
-use molrs::stereo::{TetrahedralStereo, assign_stereo_from_3d, find_chiral_centers};
+use molrs::system::atomistic::{AtomId, Atomistic};
+use molrs::system::element::Element;
 
 // ───────────────────── energy term structs ─────────────────────
 

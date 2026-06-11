@@ -26,9 +26,9 @@
 //! - Daylight SMARTS theory manual — Atomic Primitives & Bond Primitives tables:
 //!   <https://daylight.com/dayhtml/doc/theory/theory.smarts.html>
 
-use molrs::atomistic::{AtomId, Atomistic};
-use molrs::element::Element;
-use molrs::rings::RingInfo;
+use molrs::chem::rings::RingInfo;
+use molrs::system::atomistic::{AtomId, Atomistic};
+use molrs::system::element::Element;
 
 use crate::smiles::chem::ast::{AtomPrimitive, AtomQuery, BondKind, BondQuery};
 
@@ -44,7 +44,7 @@ pub(crate) struct TargetCtx<'m> {
 
 impl<'m> TargetCtx<'m> {
     pub(crate) fn new(mol: &'m Atomistic) -> Self {
-        let rings = molrs::rings::find_rings(mol);
+        let rings = molrs::chem::rings::find_rings(mol);
         Self { mol, rings }
     }
 
@@ -306,7 +306,7 @@ mod tests {
     use super::*;
     use crate::smiles::{parse_smiles, to_atomistic};
 
-    fn mol(smiles: &str) -> molrs::atomistic::Atomistic {
+    fn mol(smiles: &str) -> molrs::system::atomistic::Atomistic {
         to_atomistic(&parse_smiles(smiles).unwrap()).unwrap()
     }
 

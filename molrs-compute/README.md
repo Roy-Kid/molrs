@@ -52,7 +52,7 @@ functions pretending not to be Compute nodes.
 
 ```rust
 use molrs::Frame;
-use molrs::neighbors::{NeighborList, NeighborQuery};
+use molrs::spatial::neighbors::{NeighborList, NeighborQuery};
 use molrs_compute::RDF;
 
 let rdf = RDF::new(40, 5.0, 0.0)?;

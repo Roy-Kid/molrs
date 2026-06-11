@@ -37,7 +37,7 @@ impl MolRecReader {
         }
 
         let store = store as ReadableWritableListableStorage;
-        let rec = molrs_io::zarr::read_molrec_store(store.clone())
+        let rec = molrs_io::store::zarr::read_molrec_store(store.clone())
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let n_atoms = rec
             .frame
@@ -49,7 +49,7 @@ impl MolRecReader {
 
     #[wasm_bindgen(js_name = readFrame)]
     pub fn read_frame(&self, t: usize) -> Result<Option<Frame>, JsValue> {
-        let rs_frame = molrs_io::zarr::read_molrec_frame_from_store(self.store.clone(), t)
+        let rs_frame = molrs_io::store::zarr::read_molrec_frame_from_store(self.store.clone(), t)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         match rs_frame {
             Some(frame) => Ok(Some(Frame::from_rs(frame)?)),
@@ -60,7 +60,7 @@ impl MolRecReader {
     #[wasm_bindgen(js_name = countFrames)]
     pub fn count_frames(&self) -> Result<usize, JsValue> {
         Ok(
-            molrs_io::zarr::count_molrec_frames_in_store(self.store.clone())
+            molrs_io::store::zarr::count_molrec_frames_in_store(self.store.clone())
                 .map_err(|e| JsValue::from_str(&e.to_string()))? as usize,
         )
     }

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::validate_coords;
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 /// Harmonic bond potential with pre-resolved flat arrays.
@@ -126,7 +126,7 @@ mod tests {
     use super::*;
     use crate::forcefield::ForceField;
     use crate::potential::extract_coords;
-    use molrs::block::Block;
+    use molrs::store::block::Block;
     use molrs::types::U;
     use ndarray::Array1;
 

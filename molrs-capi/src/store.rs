@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
-use molrs::region::simbox::SimBox;
+use molrs::spatial::region::simbox::SimBox;
 use molrs_ff::ForceField;
 use slotmap::SlotMap;
 

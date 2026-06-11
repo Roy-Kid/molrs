@@ -14,7 +14,7 @@
 
 use crate::helpers::NpF;
 use crate::simbox::PyBox;
-use molrs::neighbors::{NeighborList as RsNeighborList, NeighborQuery, QueryMode};
+use molrs::spatial::neighbors::{NeighborList as RsNeighborList, NeighborQuery, QueryMode};
 use ndarray::ArrayView1;
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
@@ -338,7 +338,7 @@ impl PyNeighborQuery {
 /// >>> lc.update(new_positions, box=simbox)
 #[pyclass(name = "LinkedCell")]
 pub struct PyLinkedCell {
-    pub(crate) inner: molrs::neighbors::LinkCell,
+    pub(crate) inner: molrs::spatial::neighbors::LinkCell,
 }
 
 #[pymethods]
@@ -360,12 +360,12 @@ impl PyLinkedCell {
     ///     If ``points`` does not have 3 columns.
     #[new]
     fn new(points: PyReadonlyArray2<'_, NpF>, cutoff: NpF, r#box: &PyBox) -> PyResult<Self> {
-        use molrs::neighbors::NbListAlgo;
+        use molrs::spatial::neighbors::NbListAlgo;
         let view = points.as_array();
         if view.ncols() != 3 {
             return Err(PyValueError::new_err("points must have shape (N,3)"));
         }
-        let mut lc = molrs::neighbors::LinkCell::new().cutoff(cutoff);
+        let mut lc = molrs::spatial::neighbors::LinkCell::new().cutoff(cutoff);
         lc.build(view, &r#box.inner);
         Ok(Self { inner: lc })
     }
@@ -382,7 +382,7 @@ impl PyLinkedCell {
     /// ValueError
     ///     On internal shape error (should not happen).
     fn pairs<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<i64>>> {
-        use molrs::neighbors::NbListAlgo;
+        use molrs::spatial::neighbors::NbListAlgo;
         let result = self.inner.query();
         let n = result.n_pairs();
         let qi = result.query_point_indices();
@@ -407,7 +407,7 @@ impl PyLinkedCell {
     /// ValueError
     ///     If ``points`` does not have 3 columns.
     fn update(&mut self, points: PyReadonlyArray2<'_, NpF>, r#box: &PyBox) -> PyResult<()> {
-        use molrs::neighbors::NbListAlgo;
+        use molrs::spatial::neighbors::NbListAlgo;
         let view = points.as_array();
         if view.ncols() != 3 {
             return Err(PyValueError::new_err("points must have shape (N,3)"));
@@ -417,7 +417,7 @@ impl PyLinkedCell {
     }
 
     fn __repr__(&self) -> String {
-        use molrs::neighbors::NbListAlgo;
+        use molrs::spatial::neighbors::NbListAlgo;
         let n = self.inner.query().n_pairs();
         format!("LinkedCell(pairs={})", n)
     }

@@ -64,8 +64,8 @@
 //! MMFF94 parameters are embedded in the binary — no external data files needed.
 
 use molrs::Atomistic;
-use molrs::molgraph::{Atom, PropValue};
-use molrs::rings::find_rings;
+use molrs::chem::rings::find_rings;
+use molrs::system::molgraph::{Atom, PropValue};
 use molrs::types::F;
 use molrs_ff::potential::extract_coords;
 use molrs_ff::typifier::Typifier;

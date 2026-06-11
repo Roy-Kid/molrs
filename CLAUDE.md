@@ -48,7 +48,7 @@ and by the Python / C / WASM bindings. Rules:
    parser edge-case hard to produce from real data (e.g. malformed input →
    expected error); keep it tiny and document its origin.
 4. Data-driven integration tests live in each crate's `tests/` tree, mirroring
-   that crate's `src/` module layout (e.g. `molrs-io/tests/io/<format>.rs`), and
+   that crate's `src/` module layout (e.g. `molrs-io/tests/io/data/<format>.rs`), and
    resolve files via the io test target's local `common` module
    (`common::{tests_data_dir, data_path, format_files}`), which simply reads
    `../tests-data` (or `$MOLRS_TESTS_DATA`). No helper crate.
@@ -140,7 +140,7 @@ Key type aliases: `F3 = Array1<F>`, `F3x3 = Array2<F>`, `FN = Array1<F>`, `FNx3 
 
 ### Block (heterogeneous column store)
 
-`Block` maps string keys to typed ndarray columns (f32, f64, i64, bool). Enforces consistent `nrows` across all columns. Type-safe access via `get_float()`, `get_int()`, `get_bool()`, `get_uint()`, `get_u8()`, `get_string()`. (`molrs-core/src/block/`).
+`Block` maps string keys to typed ndarray columns (f32, f64, i64, bool). Enforces consistent `nrows` across all columns. Type-safe access via `get_float()`, `get_int()`, `get_bool()`, `get_uint()`, `get_u8()`, `get_string()`. (`molrs-core/src/store/block/`).
 
 ### Frame (hierarchical data container)
 
@@ -148,7 +148,7 @@ Key type aliases: `F3 = Array1<F>`, `F3x3 = Array2<F>`, `FN = Array1<F>`, `FNx3 
 
 ### MolGraph (molecular topology)
 
-Graph-based molecular structure with atoms, bonds, stereochemistry, ring detection. Uses petgraph. (`molrs-core/src/molgraph.rs`).
+Graph-based molecular structure with atoms, bonds, stereochemistry, ring detection. Uses petgraph. (`molrs-core/src/system/molgraph.rs`).
 
 ## Trait-Based Extensibility
 

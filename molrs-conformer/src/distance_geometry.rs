@@ -13,10 +13,10 @@ use rand::Rng;
 
 use super::builder::BuildSummary;
 use super::geom::{add, dot, norm, random_unit, scale, sub};
-use molrs::atomistic::{AtomId, Atomistic};
-use molrs::element::Element;
+use molrs::chem::rings::find_rings;
 use molrs::error::MolRsError;
-use molrs::rings::find_rings;
+use molrs::system::atomistic::{AtomId, Atomistic};
+use molrs::system::element::Element;
 
 /// Bond-length tolerance (Å) already used for 1-2 bounds; propagated into
 /// higher-order bounds via geometry.

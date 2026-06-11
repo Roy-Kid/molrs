@@ -5,7 +5,7 @@
 //! at every lag, so both Direct and Window modes have closed-form references.
 
 use molrs::Frame;
-use molrs::block::Block;
+use molrs::store::block::Block;
 use molrs::types::F;
 use ndarray::Array1;
 

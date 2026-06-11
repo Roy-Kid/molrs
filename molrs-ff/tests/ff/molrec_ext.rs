@@ -36,7 +36,7 @@ fn molrec_from_forcefield_records_method_and_styles() {
 #[test]
 fn set_forcefield_metadata_overwrites_in_place() {
     let frame = atoms_frame(&[[0.0, 0.0, 0.0]]);
-    let mut rec = molrs::molrec::MolRec::new(frame);
+    let mut rec = molrs::store::molrec::MolRec::new(frame);
     let ff = demo_ff();
 
     set_forcefield_metadata(&mut rec, &ff);

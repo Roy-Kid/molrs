@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 
-use molrs::atomistic::{AtomId, Atomistic, BondId};
-use molrs::stereo::{
+use molrs::chem::stereo::{
     BondStereo, TetrahedralStereo, assign_bond_stereo_from_3d, assign_stereo_from_3d,
     find_chiral_centers,
 };
+use molrs::system::atomistic::{AtomId, Atomistic, BondId};
 
 #[derive(Debug, Clone)]
 pub(crate) struct StereoSnapshot {

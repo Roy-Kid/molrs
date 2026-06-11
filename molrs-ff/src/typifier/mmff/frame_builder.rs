@@ -4,12 +4,12 @@ use std::collections::{HashMap, HashSet};
 
 use ndarray::Array1;
 
-use molrs::block::Block;
-use molrs::frame::Frame;
-use molrs::gasteiger::compute_gasteiger_charges;
-use molrs::molgraph::PropValue;
-use molrs::rings::find_rings;
-use molrs::topology::Topology;
+use molrs::chem::gasteiger::compute_gasteiger_charges;
+use molrs::chem::rings::find_rings;
+use molrs::store::block::Block;
+use molrs::store::frame::Frame;
+use molrs::system::molgraph::PropValue;
+use molrs::system::topology::Topology;
 use molrs::types::{F, U};
 use molrs::{AtomId, Atomistic};
 

@@ -6,7 +6,7 @@
 //!
 //! Run with: `cargo run -p molrs-core --example molgraph_building`
 
-use molrs_core::coarsegrain::CoarseGrain;
+use molrs_core::system::coarsegrain::CoarseGrain;
 use molrs_core::{Atom, Atomistic, PropValue, add_hydrogens, remove_hydrogens};
 
 fn main() {

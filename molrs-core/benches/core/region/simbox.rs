@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group};
-use molrs_core::region::simbox::SimBox;
+use molrs_core::spatial::region::simbox::SimBox;
 use molrs_core::types::F;
 use ndarray::array;
 

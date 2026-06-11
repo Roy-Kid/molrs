@@ -21,9 +21,9 @@
 //!
 //! The output is one scalar per particle per requested ℓ value.
 
-use molrs::frame_access::FrameAccess;
 use molrs::math::complex::Complex;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
 use super::steinhardt::compute_qlm;
@@ -156,9 +156,9 @@ impl Compute for ContinuousCoordination {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F) -> Frame {
@@ -181,7 +181,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("x")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -190,7 +190,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("y")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -199,7 +199,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("z")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()

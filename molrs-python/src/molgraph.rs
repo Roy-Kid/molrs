@@ -22,11 +22,11 @@
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
-use molrs::aromaticity::perceive_aromaticity as core_perceive_aromaticity;
-use molrs::atomistic::Atomistic;
-use molrs::coarsegrain::CoarseGrain;
-use molrs::entity_table::Cell;
-use molrs::molgraph::{
+use molrs::chem::aromaticity::perceive_aromaticity as core_perceive_aromaticity;
+use molrs::system::atomistic::Atomistic;
+use molrs::system::coarsegrain::CoarseGrain;
+use molrs::system::entity_table::Cell;
+use molrs::system::molgraph::{
     KindId, MolGraph, NodeId, PropValue, node_from_u64, node_to_u64, relation_from_u64,
     relation_to_u64,
 };
@@ -712,7 +712,7 @@ fn with_world_mut(mol: &Bound<'_, PyAny>, f: impl FnOnce(&mut MolGraph)) -> PyRe
 /// Translate every node's coordinates by `delta` (generic geometry system).
 #[pyfunction]
 pub fn translate(mol: &Bound<'_, PyAny>, delta: [f64; 3]) -> PyResult<()> {
-    with_world_mut(mol, |g| molrs::geometry::translate(g, delta))
+    with_world_mut(mol, |g| molrs::spatial::geometry::translate(g, delta))
 }
 
 /// Rotate node coordinates by `angle` radians about `axis` (optionally about a
@@ -725,7 +725,9 @@ pub fn rotate(
     angle: f64,
     about: Option<[f64; 3]>,
 ) -> PyResult<()> {
-    with_world_mut(mol, |g| molrs::geometry::rotate(g, axis, angle, about))
+    with_world_mut(mol, |g| {
+        molrs::spatial::geometry::rotate(g, axis, angle, about)
+    })
 }
 
 /// Scale node coordinates by a per-axis `factor` about an optional center
@@ -734,7 +736,7 @@ pub fn rotate(
 #[pyfunction]
 #[pyo3(signature = (mol, factor, about=None))]
 pub fn scale(mol: &Bound<'_, PyAny>, factor: [f64; 3], about: Option<[f64; 3]>) -> PyResult<()> {
-    with_world_mut(mol, |g| molrs::geometry::scale(g, factor, about))
+    with_world_mut(mol, |g| molrs::spatial::geometry::scale(g, factor, about))
 }
 
 /// Perceive aromaticity in place; returns the number of aromatic atoms found.
@@ -747,7 +749,7 @@ pub fn perceive_aromaticity(mol: &Bound<'_, PyAtomistic>) -> usize {
 /// Add explicit hydrogens, returning a **new** `Atomistic` (chemistry system).
 #[pyfunction]
 pub fn add_hydrogens(py: Python<'_>, mol: &Bound<'_, PyAtomistic>) -> PyResult<Py<PyAtomistic>> {
-    let out = molrs::hydrogens::add_hydrogens(mol.borrow().core());
+    let out = molrs::chem::hydrogens::add_hydrogens(mol.borrow().core());
     PyAtomistic::from_core(py, out)
 }
 
@@ -756,7 +758,7 @@ pub fn add_hydrogens(py: Python<'_>, mol: &Bound<'_, PyAtomistic>) -> PyResult<P
 #[pyfunction]
 pub fn find_rings(mol: &Bound<'_, PyAtomistic>) -> Vec<Vec<u64>> {
     let leaf = mol.borrow();
-    molrs::rings::find_rings(leaf.core())
+    molrs::chem::rings::find_rings(leaf.core())
         .rings()
         .iter()
         .map(|ring| ring.iter().map(|&a| node_to_u64(a)).collect())
@@ -772,7 +774,7 @@ pub fn compute_gasteiger_charges(
     n_iter: usize,
 ) -> Vec<(u64, f64, f64)> {
     let leaf = mol.borrow();
-    molrs::gasteiger::compute_gasteiger_charges(leaf.core(), n_iter)
+    molrs::chem::gasteiger::compute_gasteiger_charges(leaf.core(), n_iter)
         .into_iter()
         .map(|(id, gc)| (node_to_u64(id), gc.charge, gc.h_charge))
         .collect()

@@ -77,11 +77,11 @@ mod signal;
 mod transport;
 mod validate;
 
-/// Register the `keys` submodule mirroring `molrs_core::keys` so Python code
+/// Register the `keys` submodule mirroring `molrs_core::store::keys` so Python code
 /// references the field-name convention by name (`molrs.keys.X`) instead of
 /// scattering string literals.
 fn register_keys(parent: &Bound<'_, PyModule>) -> PyResult<()> {
-    use ::molrs::keys;
+    use ::molrs::store::keys;
     let m = PyModule::new(parent.py(), "keys")?;
     m.add("X", keys::X)?;
     m.add("Y", keys::Y)?;

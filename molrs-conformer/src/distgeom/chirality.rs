@@ -15,7 +15,7 @@
 //! embedder constrains. When the molecule has no coordinates the sign is left
 //! `Unknown` and only the volume magnitude bounds are emitted.
 
-use molrs::atomistic::{AtomId, Atomistic};
+use molrs::system::atomistic::{AtomId, Atomistic};
 
 use super::perceive::{Hybridization, Perceived};
 

@@ -7,9 +7,9 @@
 //! the inline unit tests.
 
 use molrs::Frame;
-use molrs::block::Block;
-use molrs::neighbors::{LinkCell, NbListAlgo, NeighborList};
-use molrs::region::simbox::SimBox;
+use molrs::spatial::neighbors::{LinkCell, NbListAlgo, NeighborList};
+use molrs::spatial::region::simbox::SimBox;
+use molrs::store::block::Block;
 use molrs::types::F;
 use ndarray::{Array1, Array2, array};
 

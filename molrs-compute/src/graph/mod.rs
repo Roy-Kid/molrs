@@ -38,7 +38,7 @@ pub use store::Store;
 use std::any::Any;
 use std::marker::PhantomData;
 
-use molrs::frame_access::FrameAccess;
+use molrs::store::frame_access::FrameAccess;
 
 use crate::error::ComputeError;
 use crate::result::ComputeResult;

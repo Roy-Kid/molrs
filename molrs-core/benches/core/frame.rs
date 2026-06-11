@@ -5,8 +5,8 @@
 //! operations: `Frame::get`, column slice extraction, `Block::insert`.
 
 use criterion::{BenchmarkId, Criterion, criterion_group};
-use molrs_core::block::{Block, BlockDtype};
-use molrs_core::frame::Frame;
+use molrs_core::store::block::{Block, BlockDtype};
+use molrs_core::store::frame::Frame;
 use molrs_core::types::F;
 use ndarray::{ArrayD, IxDyn};
 

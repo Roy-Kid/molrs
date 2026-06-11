@@ -11,7 +11,7 @@
 use crate::smiles::chem::ast::*;
 use crate::smiles::chem::validation::validate_ring_closures;
 use crate::smiles::error::{SmilesError, SmilesErrorKind};
-use molrs::element::Element;
+use molrs::system::element::Element;
 
 /// Validate a parsed SMILES molecule.
 ///

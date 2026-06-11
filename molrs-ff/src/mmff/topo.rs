@@ -13,9 +13,9 @@
 //! [`MolGraph`]. All higher layers (`aromaticity`, `atomtype`,
 //! `charges`) read from it and never mutate the graph.
 
-use molrs::element::Element;
-use molrs::molgraph::PropValue;
-use molrs::rings::{RingInfo, find_rings};
+use molrs::chem::rings::{RingInfo, find_rings};
+use molrs::system::element::Element;
+use molrs::system::molgraph::PropValue;
 use molrs::{AtomId, Atomistic};
 
 /// Bond order (Kekulé): we treat the SDF integer order verbatim.

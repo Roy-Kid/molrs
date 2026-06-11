@@ -12,8 +12,8 @@ mod result;
 
 pub use result::RDFResult;
 
-use molrs::frame_access::FrameAccess;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::Array1;
 
@@ -210,9 +210,9 @@ mod tests {
     use super::super::util::get_f_slice;
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
     use rand::Rng;
 
@@ -355,7 +355,7 @@ mod tests {
         let mut frame = random_frame(50, 10.0, 1);
         frame.simbox = None;
         let nlist = {
-            use molrs::neighbors::NeighborQuery;
+            use molrs::spatial::neighbors::NeighborQuery;
             let pos = positions(&frame);
             NeighborQuery::free(pos.view(), 4.0).query_self()
         };
@@ -389,8 +389,8 @@ mod tests {
 
     #[test]
     fn zero_distance_pairs_are_skipped() {
-        use molrs::block::Block;
-        use molrs::neighbors::NeighborQuery;
+        use molrs::spatial::neighbors::NeighborQuery;
+        use molrs::store::block::Block;
 
         let mut block = Block::new();
         block

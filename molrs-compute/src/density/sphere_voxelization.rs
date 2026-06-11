@@ -13,8 +13,8 @@
 
 use ndarray::Array3;
 
-use molrs::frame_access::FrameAccess;
-use molrs::region::simbox::BoxKind;
+use molrs::spatial::region::simbox::BoxKind;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
 use crate::error::ComputeError;
@@ -182,8 +182,8 @@ impl Compute for SphereVoxelization {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F, pbc: [bool; 3]) -> Frame {

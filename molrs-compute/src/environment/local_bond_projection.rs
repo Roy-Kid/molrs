@@ -13,8 +13,8 @@
 //! reference direction by the particle's quaternion before projection);
 //! that flavour is exposed via the `with_query_orientations` builder.
 
-use molrs::frame_access::FrameAccess;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::Array2;
 
@@ -166,9 +166,9 @@ impl Compute for LocalBondProjection {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     const TOL: F = 1e-12;
@@ -193,7 +193,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("x")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -202,7 +202,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("y")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -211,7 +211,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("z")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()

@@ -1,6 +1,6 @@
 //! Shared test fixtures for benchmarks.
 
-use molrs_core::region::simbox::SimBox;
+use molrs_core::spatial::region::simbox::SimBox;
 use molrs_core::types::F;
 use ndarray::{Array1, Array2, array};
 use rand::rngs::StdRng;

@@ -7,7 +7,7 @@
 use crate::error::FfiError;
 use crate::handle::{BlockHandle, FrameId};
 use molrs::types::{F, I, U};
-use molrs::{block::Block, frame::Frame, region::simbox::SimBox};
+use molrs::{spatial::region::simbox::SimBox, store::block::Block, store::frame::Frame};
 use slotmap::SlotMap;
 use std::collections::{HashMap, HashSet};
 

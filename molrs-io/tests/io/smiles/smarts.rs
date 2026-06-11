@@ -15,7 +15,7 @@ use molrs_io::smiles::{parse_smiles, to_atomistic};
 
 /// Build a MolGraph target from a SMILES string. Centralized here so every
 /// matcher test exercises the same ingestion path.
-fn mol(smiles: &str) -> molrs::atomistic::Atomistic {
+fn mol(smiles: &str) -> molrs::system::atomistic::Atomistic {
     let ir = parse_smiles(smiles).unwrap_or_else(|e| panic!("parse `{smiles}`: {e}"));
     to_atomistic(&ir).unwrap_or_else(|e| panic!("atomize `{smiles}`: {e}"))
 }

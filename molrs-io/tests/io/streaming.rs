@@ -10,7 +10,7 @@
 //! 3. The resulting `Frame`'s atoms-block columns match the legacy reader's
 //!    output for the same step / record.
 
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 use molrs_io::streaming::{FrameIndexBuilder, FrameIndexEntry};
 use std::path::Path;
@@ -104,8 +104,10 @@ fn assert_float_columns_eq(reference: &Frame, candidate: &Frame, columns: &[&str
 
 mod lammps_dump_streaming {
     use super::*;
-    use molrs_io::lammps_dump::{LAMMPSTrajReader, LammpsDumpIndexBuilder, parse_frame_bytes};
     use molrs_io::reader::TrajReader;
+    use molrs_io::trajectory::lammps_dump::{
+        LAMMPSTrajReader, LammpsDumpIndexBuilder, parse_frame_bytes,
+    };
     use std::io::{BufReader, Cursor};
 
     fn make_builder() -> Box<LammpsDumpIndexBuilder> {
@@ -188,8 +190,8 @@ mod lammps_dump_streaming {
 
 mod xyz_streaming {
     use super::*;
+    use molrs_io::data::xyz::{XYZReader, XyzIndexBuilder, parse_frame_bytes};
     use molrs_io::reader::TrajReader;
-    use molrs_io::xyz::{XYZReader, XyzIndexBuilder, parse_frame_bytes};
     use std::io::{BufReader, Cursor};
 
     fn make_builder() -> Box<XyzIndexBuilder> {
@@ -272,7 +274,7 @@ mod xyz_streaming {
 
 mod pdb_streaming {
     use super::*;
-    use molrs_io::pdb::{PdbIndexBuilder, parse_frame_bytes};
+    use molrs_io::data::pdb::{PdbIndexBuilder, parse_frame_bytes};
 
     fn make_builder() -> Box<PdbIndexBuilder> {
         Box::new(PdbIndexBuilder::new())
@@ -318,7 +320,7 @@ mod pdb_streaming {
         let path = crate::common::data_path("pdb/2hkb.pdb");
         let bytes = std::fs::read(&path).expect("read file");
         let one = build_index(
-            || Box::new(molrs_io::pdb::PdbIndexBuilder::new()),
+            || Box::new(molrs_io::data::pdb::PdbIndexBuilder::new()),
             &bytes,
             bytes.len(),
         );
@@ -332,7 +334,7 @@ mod pdb_streaming {
         let path = crate::common::data_path("pdb/ase.pdb");
         let bytes = std::fs::read(&path).expect("read file");
         let one = build_index(
-            || Box::new(molrs_io::pdb::PdbIndexBuilder::new()),
+            || Box::new(molrs_io::data::pdb::PdbIndexBuilder::new()),
             &bytes,
             bytes.len(),
         );
@@ -347,7 +349,9 @@ mod pdb_streaming {
 
 mod lammps_data_streaming {
     use super::*;
-    use molrs_io::lammps_data::{LammpsDataIndexBuilder, parse_frame_bytes, read_lammps_data};
+    use molrs_io::data::lammps_data::{
+        LammpsDataIndexBuilder, parse_frame_bytes, read_lammps_data,
+    };
 
     fn make_builder() -> Box<LammpsDataIndexBuilder> {
         Box::new(LammpsDataIndexBuilder::new())
@@ -393,8 +397,8 @@ mod lammps_data_streaming {
 
 mod sdf_streaming {
     use super::*;
+    use molrs_io::data::sdf::{SDFReader, SdfIndexBuilder, parse_frame_bytes};
     use molrs_io::reader::FrameReader;
-    use molrs_io::sdf::{SDFReader, SdfIndexBuilder, parse_frame_bytes};
     use std::io::{BufReader, Cursor};
 
     fn make_builder() -> Box<SdfIndexBuilder> {

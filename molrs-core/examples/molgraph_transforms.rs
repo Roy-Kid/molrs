@@ -5,7 +5,7 @@
 //!
 //! Run with: `cargo run -p molrs-core --example molgraph_transforms`
 
-use molrs_core::geometry;
+use molrs_core::spatial::geometry;
 use molrs_core::{Atom, Atomistic};
 
 fn main() {

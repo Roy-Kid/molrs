@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::validate_coords;
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 /// Tang-Toennies damped Coulomb pair potential. `b`/`n`/`c` are style-level;

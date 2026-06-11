@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::validate_coords;
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 /// Thole-screened Coulomb pair potential with pre-resolved flat arrays.

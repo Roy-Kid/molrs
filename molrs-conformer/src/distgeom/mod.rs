@@ -26,7 +26,7 @@
 //!   the input 3D coordinates (molrs has no RDKit `ChiralTag`).
 //! - **Experimental torsions**: full port. The complete ETKDGv3 CrystalFF
 //!   three-table set (v2 ++ small-rings ++ macrocycles) is matched by the core
-//!   SMARTS engine (`molrs::smarts`), reproducing RDKit
+//!   SMARTS engine (`molrs::chem::smarts`), reproducing RDKit
 //!   `getExperimentalTorsions` (first-match-wins, one torsion per rotatable
 //!   bond). See `torsion_prefs` for the precise boundary. Tetrangle smoothing
 //!   is omitted because RDKit's reference matrix does not apply it.
@@ -41,8 +41,8 @@ mod torsion_prefs;
 mod torsion_tables;
 mod uff;
 
-use molrs::atomistic::Atomistic;
 use molrs::error::MolRsError;
+use molrs::system::atomistic::Atomistic;
 
 pub use chirality::{ChiralConstraint, ChiralSign, ImproperConstraint};
 pub use knowledge::KnowledgeTorsion;

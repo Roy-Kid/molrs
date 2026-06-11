@@ -1,4 +1,4 @@
-use molrs::neighbors::QueryMode;
+use molrs::spatial::neighbors::QueryMode;
 use molrs::types::F;
 use ndarray::Array1;
 

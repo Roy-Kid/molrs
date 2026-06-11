@@ -5,7 +5,7 @@
 //! integer type IDs to atoms, bonds, angles, dihedrals, and impropers.
 
 use molrs::Atomistic;
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 
 pub mod mmff;
 

@@ -4,9 +4,9 @@
 //! guard the O(N) adjacency path against an accidental O(N^2) all-bonds scan.
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group};
-use molrs_core::aromaticity::perceive_aromaticity;
-use molrs_core::atomistic::Atomistic;
-use molrs_core::rings::find_rings;
+use molrs_core::chem::aromaticity::perceive_aromaticity;
+use molrs_core::chem::rings::find_rings;
+use molrs_core::system::atomistic::Atomistic;
 
 // Sizes are *ring counts*; total atoms = 6 x this.
 const SIZES: &[usize] = &[100, 200, 400, 800];

@@ -23,7 +23,7 @@
 //! VF2 loop's predicate closures pure and avoids nested recursion through
 //! petgraph.
 
-use molrs::atomistic::{AtomId, Atomistic};
+use molrs::system::atomistic::{AtomId, Atomistic};
 use petgraph::graph::UnGraph;
 
 use crate::smiles::chem::ast::{AtomPrimitive, AtomQuery, BondQuery, SmilesIR};
@@ -37,7 +37,7 @@ use super::predicate::{BondEdge, TargetCtx, eval_atom_query, eval_bond_query};
 /// component).
 ///
 /// Indices are 0-based positions into the iteration order of
-/// [`MolGraph::atoms`](molrs::molgraph::MolGraph::atoms).
+/// [`MolGraph::atoms`](molrs::system::molgraph::MolGraph::atoms).
 ///
 /// Reference: Daylight SMARTS theory manual — substructure matching:
 /// <https://daylight.com/dayhtml/doc/theory/theory.smarts.html>
@@ -202,7 +202,7 @@ impl TargetGraph {
     }
 }
 
-fn build_target_graph(mol: &Atomistic, rings: &molrs::rings::RingInfo) -> TargetGraph {
+fn build_target_graph(mol: &Atomistic, rings: &molrs::chem::rings::RingInfo) -> TargetGraph {
     let mut graph = UnGraph::<AtomNodeRef, BondEdge>::with_capacity(mol.n_atoms(), mol.n_bonds());
     let mut id_to_node = std::collections::HashMap::new();
     let mut id_to_index: std::collections::HashMap<AtomId, usize> =
@@ -220,7 +220,7 @@ fn build_target_graph(mol: &Atomistic, rings: &molrs::rings::RingInfo) -> Target
             .props
             .get("order")
             .and_then(|v| match v {
-                molrs::molgraph::PropValue::F64(f) => Some(*f),
+                molrs::system::molgraph::PropValue::F64(f) => Some(*f),
                 _ => None,
             })
             .unwrap_or(1.0);

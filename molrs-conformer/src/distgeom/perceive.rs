@@ -14,9 +14,9 @@
 
 use std::collections::HashMap;
 
-use molrs::atomistic::{AtomId, Atomistic};
-use molrs::element::Element;
-use molrs::rings::{RingInfo, find_rings};
+use molrs::chem::rings::{RingInfo, find_rings};
+use molrs::system::atomistic::{AtomId, Atomistic};
+use molrs::system::element::Element;
 
 /// Coarse hybridization label (subset of RDKit's `Atom::HybridizationType`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

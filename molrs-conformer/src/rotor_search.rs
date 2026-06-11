@@ -5,8 +5,8 @@ use rand::Rng;
 use super::geom::{add, norm, rotate_about_axis, scale, sub};
 use super::optimizer::{EnergyModel, steepest_descent};
 use super::options::ConformerOptions;
-use molrs::atomistic::Atomistic;
-use molrs::rotatable::detect_rotatable_bonds_with_downstream;
+use molrs::chem::rotatable::detect_rotatable_bonds_with_downstream;
+use molrs::system::atomistic::Atomistic;
 
 /// Rotor-search stage summary.
 #[derive(Debug, Clone, Copy)]

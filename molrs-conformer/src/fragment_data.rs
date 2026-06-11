@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use once_cell::sync::Lazy;
 
-use molrs::element::Element;
+use molrs::system::element::Element;
 
 /// Ring fragment template (atom symbols + coordinates).
 #[derive(Debug, Clone)]

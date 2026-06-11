@@ -30,11 +30,11 @@
 
 use std::cmp::Ordering;
 
-use molrs::frame_access::FrameAccess;
 use molrs::math::complex::Complex;
 use molrs::math::spherical_harmonics::ylm_all;
 use molrs::math::wigner3j::wigner_3j;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
 use crate::error::ComputeError;
@@ -356,9 +356,9 @@ impl Compute for Steinhardt {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F, pbc: [bool; 3]) -> Frame {
@@ -382,7 +382,7 @@ mod tests {
                 .get("atoms")
                 .unwrap()
                 .get("x")
-                .and_then(<F as molrs::block::BlockDtype>::from_column)
+                .and_then(<F as molrs::store::block::BlockDtype>::from_column)
                 .unwrap()
                 .as_slice()
                 .unwrap()
@@ -391,7 +391,7 @@ mod tests {
                 .get("atoms")
                 .unwrap()
                 .get("y")
-                .and_then(<F as molrs::block::BlockDtype>::from_column)
+                .and_then(<F as molrs::store::block::BlockDtype>::from_column)
                 .unwrap()
                 .as_slice()
                 .unwrap()
@@ -400,7 +400,7 @@ mod tests {
                 .get("atoms")
                 .unwrap()
                 .get("z")
-                .and_then(<F as molrs::block::BlockDtype>::from_column)
+                .and_then(<F as molrs::store::block::BlockDtype>::from_column)
                 .unwrap()
                 .as_slice()
                 .unwrap()

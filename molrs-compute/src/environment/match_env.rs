@@ -28,9 +28,9 @@
 
 use std::collections::HashMap;
 
-use molrs::frame_access::FrameAccess;
 use molrs::math::diagonalize::eigh_largest_sym_4x4;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
 use crate::error::ComputeError;
@@ -104,7 +104,10 @@ fn bond_vectors(particle: usize, nlist: &NeighborList) -> Vec<[F; 3]> {
     let i_idx = nlist.query_point_indices();
     let j_idx = nlist.point_indices();
     let vectors = nlist.vectors();
-    let symmetric = matches!(nlist.mode(), molrs::neighbors::QueryMode::SelfQuery);
+    let symmetric = matches!(
+        nlist.mode(),
+        molrs::spatial::neighbors::QueryMode::SelfQuery
+    );
     for k in 0..nlist.n_pairs() {
         if i_idx[k] as usize == particle {
             bonds.push([vectors[[k, 0]], vectors[[k, 1]], vectors[[k, 2]]]);
@@ -380,9 +383,9 @@ impl Compute for MatchEnv {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F) -> Frame {
@@ -405,7 +408,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("x")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -414,7 +417,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("y")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -423,7 +426,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("z")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()

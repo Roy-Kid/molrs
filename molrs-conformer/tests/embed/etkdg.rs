@@ -23,7 +23,7 @@
 
 use std::path::{Path, PathBuf};
 
-use molrs::molgraph::{Atom, PropValue};
+use molrs::system::molgraph::{Atom, PropValue};
 use molrs::{AtomId, Atomistic};
 use molrs_conformer::{Conformer, ConformerOptions};
 use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};

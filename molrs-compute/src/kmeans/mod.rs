@@ -5,7 +5,7 @@
 //! clustered via Lloyd's algorithm with k-means++ init. Deterministic given a
 //! fixed seed.
 
-use molrs::frame_access::FrameAccess;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};

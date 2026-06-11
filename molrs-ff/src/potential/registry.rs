@@ -11,7 +11,7 @@ use std::sync::{OnceLock, RwLock};
 
 use crate::forcefield::Params;
 use crate::potential::Potential;
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 
 use super::{angle, bond, dihedral, improper, kspace, pair};
 

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::{compute_angle, validate_coords};
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 /// Class2 quartic angle potential. `theta0` is stored in radians.

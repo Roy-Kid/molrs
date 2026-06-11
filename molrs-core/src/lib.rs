@@ -2,11 +2,13 @@
 //!
 //! A Rust library providing core molecular modeling functionality.
 //!
-//! ## Features
+//! ## Module layout
 //!
-//! - Element data and lookup by atomic number or symbol
-//! - Core data structures, geometry, IO, and neighbor-list algorithms
-//! - Type-safe molecular representations
+//! - [`store`] — columnar data containers (`Block`, `Frame`, `MolRec`, keys)
+//! - [`system`] — molecular representations (`Atomistic`, `MolGraph`, `Topology`, elements)
+//! - [`chem`] — chemical perception (aromaticity, charges, rings, stereo, SMARTS)
+//! - [`spatial`] — regions, neighbor lists, geometry
+//! - [`math`], [`units`] — numerical and unit-system foundations
 //!
 //! ## Examples
 //!
@@ -35,60 +37,40 @@
 // Embedded data files
 pub mod data;
 
-// Modules formerly in core/
-pub mod aromaticity;
-pub mod atomistic;
-pub mod block;
-pub mod coarsegrain;
-pub mod element;
-pub mod entity_table;
-pub mod frame;
-pub mod frame_access;
-pub mod frame_view;
-pub mod gasteiger;
-pub mod geometry;
-pub mod hydrogens;
-pub mod keys;
-pub mod mapping;
-pub mod molgraph;
-pub mod molrec;
-pub mod region;
-pub mod rings;
-pub mod rotatable;
-pub mod smarts;
-pub mod stereo;
-pub mod topology;
+// Domain groups
+pub mod chem;
+pub mod spatial;
+pub mod store;
+pub mod system;
+
+// Foundations
+pub mod error;
+pub mod math;
 pub mod types;
 pub mod units;
 
-// Other top-level modules
-pub mod error;
-pub mod math;
-pub mod neighbors;
-
 // Public re-exports for common types
-pub use aromaticity::perceive_aromaticity;
-pub use atomistic::{AngleId, AtomId, Atomistic, Bond, BondId, DihedralId, ImproperId};
-pub use block::Block;
-pub use coarsegrain::CoarseGrain;
-pub use element::Element;
-pub use error::MolRsError;
-pub use frame::Frame;
-pub use frame_access::FrameAccess;
-pub use frame_view::FrameView;
-pub use gasteiger::{GasteigerCharges, compute_gasteiger_charges};
-pub use hydrogens::{add_hydrogens, implicit_h_count, remove_hydrogens};
-pub use mapping::{CGMapping, WeightScheme};
-pub use molgraph::{Atom, Bead, KindId, MolGraph, NodeId, PropValue, Relation};
-pub use rings::{RingInfo, find_rings};
-pub use smarts::SmartsPattern;
-pub use stereo::{
+pub use chem::aromaticity::perceive_aromaticity;
+pub use chem::gasteiger::{GasteigerCharges, compute_gasteiger_charges};
+pub use chem::hydrogens::{add_hydrogens, implicit_h_count, remove_hydrogens};
+pub use chem::rings::{RingInfo, find_rings};
+pub use chem::smarts::SmartsPattern;
+pub use chem::stereo::{
     BondStereo, TetrahedralStereo, assign_bond_stereo_from_3d, assign_stereo_from_3d,
     chiral_volume, find_chiral_centers,
 };
-pub use topology::{Topology, TopologyRingInfo};
-pub use units::{Dimension, Quantity, Unit, UnitDef, UnitRegistry, UnitsError};
-
-pub use molrec::{
+pub use error::MolRsError;
+pub use store::block::Block;
+pub use store::frame::Frame;
+pub use store::frame_access::FrameAccess;
+pub use store::frame_view::FrameView;
+pub use store::molrec::{
     MolRec, ObservableData, ObservableKind, ObservableRecord, SchemaValue, Trajectory,
 };
+pub use system::atomistic::{AngleId, AtomId, Atomistic, Bond, BondId, DihedralId, ImproperId};
+pub use system::coarsegrain::CoarseGrain;
+pub use system::element::Element;
+pub use system::mapping::{CGMapping, WeightScheme};
+pub use system::molgraph::{Atom, Bead, KindId, MolGraph, NodeId, PropValue, Relation};
+pub use system::topology::{Topology, TopologyRingInfo};
+pub use units::{Dimension, Quantity, Unit, UnitDef, UnitRegistry, UnitsError};

@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use molrs::Atomistic;
-use molrs::molgraph::{Atom, PropValue};
+use molrs::system::molgraph::{Atom, PropValue};
 use molrs_conformer::distgeom::{
     self, BoundsMatrix, ChiralSign, EtkdgVersion, build_bounds, smooth_bounds,
 };

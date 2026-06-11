@@ -20,9 +20,9 @@
 //! PMF is `−ln(ρ / ρ_ref)`. The lab z-axis is ignored; orientations are
 //! scalar 2-D angles in radians.
 
-use molrs::frame_access::FrameAccess;
-use molrs::neighbors::NeighborList;
-use molrs::region::simbox::BoxKind;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::spatial::region::simbox::BoxKind;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::Array3;
 
@@ -124,7 +124,10 @@ impl PMFTXYT {
         let i_idx = nlist.query_point_indices();
         let j_idx = nlist.point_indices();
         let n_pairs = nlist.n_pairs();
-        let symmetric = matches!(nlist.mode(), molrs::neighbors::QueryMode::SelfQuery);
+        let symmetric = matches!(
+            nlist.mode(),
+            molrs::spatial::neighbors::QueryMode::SelfQuery
+        );
 
         let push = |xl: F, yl: F, t: F, counts: &mut Array3<u64>| {
             if xl.abs() >= self.x_max || yl.abs() >= self.y_max {
@@ -242,9 +245,9 @@ impl Compute for PMFTXYT {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F) -> Frame {
@@ -273,7 +276,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("x")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -282,7 +285,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("y")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -291,7 +294,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("z")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()

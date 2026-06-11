@@ -13,7 +13,9 @@
 //! angstroms).
 
 use crate::helpers::NpF;
-use molrs::region::region::{AndRegion, Cuboid, HollowSphere, NotRegion, OrRegion, Region, Sphere};
+use molrs::spatial::region::region::{
+    AndRegion, Cuboid, HollowSphere, NotRegion, OrRegion, Region, Sphere,
+};
 use ndarray::Array1;
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;

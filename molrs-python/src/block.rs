@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use molrs::block::{
+use molrs::store::block::{
     Block as CoreBlock, BlockDtype, Column, ColumnHolder, block_from_csv, block_to_csv,
 };
 use molrs::types::{F, I, U};

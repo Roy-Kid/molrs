@@ -20,8 +20,8 @@
 //! which collapses to the standard `1.0` count when `diameter = 0`. The
 //! identical formula appears in `LocalDensity::compute` in freud.
 
-use molrs::frame_access::FrameAccess;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
 use crate::error::ComputeError;
@@ -96,7 +96,10 @@ impl LocalDensity {
         // side. For a self-query NeighborList we get i<j pairs only, so we
         // must add the symmetric contribution. For a cross-query nlist we
         // take i as the query point and j as the reference.
-        let symmetric = matches!(nlist.mode(), molrs::neighbors::QueryMode::SelfQuery);
+        let symmetric = matches!(
+            nlist.mode(),
+            molrs::spatial::neighbors::QueryMode::SelfQuery
+        );
 
         let half_diam = self.diameter * 0.5;
         let inv_diam = if self.diameter > 0.0 {
@@ -165,9 +168,9 @@ impl Compute for LocalDensity {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F, pbc: [bool; 3]) -> Frame {
@@ -190,7 +193,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("x")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -199,7 +202,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("y")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -208,7 +211,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("z")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()

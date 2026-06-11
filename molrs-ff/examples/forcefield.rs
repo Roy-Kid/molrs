@@ -6,8 +6,8 @@
 //!
 //! Run: cargo run -p molrs-core --example forcefield
 
-use molrs::block::Block;
-use molrs::frame::Frame;
+use molrs::store::block::Block;
+use molrs::store::frame::Frame;
 use molrs::types::{F, U};
 use molrs_ff::forcefield::ForceField;
 use molrs_ff::potential::extract_coords;

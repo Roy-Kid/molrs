@@ -21,8 +21,8 @@ use std::collections::HashMap;
 
 use crate::forcefield::ForceField;
 use crate::potential::Potentials;
-use molrs::frame::Frame;
-use molrs::rings::RingInfo;
+use molrs::chem::rings::RingInfo;
+use molrs::store::frame::Frame;
 use molrs::{AtomId, Atomistic};
 
 use super::Typifier;
@@ -83,7 +83,7 @@ impl MMFFTypifier {
     ///
     /// `mol → Frame → Potentials`. The intermediate `Frame` is not retained.
     ///
-    /// Requires [`Atomistic`](molrs::atomistic::Atomistic) because MMFF94
+    /// Requires [`Atomistic`](molrs::system::atomistic::Atomistic) because MMFF94
     /// typing depends on element symbols, bond orders, and ring membership.
     pub fn build(&self, mol: &Atomistic) -> Result<Potentials, String> {
         let frame = self.typify(mol)?;

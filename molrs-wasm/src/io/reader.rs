@@ -18,16 +18,16 @@
 //! | `LAMMPSTrajReader` | LAMMPS dump trajectory | Yes | `"atoms"` block with columns from dump header |
 
 use crate::core::frame::Frame;
-use molrs_io::chgcar::read_chgcar_from_reader;
-use molrs_io::cif::CifReader as RsCifReader;
-use molrs_io::cube::read_cube_from_reader;
-use molrs_io::dcd::DcdReader as RsDcdReader;
-use molrs_io::lammps_data::LAMMPSDataReader;
-use molrs_io::lammps_dump::LAMMPSTrajReader;
-use molrs_io::pdb::PDBReader;
+use molrs_io::data::chgcar::read_chgcar_from_reader;
+use molrs_io::data::cif::CifReader as RsCifReader;
+use molrs_io::data::cube::read_cube_from_reader;
+use molrs_io::data::lammps_data::LAMMPSDataReader;
+use molrs_io::data::pdb::PDBReader;
+use molrs_io::data::sdf::SDFReader;
+use molrs_io::data::xyz::XYZReader;
 use molrs_io::reader::{FrameReader, Reader, TrajReader};
-use molrs_io::sdf::SDFReader;
-use molrs_io::xyz::XYZReader;
+use molrs_io::trajectory::dcd::DcdReader as RsDcdReader;
+use molrs_io::trajectory::lammps_dump::LAMMPSTrajReader;
 use std::io::{BufReader, Cursor};
 use wasm_bindgen::prelude::*;
 

@@ -5,8 +5,8 @@
 mod tests {
     use crate::typifier::Typifier;
     use crate::typifier::mmff::MMFFTypifier;
-    use molrs::molgraph::{Atom, PropValue};
-    use molrs::rings::find_rings;
+    use molrs::chem::rings::find_rings;
+    use molrs::system::molgraph::{Atom, PropValue};
     use molrs::{AtomId, Atomistic};
 
     fn atom(sym: &str) -> Atom {

@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use molrs::molgraph::{Atom, PropValue};
+use molrs::system::molgraph::{Atom, PropValue};
 use molrs::{AtomId, Atomistic};
 use molrs_ff::mmff::{MmffMolProperties, MmffVariant};
 use serde_json::Value;

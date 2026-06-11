@@ -24,7 +24,7 @@ pub mod kernels {
 }
 
 use crate::forcefield::{ForceField, Params};
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 // ---------------------------------------------------------------------------
@@ -287,7 +287,7 @@ impl ForceField {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use molrs::block::Block;
+    use molrs::store::block::Block;
     use molrs::types::U;
     use ndarray::Array1;
 

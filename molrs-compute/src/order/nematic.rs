@@ -25,8 +25,8 @@
 
 use ndarray::array;
 
-use molrs::frame_access::FrameAccess;
 use molrs::math::diagonalize::eigh_sym_3x3;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::{F, F3, F3x3};
 
 use crate::error::ComputeError;

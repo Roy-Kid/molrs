@@ -14,11 +14,11 @@ use super::geom::{
     add, arbitrary_perpendicular, cross, dot, norm, normalize, random_unit, rotate_about_axis,
     scale, sub,
 };
-use molrs::atomistic::{AtomId, Atomistic};
-use molrs::element::Element;
+use molrs::chem::rings::find_rings;
+use molrs::chem::rotatable::detect_rotatable_bonds;
 use molrs::error::MolRsError;
-use molrs::rings::find_rings;
-use molrs::rotatable::detect_rotatable_bonds;
+use molrs::system::atomistic::{AtomId, Atomistic};
+use molrs::system::element::Element;
 
 /// Summary metrics returned by the embedding stage.
 #[derive(Debug, Clone)]

@@ -23,9 +23,9 @@
 //! orientations are scalar angles (radians). Caller is responsible for
 //! the planar configuration.
 
-use molrs::frame_access::FrameAccess;
-use molrs::neighbors::NeighborList;
-use molrs::region::simbox::BoxKind;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::spatial::region::simbox::BoxKind;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::Array3;
 
@@ -121,7 +121,10 @@ impl PMFTR12 {
         let i_idx = nlist.query_point_indices();
         let j_idx = nlist.point_indices();
         let n_pairs = nlist.n_pairs();
-        let symmetric = matches!(nlist.mode(), molrs::neighbors::QueryMode::SelfQuery);
+        let symmetric = matches!(
+            nlist.mode(),
+            molrs::spatial::neighbors::QueryMode::SelfQuery
+        );
 
         for k in 0..n_pairs {
             let vx = vectors[[k, 0]];
@@ -238,9 +241,9 @@ impl Compute for PMFTR12 {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F) -> Frame {
@@ -269,7 +272,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("x")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -278,7 +281,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("y")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -287,7 +290,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("z")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()

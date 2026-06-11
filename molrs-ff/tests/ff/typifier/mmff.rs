@@ -1,8 +1,8 @@
 //! End-to-end MMFF94 typification: MolGraph (built in code) -> typed Frame,
 //! atom-type assignment, bond/angle/torsion classification, and full build.
 
-use molrs::molgraph::{Atom, PropValue};
-use molrs::rings::find_rings;
+use molrs::chem::rings::find_rings;
+use molrs::system::molgraph::{Atom, PropValue};
 use molrs::{AtomId, Atomistic};
 use molrs_ff::typifier::Typifier;
 use molrs_ff::typifier::mmff::MMFFTypifier;

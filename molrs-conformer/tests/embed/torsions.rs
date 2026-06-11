@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use molrs::Atomistic;
-use molrs::molgraph::{Atom, PropValue};
+use molrs::system::molgraph::{Atom, PropValue};
 use molrs_conformer::distgeom::{TorsionTable, experimental_torsions_with_provenance};
 
 fn fixtures_dir() -> PathBuf {

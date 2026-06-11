@@ -21,7 +21,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use molrs::atomistic::Atomistic;
+use molrs::system::atomistic::Atomistic;
 use molrs_conformer::{Conformer, ConformerOptions, ConformerSpeed};
 
 use crate::core::frame::Frame;

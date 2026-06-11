@@ -8,7 +8,7 @@
 //! topology-blind.
 
 use crate::helpers::{atoms_block, flat_coords, numerical_forces, topo_block};
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 use molrs_ff::{ForceField, LBFGS, LbfgsConfig};
 

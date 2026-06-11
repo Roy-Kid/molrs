@@ -1,13 +1,13 @@
 //! Shared in-code builders for `molrs-ff` integration tests.
 //!
 //! Everything here builds inputs from scratch (no file-format strings). Frames
-//! are assembled with the public `molrs::block::Block` / `molrs::frame::Frame`
+//! are assembled with the public `molrs::store::block::Block` / `molrs::store::frame::Frame`
 //! API exactly as a real consumer would after typification.
 
 #![allow(dead_code)]
 
-use molrs::block::Block;
-use molrs::frame::Frame;
+use molrs::store::block::Block;
+use molrs::store::frame::Frame;
 use molrs::types::{F, U};
 use ndarray::Array1;
 

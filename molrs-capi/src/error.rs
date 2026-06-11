@@ -5,12 +5,12 @@
 //! and can be retrieved via [`crate::molrs_last_error`].
 //!
 //! Column data types are exposed to C as [`MolrsDType`] discriminants
-//! that map one-to-one to the internal [`molrs::block::DType`] enum.
+//! that map one-to-one to the internal [`molrs::store::block::DType`] enum.
 
 use std::cell::RefCell;
 use std::ffi::c_char;
 
-use molrs::block::DType;
+use molrs::store::block::DType;
 use molrs_ffi::FfiError;
 
 /// Status codes returned by every `extern "C"` function.
@@ -65,7 +65,7 @@ pub enum MolrsStatus {
 
 /// Data type discriminants for Block columns.
 ///
-/// Each column in a [`Block`](molrs::block::Block) stores a
+/// Each column in a [`Block`](molrs::store::block::Block) stores a
 /// homogeneously-typed ndarray.  This enum tells C callers which
 /// accessor family to use (`molrs_block_get_F`, `molrs_block_get_I`,
 /// `molrs_block_get_U`, etc.).

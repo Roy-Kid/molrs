@@ -5,9 +5,9 @@
 
 use std::collections::HashMap;
 
-use molrs::element::Element;
-use molrs::hydrogens::implicit_h_count;
-use molrs::rings::RingInfo;
+use molrs::chem::hydrogens::implicit_h_count;
+use molrs::chem::rings::RingInfo;
+use molrs::system::element::Element;
 use molrs::{AtomId, Atomistic};
 
 use super::params::{MMFFParams, PropKey};

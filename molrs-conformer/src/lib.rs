@@ -8,7 +8,7 @@
 //!
 //! ```no_run
 //! use molrs_conformer::{Conformer, ConformerOptions};
-//! # fn run(mol: &molrs::atomistic::Atomistic) -> Result<(), molrs::error::MolRsError> {
+//! # fn run(mol: &molrs::system::atomistic::Atomistic) -> Result<(), molrs::error::MolRsError> {
 //! let (mol_3d, report) = Conformer::new(ConformerOptions::default()).generate(mol)?;
 //! # let _ = (mol_3d, report);
 //! # Ok(())
@@ -47,8 +47,8 @@ pub mod etkdg;
 pub use options::{ConformerAlgorithm, ConformerOptions, ConformerSpeed, ForceFieldKind};
 pub use report::{ConformerReport, ConformerStageReport, StageKind};
 
-use molrs::atomistic::Atomistic;
 use molrs::error::MolRsError;
+use molrs::system::atomistic::Atomistic;
 
 /// 3D conformer generator for all-atom molecular graphs.
 ///

@@ -29,8 +29,8 @@ use crate::frame::PyFrame;
 use crate::helpers::NpF;
 use crate::linkedcell::PyNeighborList;
 
-use molrs::frame::Frame as CoreFrame;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame::Frame as CoreFrame;
 use molrs::types::F;
 use molrs_compute::{
     BondOrder, ClusterProperties, Compute, GaussianDensity, Hexatic, LocalDensity, Nematic, PMFTXY,

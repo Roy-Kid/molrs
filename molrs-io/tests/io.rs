@@ -8,31 +8,31 @@
 #[path = "io/common.rs"]
 mod common;
 
-#[path = "io/chgcar.rs"]
+#[path = "io/data/chgcar.rs"]
 mod chgcar;
-#[path = "io/cif.rs"]
+#[path = "io/data/cif.rs"]
 mod cif;
-#[path = "io/cube.rs"]
+#[path = "io/data/cube.rs"]
 mod cube;
-#[path = "io/dcd.rs"]
+#[path = "io/trajectory/dcd.rs"]
 mod dcd;
-#[path = "io/gro.rs"]
+#[path = "io/data/gro.rs"]
 mod gro;
-#[path = "io/lammps_data.rs"]
+#[path = "io/data/lammps_data.rs"]
 mod lammps_data;
-#[path = "io/lammps_dump.rs"]
+#[path = "io/trajectory/lammps_dump.rs"]
 mod lammps_dump;
-#[path = "io/mol2.rs"]
+#[path = "io/data/mol2.rs"]
 mod mol2;
-#[path = "io/pdb.rs"]
+#[path = "io/data/pdb.rs"]
 mod pdb;
-#[path = "io/poscar.rs"]
+#[path = "io/data/poscar.rs"]
 mod poscar;
-#[path = "io/sdf.rs"]
+#[path = "io/data/sdf.rs"]
 mod sdf;
 #[path = "io/streaming.rs"]
 mod streaming;
-#[path = "io/xyz.rs"]
+#[path = "io/data/xyz.rs"]
 mod xyz;
 
 // SMILES/SMARTS are string parsers (no `tests-data/` files); they mirror

@@ -7,7 +7,7 @@ use crate::potential::Potential;
 use crate::potential::geometry::{
     accumulate_angle_forces, compute_angle, mag3, sub3, validate_coords,
 };
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 /// md/A -> kcal/mol conversion.
