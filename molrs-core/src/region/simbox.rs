@@ -32,6 +32,13 @@ pub struct SimBox {
     pbc: Pbc3,
     /// Cached geometry kind
     kind: BoxKind,
+    /// Whether the cell is geometrically defined. `false` marks a "no-cell"
+    /// box (an undefined / zero-volume cell) — distinct from `pbc`, which only
+    /// describes periodicity. A defined non-periodic box (e.g. a free-boundary
+    /// bounding box) keeps `cell_defined = true`; only a box with no meaningful
+    /// cell at all (carrying the identity matrix purely so geometry ops are
+    /// no-ops) sets it `false`.
+    cell_defined: bool,
 }
 
 /// Error type for simulation box construction.
@@ -50,6 +57,14 @@ pub enum BoxError {
 impl SimBox {
     /// Construct from triclinic cell matrix `H`, origin `O`, and per-axis PBC flags
     pub fn new(h: F3x3, origin: F3, pbc: Pbc3) -> Result<Self, BoxError> {
+        Self::new_cell(h, origin, pbc, true)
+    }
+
+    /// Construct a box, explicitly marking whether the cell is geometrically
+    /// defined. Pass `cell_defined = false` for a "no-cell" box (undefined /
+    /// zero-volume): supply the identity matrix so geometry ops degrade to
+    /// no-ops, and `volume` / `is_cell_defined` reflect the undefined cell.
+    pub fn new_cell(h: F3x3, origin: F3, pbc: Pbc3, cell_defined: bool) -> Result<Self, BoxError> {
         if let Some(inv) = math::inv3(&h) {
             let kind = detect_box_kind(&h);
             Ok(Self {
@@ -58,10 +73,19 @@ impl SimBox {
                 origin,
                 pbc,
                 kind,
+                cell_defined,
             })
         } else {
             Err(BoxError::SingularCell)
         }
+    }
+
+    /// Whether the cell is geometrically defined (`false` ⇒ a no-cell box of
+    /// undefined / zero volume). Distinct from periodicity ([`is_free`]).
+    ///
+    /// [`is_free`]: SimBox::is_free
+    pub fn is_cell_defined(&self) -> bool {
+        self.cell_defined
     }
 
     pub fn try_new(h: F3x3, origin: F3, pbc: Pbc3) -> Result<Self, BoxError> {
@@ -496,6 +520,34 @@ mod tests {
 
     fn assert_close(a: F, b: F) {
         assert!((a - b).abs() < 1e-6 as F, "{} != {}", a, b);
+    }
+
+    #[test]
+    fn cell_defined_distinct_from_pbc() {
+        // A defined box (any pbc) reports cell_defined = true (the default).
+        let defined = SimBox::ortho(
+            array![2.0, 2.0, 2.0],
+            array![0.0, 0.0, 0.0],
+            [false, false, false],
+        )
+        .unwrap();
+        assert!(defined.is_cell_defined());
+        assert!(defined.is_free()); // non-periodic => free, but cell IS defined
+        assert_close(defined.volume(), 8.0); // real cell volume preserved (RDF)
+
+        // A no-cell box carries the identity cell (so geometry is a no-op) but
+        // is marked cell_defined = false.
+        let nocell = SimBox::new_cell(
+            ndarray::Array2::eye(3),
+            array![0.0, 0.0, 0.0],
+            [false, false, false],
+            false,
+        )
+        .unwrap();
+        assert!(!nocell.is_cell_defined());
+        // geometry no-ops on the identity cell:
+        let pts = array![[1.0, 2.0, 3.0]];
+        assert_eq!(nocell.wrap(pts.view()), pts);
     }
 
     #[test]

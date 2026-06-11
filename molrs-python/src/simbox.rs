@@ -67,11 +67,12 @@ impl PyBox {
     /// >>> h = np.eye(3) * 10.0
     /// >>> box = Box(h)
     #[new]
-    #[pyo3(signature = (h, origin=None, pbc=None))]
+    #[pyo3(signature = (h, origin=None, pbc=None, cell_defined=true))]
     fn new(
         h: PyReadonlyArray2<'_, NpF>,
         origin: Option<PyReadonlyArray1<'_, NpF>>,
         pbc: Option<PyReadonlyArray1<'_, bool>>,
+        cell_defined: bool,
     ) -> PyResult<Self> {
         let h_view = h.as_array();
         if h_view.dim() != (3, 3) {
@@ -81,8 +82,16 @@ impl PyBox {
         let origin_vec = parse_origin(origin)?;
         let pbc_array = parse_pbc(pbc)?;
 
-        let inner = SimBox::new(h_matrix, origin_vec, pbc_array).map_err(box_error_to_pyerr)?;
+        let inner = SimBox::new_cell(h_matrix, origin_vec, pbc_array, cell_defined)
+            .map_err(box_error_to_pyerr)?;
         Ok(PyBox { inner })
+    }
+
+    /// Whether the cell is geometrically defined. ``False`` marks a "no-cell"
+    /// box (undefined / zero-volume), distinct from ``is_free`` (periodicity).
+    #[getter]
+    fn cell_defined(&self) -> bool {
+        self.inner.is_cell_defined()
     }
 
     /// Create a cubic simulation box.
