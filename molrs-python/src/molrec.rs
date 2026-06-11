@@ -24,7 +24,7 @@ use crate::forcefield::PyForceField;
 use crate::frame::PyFrame;
 use crate::helpers::{NpF, molrs_error_to_pyerr};
 
-#[pyclass(name = "Trajectory", from_py_object)]
+#[pyclass(name = "Trajectory", from_py_object, subclass)]
 #[derive(Clone)]
 pub struct PyTrajectory {
     pub(crate) inner: CoreTrajectory,
