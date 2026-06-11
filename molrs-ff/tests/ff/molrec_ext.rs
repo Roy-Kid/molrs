@@ -7,7 +7,7 @@ use molrs_ff::{molrec_from_forcefield, set_forcefield_metadata};
 fn demo_ff() -> ForceField {
     let mut ff = ForceField::new("OPLS-demo");
     ff.def_bondstyle("harmonic")
-        .def_type("CT-CT", &[("k0", 268.0), ("r0", 1.529)]);
+        .def_type("CT-CT", &[("k", 268.0), ("r0", 1.529)]);
     ff.def_pairstyle("lj/cut", &[("cutoff", 10.0)])
         .def_type("CT", &[("epsilon", 0.066), ("sigma", 3.5)]);
     ff

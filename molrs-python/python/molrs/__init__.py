@@ -104,6 +104,42 @@ from .molrs import (
 from . import frame  # noqa: F401
 from .frame import Block, Frame
 
+# Chainable, object-style force-field layer (Style/Type handle views over the
+# Rust ForceField). Shadows the bare PyO3 ``ForceField`` with the subclass that
+# adds ``def_*style`` factories; ``def_type``/``types``/``to_potentials`` are
+# inherited from the core. Raw core stays importable from ``.molrs``.
+from . import forcefield  # noqa: F401
+from .forcefield import (  # noqa: F401
+    AngleHarmonicStyle,
+    AngleStyle,
+    AngleType,
+    AtomStyle,
+    AtomType,
+    BondHarmonicStyle,
+    BondStyle,
+    BondType,
+    DihedralOPLSStyle,
+    DihedralStyle,
+    DihedralType,
+    ForceField,
+    ImproperStyle,
+    ImproperType,
+    PairCoulLongStyle,
+    PairLJ126CoulCutStyle,
+    PairLJ126CoulLongStyle,
+    PairLJ126Style,
+    PairStyle,
+    PairType,
+    Parameters,
+    Style,
+    Type,
+    # readers re-wrapped to yield the Python ForceField (shadow the raw ones)
+    read_forcefield_xml,
+    read_forcefield_xml_str,
+    read_opls_xml,
+    read_opls_xml_str,
+)
+
 from . import io  # molpy-compatible I/O facade (read_lammps_data, …)
 from . import compute  # analysis subpackage — molrs.compute.{density,order,…}
 from . import signal
@@ -173,6 +209,21 @@ __all__ = [
     "ConformerStageReport",
     "MMFFTypifier",
     "ForceField",
+    "Style",
+    "AtomStyle",
+    "BondStyle",
+    "AngleStyle",
+    "DihedralStyle",
+    "ImproperStyle",
+    "PairStyle",
+    "Type",
+    "AtomType",
+    "BondType",
+    "AngleType",
+    "DihedralType",
+    "ImproperType",
+    "PairType",
+    "Parameters",
     "Potentials",
     "OptReport",
     "LBFGS",

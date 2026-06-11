@@ -16,7 +16,7 @@ fn compile_bond_then_eval_matches_analytical_energy() {
     // E = 0.5 * k0 * (r - r0)^2 ; r = 2.0, r0 = 1.5, k0 = 300 -> 0.5*300*0.25 = 37.5
     let mut ff = ForceField::new("test");
     ff.def_bondstyle("harmonic")
-        .def_type("CT-CT", &[("k0", 300.0), ("r0", 1.5)]);
+        .def_type("CT-CT", &[("k", 300.0), ("r0", 1.5)]);
 
     let mut frame = atoms_frame(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
     frame.insert(
@@ -35,7 +35,7 @@ fn compile_multi_style_sums_independent_contributions() {
     // A bond + a pair style compiled together; total energy is the sum.
     let mut ff = ForceField::new("multi");
     ff.def_bondstyle("harmonic")
-        .def_type("A-A", &[("k0", 100.0), ("r0", 1.0)]);
+        .def_type("A-A", &[("k", 100.0), ("r0", 1.0)]);
     ff.def_pairstyle("lj/cut", &[("cutoff", 10.0)])
         .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)]);
 
@@ -74,14 +74,17 @@ fn atom_style_is_skipped() {
 }
 
 #[test]
-fn compile_missing_topology_block_is_error() {
+fn compile_skips_absent_topology_block() {
+    // A style whose topology block is absent from the frame contributes nothing
+    // (the molecule has no interactions of that kind) — it is skipped, not an
+    // error. (A *present* block with an unknown type label still errors.)
     let mut ff = ForceField::new("test");
     ff.def_pairstyle("lj/cut", &[("cutoff", 10.0)])
         .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)]);
     // No "pairs" block in the frame.
     let frame = atoms_frame(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
-    let err = ff.to_potentials(&frame).expect_err("missing pairs block");
-    assert!(err.contains("pairs"), "{err}");
+    let pots = ff.to_potentials(&frame).unwrap();
+    assert_eq!(pots.len(), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +99,7 @@ fn parse_generic_xml_then_compile_and_eval() {
     let xml = r#"
         <ForceField name="demo">
           <BondStyle name="harmonic">
-            <Type name="CT-CT" k0="300.0" r0="1.5" />
+            <Type name="CT-CT" k="300.0" r0="1.5" />
           </BondStyle>
         </ForceField>
     "#;

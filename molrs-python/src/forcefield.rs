@@ -100,11 +100,36 @@ impl From<OptReport> for PyOptReport {
 /// >>> energy, forces = potentials.eval(coords)
 #[pyclass(name = "Potentials")]
 pub struct PyPotentials {
-    inner: Potentials,
+    inner: PotBacking,
+}
+
+/// A [`PyPotentials`] is either already compiled against a molecule's topology
+/// (the MMFF / pre-bound path) or *deferred*: it holds the force field and binds
+/// the topology lazily from the `Frame` passed to ``calc_energy``/``calc_forces``.
+/// Deferred is what ``ForceField.to_potentials()`` (no frame) returns, matching
+/// the molpy evaluation model where the frame enters at evaluation time.
+enum PotBacking {
+    Compiled(Potentials),
+    Deferred(ForceField),
+}
+
+impl PotBacking {
+    /// The compiled potentials, or an error if this set is still deferred and
+    /// no `Frame` has been supplied to bind its topology.
+    fn compiled(&self) -> PyResult<&Potentials> {
+        match self {
+            PotBacking::Compiled(p) => Ok(p),
+            PotBacking::Deferred(_) => Err(PyValueError::new_err(
+                "this Potentials is not bound to a molecule; \
+                 call calc_energy(frame)/calc_forces(frame) with a Frame, \
+                 or build it from a typifier",
+            )),
+        }
+    }
 }
 
 /// Force-field definition metadata exposed to Python as `molrs.ForceField`.
-#[pyclass(name = "ForceField")]
+#[pyclass(name = "ForceField", subclass)]
 pub struct PyForceField {
     pub(crate) inner: ForceField,
 }
@@ -126,87 +151,81 @@ fn as_pairs(owned: &[(String, f64)]) -> Vec<(&str, f64)> {
     owned.iter().map(|(k, v)| (k.as_str(), *v)).collect()
 }
 
+impl PyPotentials {
+    /// Evaluate energy + forces against either a [`PyFrame`] (binds topology and
+    /// reads coordinates from the frame's ``atoms`` block — the molpy model) or a
+    /// flat coordinate array (requires already-compiled potentials).
+    fn eval_any(&self, arg: &Bound<'_, PyAny>) -> PyResult<(f64, Vec<NpF>)> {
+        if let Ok(frame) = arg.extract::<PyRef<'_, PyFrame>>() {
+            let core = frame.clone_core_frame()?;
+            let coords = extract_coords(&core).map_err(PyValueError::new_err)?;
+            let ef = match &self.inner {
+                PotBacking::Compiled(p) => p.calc_energy_forces(&coords),
+                PotBacking::Deferred(ff) => ff
+                    .to_potentials(&core)
+                    .map_err(PyValueError::new_err)?
+                    .calc_energy_forces(&coords),
+            };
+            return Ok(ef);
+        }
+        let arr = arg.extract::<numpy::PyReadonlyArray1<'_, NpF>>()?;
+        let slice = arr.as_slice()?;
+        Ok(self.inner.compiled()?.calc_energy_forces(slice))
+    }
+}
+
 #[pymethods]
 impl PyPotentials {
-    /// Number of individual potential kernels in this compiled set.
-    ///
-    /// Returns
-    /// -------
-    /// int
+    /// Number of compiled potential kernels, or ``0`` while still deferred
+    /// (not yet bound to a molecule).
     fn __len__(&self) -> usize {
-        self.inner.len()
+        match &self.inner {
+            PotBacking::Compiled(p) => p.len(),
+            PotBacking::Deferred(_) => 0,
+        }
     }
 
-    /// Evaluate energy and forces for the given coordinates.
+    /// Evaluate energy and forces.
     ///
     /// Parameters
     /// ----------
-    /// coords : numpy.ndarray, shape (3*N,), dtype float
-    ///     Flat coordinate array ``[x0, y0, z0, x1, y1, z1, ...]``.
+    /// arg : Frame or numpy.ndarray
+    ///     A typed :class:`Frame` (topology + coordinates are taken from it), or
+    ///     a flat coordinate array ``[x0, y0, z0, ...]`` for already-compiled
+    ///     potentials.
     ///
     /// Returns
     /// -------
     /// tuple[float, numpy.ndarray]
-    ///     ``(energy, forces)`` where ``energy`` is a scalar in kcal/mol and
-    ///     ``forces`` is a flat array of the same shape as ``coords`` in
-    ///     kcal/(mol*angstrom).
-    ///
-    /// Raises
-    /// ------
-    /// ValueError
-    ///     If ``coords`` is not contiguous in memory.
-    ///
-    /// Examples
-    /// --------
-    /// >>> energy, forces = potentials.eval(coords)
-    /// >>> energy
-    /// -12.34
+    ///     ``(energy, forces)`` in kcal/mol and kcal/(mol*angstrom).
     fn calc_energy_forces<'py>(
         &self,
         py: Python<'py>,
-        coords: numpy::PyReadonlyArray1<'_, NpF>,
+        arg: &Bound<'_, PyAny>,
     ) -> PyResult<(f64, Bound<'py, PyArray1<NpF>>)> {
-        let slice = coords.as_slice()?;
-        let (energy, forces) = self.inner.calc_energy_forces(slice);
-        let forces_arr = forces.to_pyarray(py);
-        Ok((energy, forces_arr))
+        let (energy, forces) = self.eval_any(arg)?;
+        Ok((energy, forces.to_pyarray(py)))
     }
 
-    /// Evaluate energy only (no force computation).
-    ///
-    /// Parameters
-    /// ----------
-    /// coords : numpy.ndarray, shape (3*N,), dtype float
-    ///     Flat coordinate array.
-    ///
-    /// Returns
-    /// -------
-    /// float
-    ///     Energy in kcal/mol.
-    ///
-    /// Raises
-    /// ------
-    /// ValueError
-    ///     If ``coords`` is not contiguous in memory.
-    fn calc_energy(&self, coords: numpy::PyReadonlyArray1<'_, NpF>) -> PyResult<f64> {
-        let slice = coords.as_slice()?;
-        Ok(self.inner.calc_energy(slice))
+    /// Evaluate total energy (kcal/mol) against a :class:`Frame` or coordinates.
+    fn calc_energy(&self, arg: &Bound<'_, PyAny>) -> PyResult<f64> {
+        Ok(self.eval_any(arg)?.0)
     }
 
-    /// Compute forces (= -gradient) for the given flat coordinates.
-    ///
-    /// Returns a flat array of the same shape as ``coords`` (kcal/mol/angstrom).
+    /// Compute forces (= -gradient) against a :class:`Frame` or coordinates.
     fn calc_forces<'py>(
         &self,
         py: Python<'py>,
-        coords: numpy::PyReadonlyArray1<'_, NpF>,
+        arg: &Bound<'_, PyAny>,
     ) -> PyResult<Bound<'py, PyArray1<NpF>>> {
-        let slice = coords.as_slice()?;
-        Ok(self.inner.calc_forces(slice).to_pyarray(py))
+        Ok(self.eval_any(arg)?.1.to_pyarray(py))
     }
 
     fn __repr__(&self) -> String {
-        format!("Potentials(n_kernels={})", self.inner.len())
+        match &self.inner {
+            PotBacking::Compiled(p) => format!("Potentials(n_kernels={})", p.len()),
+            PotBacking::Deferred(_) => "Potentials(deferred)".to_string(),
+        }
     }
 }
 
@@ -270,7 +289,7 @@ impl PyLBFGS {
                         "coords has {n_elem} elements, not a multiple of 3 (expected (N, 3) or (3N,))"
                     )));
                 }
-                let report = LBFGS::new(&pots.inner, self.cfg)
+                let report = LBFGS::new(pots.inner.compiled()?, self.cfg)
                     .run(&mut flat)
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 let out: Bound<'py, PyArray2<NpF>> = Array2::from_shape_vec((n_elem / 3, 3), flat)
@@ -288,14 +307,14 @@ impl PyLBFGS {
                     )));
                 }
                 let (b, n) = (shape[0], shape[1]);
-                let expected = pots.inner.n_atoms();
+                let expected = pots.inner.compiled()?.n_atoms();
                 if expected != 0 && n != expected {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
                         "structure atom count N={n} does not match this Potentials' atom count {expected}"
                     )));
                 }
                 let mut flat: Vec<NpF> = arr.iter().copied().collect();
-                let reports = LBFGS::new(&pots.inner, self.cfg)
+                let reports = LBFGS::new(pots.inner.compiled()?, self.cfg)
                     .run_batch(&mut flat, n, b)
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
                 let out: Bound<'py, PyArray3<NpF>> = Array3::from_shape_vec((b, n, 3), flat)
@@ -419,7 +438,9 @@ impl PyMMFFTypifier {
             .inner
             .build(mol.core())
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        Ok(PyPotentials { inner: potentials })
+        Ok(PyPotentials {
+            inner: PotBacking::Compiled(potentials),
+        })
     }
 
     /// Return the underlying force-field definition.
@@ -522,7 +543,9 @@ pub fn build_mmff_potentials_py(mol: &PyAtomistic, variant: &str) -> PyResult<Py
     let mut pots = Potentials::new();
     pots.set_n_atoms(core.n_atoms());
     pots.push(Box::new(ff));
-    Ok(PyPotentials { inner: pots })
+    Ok(PyPotentials {
+        inner: PotBacking::Compiled(pots),
+    })
 }
 
 /// Read a force-field definition from an XML file.
@@ -539,8 +562,11 @@ impl PyForceField {
     /// Construct an empty force field. Populate it with the ``def_*style`` /
     /// ``def_*type`` builder methods, or load one with :func:`read_forcefield_xml`.
     #[new]
-    #[pyo3(signature = (name = "forcefield"))]
-    fn new(name: &str) -> Self {
+    #[pyo3(signature = (name = "forcefield", units = "real"))]
+    fn new(name: &str, units: &str) -> Self {
+        // ``units`` is carried by the Python ergonomic layer (``molrs.ForceField``),
+        // accepted here so subclasses can forward their ``(name, units)`` ctor.
+        let _ = units;
         Self {
             inner: ForceField::new(name),
         }
@@ -838,22 +864,122 @@ impl PyForceField {
             for (k, v) in params.iter() {
                 d.set_item(k, v)?;
             }
+            for (k, v) in params.iter_strings() {
+                d.set_item(k, v)?;
+            }
             out.append((name, d))?;
         }
         Ok(out)
     }
 
-    /// Compile this force field against a typed :class:`Frame` into
-    /// evaluable :class:`Potentials`.
+    // -- handle-view support (Style/Type live in the Python layer over these) --
+
+    /// Endpoint atom-type names of one type, e.g. ``["CT","CT"]`` for a bond.
+    /// ``None`` if no such type; ``[]`` for atom styles.
+    fn type_endpoints(
+        &self,
+        category: &str,
+        style: &str,
+        name: &str,
+    ) -> PyResult<Option<Vec<String>>> {
+        let s = self
+            .inner
+            .get_style(category, style)
+            .ok_or_else(|| PyValueError::new_err(format!("no {category} style named '{style}'")))?;
+        Ok(s.type_endpoints(name))
+    }
+
+    /// Set (or add) a single param on one type. Raises if the type is absent.
+    fn set_type_param(
+        &mut self,
+        category: &str,
+        style: &str,
+        name: &str,
+        key: &str,
+        value: f64,
+    ) -> PyResult<()> {
+        let s = self
+            .inner
+            .get_style_mut(category, style)
+            .ok_or_else(|| PyValueError::new_err(format!("no {category} style named '{style}'")))?;
+        if s.set_type_param(name, key, value) {
+            Ok(())
+        } else {
+            Err(PyValueError::new_err(format!(
+                "no {category} type named '{name}' in style '{style}'"
+            )))
+        }
+    }
+
+    /// Set (or add) a single **string** param on one type (e.g. ``element``).
+    /// Raises if the type is absent.
+    fn set_type_str_param(
+        &mut self,
+        category: &str,
+        style: &str,
+        name: &str,
+        key: &str,
+        value: &str,
+    ) -> PyResult<()> {
+        let s = self
+            .inner
+            .get_style_mut(category, style)
+            .ok_or_else(|| PyValueError::new_err(format!("no {category} style named '{style}'")))?;
+        if s.set_type_str_param(name, key, value) {
+            Ok(())
+        } else {
+            Err(PyValueError::new_err(format!(
+                "no {category} type named '{name}' in style '{style}'"
+            )))
+        }
+    }
+
+    /// Rename every type ``old`` -> ``new`` in ``(category, style)``; returns count.
+    fn rename_type(
+        &mut self,
+        category: &str,
+        style: &str,
+        old: &str,
+        new: &str,
+    ) -> PyResult<usize> {
+        let s = self
+            .inner
+            .get_style_mut(category, style)
+            .ok_or_else(|| PyValueError::new_err(format!("no {category} style named '{style}'")))?;
+        Ok(s.rename_type(old, new))
+    }
+
+    /// Remove every type ``name`` in ``(category, style)``; returns count.
+    fn remove_type(&mut self, category: &str, style: &str, name: &str) -> PyResult<usize> {
+        let s = self
+            .inner
+            .get_style_mut(category, style)
+            .ok_or_else(|| PyValueError::new_err(format!("no {category} style named '{style}'")))?;
+        Ok(s.remove_type(name))
+    }
+
+    /// Remove a whole style ``(category, name)``; returns whether one was removed.
+    fn remove_style(&mut self, category: &str, name: &str) -> bool {
+        self.inner.remove_style(category, name)
+    }
+
+    /// Build evaluable :class:`Potentials` from this force field.
     ///
-    /// The frame must carry the topology + ``type`` columns each style
-    /// resolves (``atoms``/``bonds``/``angles``/``dihedrals``/``impropers``/
-    /// ``pairs``), exactly as produced by a typifier or an external emitter.
+    /// Called with no argument, the result is *deferred*: it captures the force
+    /// field and binds a molecule's topology + coordinates later, from the
+    /// :class:`Frame` passed to ``calc_energy(frame)`` / ``calc_forces(frame)``
+    /// (the molpy evaluation model). Optionally pass a typed ``frame`` here to
+    /// bind eagerly.
+    ///
+    /// The frame (here or at eval) must carry the topology + ``type`` columns
+    /// each style resolves (``atoms``/``bonds``/``angles``/``dihedrals``/
+    /// ``impropers``/``pairs``), as produced by a typifier or external emitter.
     ///
     /// Parameters
     /// ----------
-    /// frame : Frame
-    ///     Typed molecular data.
+    /// frame : Frame, optional
+    ///     Typed molecular data to bind eagerly. If omitted, binding is deferred
+    ///     to evaluation time.
     ///
     /// Returns
     /// -------
@@ -862,15 +988,25 @@ impl PyForceField {
     /// Raises
     /// ------
     /// ValueError
-    ///     If a style has no registered kernel, a topology block is missing,
-    ///     or a type label is unknown.
-    fn to_potentials(&self, frame: &PyFrame) -> PyResult<PyPotentials> {
-        let core = frame.clone_core_frame()?;
-        let potentials = self
-            .inner
-            .to_potentials(&core)
-            .map_err(pyo3::exceptions::PyValueError::new_err)?;
-        Ok(PyPotentials { inner: potentials })
+    ///     If (when binding) a style has no registered kernel, a topology block
+    ///     is missing, or a type label is unknown.
+    #[pyo3(signature = (frame = None))]
+    fn to_potentials(&self, frame: Option<&PyFrame>) -> PyResult<PyPotentials> {
+        match frame {
+            None => Ok(PyPotentials {
+                inner: PotBacking::Deferred(self.inner.clone()),
+            }),
+            Some(frame) => {
+                let core = frame.clone_core_frame()?;
+                let potentials = self
+                    .inner
+                    .to_potentials(&core)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+                Ok(PyPotentials {
+                    inner: PotBacking::Compiled(potentials),
+                })
+            }
+        }
     }
 
     /// Project this force field onto the types a typed :class:`Frame` uses.

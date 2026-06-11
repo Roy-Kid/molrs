@@ -24,11 +24,11 @@ _FF_XML = """<ForceField name="fixture">
   <Type name="C" epsilon="0.3" sigma="4.0"/>
  </PairStyle>
  <BondStyle name="harmonic">
-  <Type name="A-B" k0="300" r0="1.5"/>
-  <Type name="A-C" k0="320" r0="1.6"/>
+  <Type name="A-B" k="300" r0="1.5"/>
+  <Type name="A-C" k="320" r0="1.6"/>
  </BondStyle>
  <AngleStyle name="harmonic">
-  <Type name="A-B-A" k0="40" theta0="1.9"/>
+  <Type name="A-B-A" k="40" theta0="1.9"/>
  </AngleStyle>
 </ForceField>"""
 

@@ -252,6 +252,23 @@ impl ForceField {
     pub fn to_potentials(&self, frame: &Frame) -> Result<Potentials, String> {
         let mut pots = Potentials::new();
         for style in self.styles() {
+            // A style whose topology block is entirely absent contributes nothing
+            // (the molecule simply has no bonds/angles/… of that kind) — skip it,
+            // rather than error. A *present* block with an unknown type label is a
+            // real error and still propagates from the kernel constructor.
+            let block = match style.category() {
+                "bond" => Some("bonds"),
+                "angle" => Some("angles"),
+                "dihedral" => Some("dihedrals"),
+                "improper" => Some("impropers"),
+                "pair" => Some("pairs"),
+                _ => None,
+            };
+            if let Some(b) = block {
+                if frame.get(b).is_none() {
+                    continue;
+                }
+            }
             if let Some(pot) = style.to_potential(frame)? {
                 pots.push(pot);
             }
@@ -300,6 +317,22 @@ mod tests {
         frame
     }
 
+    fn make_bond_frame() -> Frame {
+        let mut frame = make_atoms_only_frame();
+        let mut bonds = Block::new();
+        bonds
+            .insert("atomi", Array1::from_vec(vec![0 as U]).into_dyn())
+            .unwrap();
+        bonds
+            .insert("atomj", Array1::from_vec(vec![1 as U]).into_dyn())
+            .unwrap();
+        bonds
+            .insert("type", Array1::from_vec(vec!["A-A".to_string()]).into_dyn())
+            .unwrap();
+        frame.insert("bonds", bonds);
+        frame
+    }
+
     fn make_lj_frame() -> Frame {
         let mut frame = make_atoms_only_frame();
 
@@ -341,7 +374,7 @@ mod tests {
         let mut ff = ForceField::new("test");
         ff.def_bondstyle("nonexistent")
             .def_type("A-A", &[("k", 1.0)]);
-        let frame = make_lj_frame();
+        let frame = make_bond_frame();
         let err = ff.to_potentials(&frame).unwrap_err();
         assert!(err.contains("no kernel"), "{err}");
     }
@@ -381,7 +414,7 @@ mod tests {
     fn test_compile_requires_types() {
         let mut ff = ForceField::new("test");
         ff.def_bondstyle("harmonic");
-        let frame = make_atoms_only_frame();
+        let frame = make_bond_frame();
         let err = ff
             .to_potentials(&frame)
             .expect_err("expected compile to fail");
@@ -435,13 +468,17 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_missing_topology_is_error() {
+    fn test_compile_skips_absent_topology() {
+        // A style whose topology block is absent from the frame contributes
+        // nothing (no rows of that kind) — skipped, not an error.
         let mut ff = ForceField::new("test");
         ff.def_pairstyle("lj/cut", &[("cutoff", 10.0)])
             .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)]);
 
         let frame = make_atoms_only_frame();
-        let err = ff.to_potentials(&frame).unwrap_err();
-        assert!(err.contains("pairs"));
+        let pots = ff.to_potentials(&frame).unwrap();
+        assert_eq!(pots.len(), 0);
+        let coords = extract_coords(&frame).unwrap();
+        assert!(pots.calc_energy(&coords).abs() < 1e-9);
     }
 }

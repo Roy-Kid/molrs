@@ -18,9 +18,15 @@ use molrs::frame::Frame;
 // ---------------------------------------------------------------------------
 
 /// Key-value parameter bag for type definitions.
+///
+/// Holds numeric params (`k`, `r0`, the numeric type `id`, …) and, separately,
+/// string params (`element`, or any string metadata carried by convention as a
+/// keyword param). Energy kernels read only the numeric side; the string side
+/// preserves I/O metadata across the boundary.
 #[derive(Debug, Clone, Default)]
 pub struct Params {
     inner: HashMap<String, f64>,
+    strings: HashMap<String, String>,
 }
 
 impl Params {
@@ -33,7 +39,10 @@ impl Params {
         for &(k, v) in pairs {
             inner.insert(k.to_owned(), v);
         }
-        Self { inner }
+        Self {
+            inner,
+            strings: HashMap::new(),
+        }
     }
 
     pub fn get(&self, key: &str) -> Option<f64> {
@@ -50,6 +59,20 @@ impl Params {
 
     pub fn inner(&self) -> &HashMap<String, f64> {
         &self.inner
+    }
+
+    // -- string params (element, and other string metadata by convention) --
+
+    pub fn get_str(&self, key: &str) -> Option<&str> {
+        self.strings.get(key).map(|s| s.as_str())
+    }
+
+    pub fn set_str(&mut self, key: &str, value: &str) {
+        self.strings.insert(key.to_owned(), value.to_owned());
+    }
+
+    pub fn iter_strings(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
+        self.strings.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 }
 
@@ -423,6 +446,137 @@ impl Style {
     }
 }
 
+/// In-place mutators backing the Python handle-view layer (Style/Type views read
+/// through [`collect_type_params`](StyleDefs::collect_type_params) and write
+/// through these). Each operates on the type identified by its dash-form name.
+impl Style {
+    /// Endpoint atom-type names of the type named `name` (e.g. `["CT","CT"]`),
+    /// or `None` if no such type. Atom/kspace styles return an empty vec.
+    pub fn type_endpoints(&self, name: &str) -> Option<Vec<String>> {
+        match &self.defs {
+            StyleDefs::Atom(v) => v.iter().find(|t| t.name == name).map(|_| Vec::new()),
+            StyleDefs::Bond(v) => v
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| vec![t.itom.clone(), t.jtom.clone()]),
+            StyleDefs::Angle(v) => v
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| vec![t.itom.clone(), t.jtom.clone(), t.ktom.clone()]),
+            StyleDefs::Dihedral(v) => v.iter().find(|t| t.name == name).map(|t| {
+                vec![
+                    t.itom.clone(),
+                    t.jtom.clone(),
+                    t.ktom.clone(),
+                    t.ltom.clone(),
+                ]
+            }),
+            StyleDefs::Improper(v) => v.iter().find(|t| t.name == name).map(|t| {
+                vec![
+                    t.itom.clone(),
+                    t.jtom.clone(),
+                    t.ktom.clone(),
+                    t.ltom.clone(),
+                ]
+            }),
+            StyleDefs::Pair(v) => v
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| vec![t.itom.clone(), t.jtom.clone()]),
+            StyleDefs::KSpace => None,
+        }
+    }
+
+    /// Set (or add) a single param on the type named `name`. Returns `false` if
+    /// no such type exists.
+    pub fn set_type_param(&mut self, name: &str, key: &str, value: f64) -> bool {
+        macro_rules! set_on {
+            ($v:expr) => {{
+                if let Some(t) = $v.iter_mut().find(|t| t.name == name) {
+                    t.params.set(key, value);
+                    return true;
+                }
+            }};
+        }
+        match &mut self.defs {
+            StyleDefs::Atom(v) => set_on!(v),
+            StyleDefs::Bond(v) => set_on!(v),
+            StyleDefs::Angle(v) => set_on!(v),
+            StyleDefs::Dihedral(v) => set_on!(v),
+            StyleDefs::Improper(v) => set_on!(v),
+            StyleDefs::Pair(v) => set_on!(v),
+            StyleDefs::KSpace => {}
+        }
+        false
+    }
+
+    /// Set (or add) a single string param on the type named `name`. Returns
+    /// `false` if no such type exists.
+    pub fn set_type_str_param(&mut self, name: &str, key: &str, value: &str) -> bool {
+        macro_rules! set_on {
+            ($v:expr) => {{
+                if let Some(t) = $v.iter_mut().find(|t| t.name == name) {
+                    t.params.set_str(key, value);
+                    return true;
+                }
+            }};
+        }
+        match &mut self.defs {
+            StyleDefs::Atom(v) => set_on!(v),
+            StyleDefs::Bond(v) => set_on!(v),
+            StyleDefs::Angle(v) => set_on!(v),
+            StyleDefs::Dihedral(v) => set_on!(v),
+            StyleDefs::Improper(v) => set_on!(v),
+            StyleDefs::Pair(v) => set_on!(v),
+            StyleDefs::KSpace => {}
+        }
+        false
+    }
+
+    /// Rename every type named `old` to `new`. Returns the count renamed.
+    pub fn rename_type(&mut self, old: &str, new: &str) -> usize {
+        macro_rules! rename_in {
+            ($v:expr) => {{
+                let mut n = 0;
+                for t in $v.iter_mut().filter(|t| t.name == old) {
+                    t.name = new.to_owned();
+                    n += 1;
+                }
+                n
+            }};
+        }
+        match &mut self.defs {
+            StyleDefs::Atom(v) => rename_in!(v),
+            StyleDefs::Bond(v) => rename_in!(v),
+            StyleDefs::Angle(v) => rename_in!(v),
+            StyleDefs::Dihedral(v) => rename_in!(v),
+            StyleDefs::Improper(v) => rename_in!(v),
+            StyleDefs::Pair(v) => rename_in!(v),
+            StyleDefs::KSpace => 0,
+        }
+    }
+
+    /// Remove every type named `name`. Returns the count removed.
+    pub fn remove_type(&mut self, name: &str) -> usize {
+        macro_rules! remove_in {
+            ($v:expr) => {{
+                let before = $v.len();
+                $v.retain(|t| t.name != name);
+                before - $v.len()
+            }};
+        }
+        match &mut self.defs {
+            StyleDefs::Atom(v) => remove_in!(v),
+            StyleDefs::Bond(v) => remove_in!(v),
+            StyleDefs::Angle(v) => remove_in!(v),
+            StyleDefs::Dihedral(v) => remove_in!(v),
+            StyleDefs::Improper(v) => remove_in!(v),
+            StyleDefs::Pair(v) => remove_in!(v),
+            StyleDefs::KSpace => 0,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ForceField
 // ---------------------------------------------------------------------------
@@ -536,6 +690,22 @@ impl ForceField {
         self.styles
             .iter()
             .find(|s| s.category() == category && s.name == name)
+    }
+
+    /// Mutable style lookup, backing the Python handle-view writes.
+    pub fn get_style_mut(&mut self, category: &str, name: &str) -> Option<&mut Style> {
+        self.styles
+            .iter_mut()
+            .find(|s| s.category() == category && s.name == name)
+    }
+
+    /// Remove the style identified by `(category, name)`. Returns whether one was
+    /// removed.
+    pub fn remove_style(&mut self, category: &str, name: &str) -> bool {
+        let before = self.styles.len();
+        self.styles
+            .retain(|s| !(s.category() == category && s.name == name));
+        before != self.styles.len()
     }
 
     pub fn get_styles(&self, category: &str) -> Vec<&Style> {

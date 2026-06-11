@@ -102,8 +102,8 @@ pub fn angle_harmonic_ctor(
             .get(label.as_str())
             .ok_or_else(|| format!("AngleHarmonic: unknown angle type '{}'", label))?;
         let k0 = params
-            .get("k0")
-            .ok_or_else(|| format!("AngleHarmonic type '{}': missing 'k0'", label))?
+            .get("k")
+            .ok_or_else(|| format!("AngleHarmonic type '{}': missing 'k'", label))?
             as F;
         let theta0_rad = params
             .get("theta0")

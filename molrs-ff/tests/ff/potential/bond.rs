@@ -65,7 +65,7 @@ fn forces_match_finite_difference() {
 fn compile_path_resolves_type_labels() {
     let mut ff = ForceField::new("bond-only");
     ff.def_bondstyle("harmonic")
-        .def_type("CT-CT", &[("k0", K0), ("r0", R0)]);
+        .def_type("CT-CT", &[("k", K0), ("r0", R0)]);
     let mut frame = atoms_frame(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
     frame.insert(
         "bonds",
@@ -80,7 +80,7 @@ fn compile_path_resolves_type_labels() {
 fn compile_unknown_bond_label_errors() {
     let mut ff = ForceField::new("bond-only");
     ff.def_bondstyle("harmonic")
-        .def_type("CT-CT", &[("k0", K0), ("r0", R0)]);
+        .def_type("CT-CT", &[("k", K0), ("r0", R0)]);
     let mut frame = atoms_frame(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
     frame.insert(
         "bonds",

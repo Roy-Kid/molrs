@@ -66,6 +66,23 @@ impl KernelRegistry {
         r.register("angle", "harmonic", angle::harmonic::angle_harmonic_ctor);
         r.register("angle", "class2", angle::class2::angle_class2_ctor);
         r.register("dihedral", "opls", dihedral::opls::dihedral_opls_ctor);
+        r.register("dihedral", "charmm", dihedral::charmm::dihedral_charmm_ctor);
+        r.register(
+            "dihedral",
+            "multi/harmonic",
+            dihedral::multi_harmonic::dihedral_multi_harmonic_ctor,
+        );
+        r.register(
+            "dihedral",
+            "periodic",
+            dihedral::periodic::dihedral_periodic_ctor,
+        );
+        r.register(
+            "dihedral",
+            "fourier",
+            dihedral::periodic::dihedral_periodic_ctor,
+        );
+        r.register("dihedral", "class2", dihedral::class2::dihedral_class2_ctor);
         // pair / nonbonded
         r.register("pair", "lj/cut", pair::lj_cut::pair_lj_cut_ctor);
         r.register("pair", "lj/class2", pair::lj_class2::pair_lj_class2_ctor);
@@ -88,6 +105,17 @@ impl KernelRegistry {
             dihedral::mmff::mmff_torsion_ctor,
         );
         r.register("improper", "mmff_oop", improper::mmff::mmff_oop_ctor);
+        r.register(
+            "improper",
+            "harmonic",
+            improper::harmonic::improper_harmonic_ctor,
+        );
+        r.register("improper", "cvff", improper::cvff::improper_cvff_ctor);
+        r.register(
+            "improper",
+            "periodic",
+            improper::periodic::improper_periodic_ctor,
+        );
         r.register("pair", "mmff_vdw", pair::mmff::mmff_vdw_ctor);
         r.register("pair", "mmff_ele", pair::mmff::mmff_ele_ctor);
         // k-space

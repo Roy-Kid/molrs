@@ -1,0 +1,175 @@
+//! Harmonic improper (LAMMPS `improper_style harmonic`):
+//!
+//! E(χ) = K · (χ − χ₀)²
+//!
+//! Following LAMMPS, the improper angle χ is the **unsigned** dihedral of the
+//! quadruple I-J-K-L: χ = |φ| ∈ [0, π], where φ = atan2(…) is the signed
+//! dihedral. Hence dχ/dφ = sign(φ), so dE/dφ = 2K(χ − χ₀)·sign(φ), projected
+//! onto Cartesian forces by the shared dihedral routine. `χ₀` is the
+//! equilibrium angle in degrees (0 for a planar centre).
+
+use std::collections::HashMap;
+
+use crate::forcefield::Params;
+use crate::potential::Potential;
+use crate::potential::geometry::{accumulate_dihedral_forces, compute_dihedral, validate_coords};
+use molrs::frame::Frame;
+use molrs::types::F;
+
+/// Harmonic improper with pre-resolved flat arrays.
+pub struct ImproperHarmonic {
+    atom_i: Vec<usize>,
+    atom_j: Vec<usize>,
+    atom_k: Vec<usize>,
+    atom_l: Vec<usize>,
+    k: Vec<F>,
+    /// equilibrium angle in radians
+    chi0: Vec<F>,
+}
+
+impl Potential for ImproperHarmonic {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
+        let _n = validate_coords(coords);
+        let mut energy: F = 0.0;
+        let mut forces = vec![0.0 as F; coords.len()];
+
+        for idx in 0..self.atom_i.len() {
+            let (i, j, k, l) = (
+                self.atom_i[idx],
+                self.atom_j[idx],
+                self.atom_k[idx],
+                self.atom_l[idx],
+            );
+            let phi = compute_dihedral(coords, i, j, k, l);
+            let chi = phi.abs();
+            let (ki, c0) = (self.k[idx], self.chi0[idx]);
+            let dchi = chi - c0;
+            energy += ki * dchi * dchi;
+            // dE/dφ = 2K(χ − χ₀)·sign(φ). sign(0) → 0 (stationary, planar).
+            let sign = if phi > 0.0 {
+                1.0
+            } else if phi < 0.0 {
+                -1.0
+            } else {
+                0.0
+            };
+            let de_dphi = 2.0 * ki * dchi * sign;
+            accumulate_dihedral_forces(coords, i, j, k, l, de_dphi, &mut forces);
+        }
+        (energy, forces)
+    }
+}
+
+/// Construct an [`ImproperHarmonic`] from per-type params (`k`, `chi0` degrees)
+/// and a Frame's `"impropers"` block (`atomi/atomj/atomk/atoml/type`).
+pub fn improper_harmonic_ctor(
+    _sp: &Params,
+    tp: &[(&str, &Params)],
+    frame: &Frame,
+) -> Result<Box<dyn Potential>, String> {
+    let type_map: HashMap<&str, &Params> = tp.iter().copied().collect();
+    let block = frame
+        .get("impropers")
+        .ok_or("improper_harmonic: missing \"impropers\" block")?;
+    let ic = block.get_uint("atomi").ok_or("missing atomi")?;
+    let jc = block.get_uint("atomj").ok_or("missing atomj")?;
+    let kc = block.get_uint("atomk").ok_or("missing atomk")?;
+    let lc = block.get_uint("atoml").ok_or("missing atoml")?;
+    let tc = block.get_string("type").ok_or("missing type")?;
+
+    let n = ic.len();
+    let (mut ai, mut aj, mut ak, mut al) = (
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+    );
+    let (mut kk, mut cc) = (Vec::with_capacity(n), Vec::with_capacity(n));
+
+    for idx in 0..n {
+        let p = type_map
+            .get(tc[idx].as_str())
+            .ok_or_else(|| format!("improper_harmonic: unknown type '{}'", tc[idx]))?;
+        ai.push(ic[idx] as usize);
+        aj.push(jc[idx] as usize);
+        ak.push(kc[idx] as usize);
+        al.push(lc[idx] as usize);
+        kk.push(p.get("k").ok_or("improper_harmonic: missing k")? as F);
+        cc.push((p.get("chi0").unwrap_or(0.0) as F).to_radians());
+    }
+    Ok(Box::new(ImproperHarmonic {
+        atom_i: ai,
+        atom_j: aj,
+        atom_k: ak,
+        atom_l: al,
+        k: kk,
+        chi0: cc,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quad(phi: F) -> Vec<F> {
+        let (s, c) = phi.sin_cos();
+        vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, c, s]
+    }
+
+    fn single(k: F, chi0_deg: F) -> ImproperHarmonic {
+        ImproperHarmonic {
+            atom_i: vec![0],
+            atom_j: vec![1],
+            atom_k: vec![2],
+            atom_l: vec![3],
+            k: vec![k],
+            chi0: vec![chi0_deg.to_radians()],
+        }
+    }
+
+    #[test]
+    fn energy_minimum_at_chi0() {
+        // χ₀ = 60°, geometry at φ = 60° → E = 0.
+        let p = single(3.0, 60.0);
+        let e = p.calc_energy_forces(&quad(60.0_f64.to_radians())).0;
+        assert!(e.abs() < 1e-9, "E at χ₀ got {e}");
+        // φ = 90° → E = K(30°)² in radians.
+        let e2 = p.calc_energy_forces(&quad(90.0_f64.to_radians())).0;
+        let want = 3.0 * (30.0_f64.to_radians()).powi(2);
+        assert!((e2 - want).abs() < 1e-9, "E got {e2} want {want}");
+    }
+
+    #[test]
+    fn numerical_gradient() {
+        // χ₀ chosen so φ stays well away from 0 and ±π under perturbation.
+        let pot = single(5.0, 20.0);
+        let coords: Vec<F> = vec![0.1, 1.0, 0.2, 0.0, 0.0, 0.0, 1.0, 0.0, -0.1, 1.2, -0.8, 0.5];
+        let (_, forces) = pot.calc_energy_forces(&coords);
+        let h = 1e-6;
+        for d in 0..coords.len() {
+            let mut cp = coords.clone();
+            let mut cm = coords.clone();
+            cp[d] += h;
+            cm[d] -= h;
+            let ep = pot.calc_energy_forces(&cp).0;
+            let em = pot.calc_energy_forces(&cm).0;
+            let fd = -(ep - em) / (2.0 * h);
+            assert!(
+                (forces[d] - fd).abs() < 1e-5,
+                "comp {d}: analytic {} vs fd {fd}",
+                forces[d]
+            );
+        }
+    }
+
+    #[test]
+    fn newtons_third_law() {
+        let pot = single(5.0, 20.0);
+        let coords: Vec<F> = vec![0.1, 1.0, 0.2, 0.0, 0.0, 0.0, 1.0, 0.0, -0.1, 1.2, -0.8, 0.5];
+        let (_, f) = pot.calc_energy_forces(&coords);
+        for dim in 0..3 {
+            let s: F = (0..4).map(|a| f[a * 3 + dim]).sum();
+            assert!(s.abs() < 1e-9, "dim {dim} force sum {s}");
+        }
+    }
+}

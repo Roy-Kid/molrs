@@ -16,9 +16,9 @@ use molrs_ff::{ForceField, LBFGS, LbfgsConfig};
 fn opls_chain_ff() -> ForceField {
     let mut ff = ForceField::new("opls-demo");
     ff.def_bondstyle("harmonic")
-        .def_type("C-C", &[("k0", 300.0), ("r0", 1.5)]);
+        .def_type("C-C", &[("k", 300.0), ("r0", 1.5)]);
     ff.def_anglestyle("harmonic")
-        .def_type("C-C-C", &[("k0", 60.0), ("theta0", 1.911)]);
+        .def_type("C-C-C", &[("k", 60.0), ("theta0", 1.911)]);
     ff.def_dihedralstyle("opls").def_type(
         "C-C-C-C",
         &[("f1", 1.3), ("f2", -0.5), ("f3", 0.4), ("f4", 0.1)],

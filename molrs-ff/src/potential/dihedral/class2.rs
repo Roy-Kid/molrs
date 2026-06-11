@@ -1,0 +1,169 @@
+//! Class2 (COMPASS / PCFF) proper dihedral — core torsion term:
+//!
+//! E(φ) = Σ_{n=1..3} K_n · [1 − cos(n·φ − φ_n)]
+//!
+//! `K_n` are force constants (kcal/mol) and `φ_n` the per-term phases in
+//! degrees. This kernel covers the *core* three-term cosine expansion that the
+//! molpy `class2` dihedral data model carries (`k1`,`phi1`,…,`k3`,`phi3`). The
+//! optional class2 cross terms (mbt / ebt / at / aat / bb13), which are emitted
+//! as separate LAMMPS coeff lines and not part of this style's per-type params,
+//! are out of scope here.
+
+use std::collections::HashMap;
+
+use crate::forcefield::Params;
+use crate::potential::Potential;
+use crate::potential::geometry::{accumulate_dihedral_forces, compute_dihedral, validate_coords};
+use molrs::frame::Frame;
+use molrs::types::F;
+
+/// Class2 proper dihedral (core 3-term cosine) with pre-resolved flat arrays.
+pub struct DihedralClass2 {
+    atom_i: Vec<usize>,
+    atom_j: Vec<usize>,
+    atom_k: Vec<usize>,
+    atom_l: Vec<usize>,
+    /// (K_n, φ_n radians) for n = 1..3 per dihedral instance.
+    terms: Vec<[(F, F); 3]>,
+}
+
+impl Potential for DihedralClass2 {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
+        let _n = validate_coords(coords);
+        let mut energy: F = 0.0;
+        let mut forces = vec![0.0 as F; coords.len()];
+
+        for idx in 0..self.atom_i.len() {
+            let (i, j, k, l) = (
+                self.atom_i[idx],
+                self.atom_j[idx],
+                self.atom_k[idx],
+                self.atom_l[idx],
+            );
+            let phi = compute_dihedral(coords, i, j, k, l);
+            let mut de_dphi: F = 0.0;
+            for (m, &(kn, pn)) in self.terms[idx].iter().enumerate() {
+                let n = (m + 1) as F;
+                let arg = n * phi - pn;
+                energy += kn * (1.0 - arg.cos());
+                // dE/dφ = K_n·n·sin(n·φ − φ_n)
+                de_dphi += kn * n * arg.sin();
+            }
+            accumulate_dihedral_forces(coords, i, j, k, l, de_dphi, &mut forces);
+        }
+        (energy, forces)
+    }
+}
+
+/// Construct a [`DihedralClass2`] from per-type params (`k1`,`phi1`,…,`k3`,
+/// `phi3`) and a Frame's `"dihedrals"` block.
+pub fn dihedral_class2_ctor(
+    _sp: &Params,
+    tp: &[(&str, &Params)],
+    frame: &Frame,
+) -> Result<Box<dyn Potential>, String> {
+    let type_map: HashMap<&str, &Params> = tp.iter().copied().collect();
+    let block = frame
+        .get("dihedrals")
+        .ok_or("dihedral_class2: missing \"dihedrals\" block")?;
+    let ic = block.get_uint("atomi").ok_or("missing atomi")?;
+    let jc = block.get_uint("atomj").ok_or("missing atomj")?;
+    let kc = block.get_uint("atomk").ok_or("missing atomk")?;
+    let lc = block.get_uint("atoml").ok_or("missing atoml")?;
+    let tc = block.get_string("type").ok_or("missing type")?;
+
+    let n = ic.len();
+    let (mut ai, mut aj, mut ak, mut al, mut terms) = (
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+    );
+
+    for idx in 0..n {
+        let p = type_map
+            .get(tc[idx].as_str())
+            .ok_or_else(|| format!("dihedral_class2: unknown type '{}'", tc[idx]))?;
+        ai.push(ic[idx] as usize);
+        aj.push(jc[idx] as usize);
+        ak.push(kc[idx] as usize);
+        al.push(lc[idx] as usize);
+        let mut t = [(0.0 as F, 0.0 as F); 3];
+        for (m, slot) in t.iter_mut().enumerate() {
+            let kn = p.get(&format!("k{}", m + 1)).unwrap_or(0.0) as F;
+            let pn = (p.get(&format!("phi{}", m + 1)).unwrap_or(0.0) as F).to_radians();
+            *slot = (kn, pn);
+        }
+        terms.push(t);
+    }
+    Ok(Box::new(DihedralClass2 {
+        atom_i: ai,
+        atom_j: aj,
+        atom_k: ak,
+        atom_l: al,
+        terms,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quad(phi: F) -> Vec<F> {
+        let (s, c) = phi.sin_cos();
+        vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, c, s]
+    }
+
+    fn single(terms: [(F, F); 3]) -> DihedralClass2 {
+        DihedralClass2 {
+            atom_i: vec![0],
+            atom_j: vec![1],
+            atom_k: vec![2],
+            atom_l: vec![3],
+            terms: vec![terms],
+        }
+    }
+
+    #[test]
+    fn energy_phase() {
+        // Single term K1[1−cos(φ−φ1)], φ1=0: E(0)=0, E(π)=2K1.
+        let t = [(1.5, 0.0), (0.0, 0.0), (0.0, 0.0)];
+        assert!(single(t).calc_energy_forces(&quad(0.0)).0.abs() < 1e-9);
+        let epi = single(t).calc_energy_forces(&quad(std::f64::consts::PI)).0;
+        assert!((epi - 3.0).abs() < 1e-9, "E(pi) got {epi}");
+    }
+
+    #[test]
+    fn numerical_gradient() {
+        let pot = single([(1.3, 0.0), (-0.7, std::f64::consts::PI), (0.4, 0.0)]);
+        let coords: Vec<F> = vec![0.1, 1.0, 0.2, 0.0, 0.0, 0.0, 1.0, 0.0, -0.1, 1.2, -0.8, 0.5];
+        let (_, forces) = pot.calc_energy_forces(&coords);
+        let h = 1e-6;
+        for d in 0..coords.len() {
+            let mut cp = coords.clone();
+            let mut cm = coords.clone();
+            cp[d] += h;
+            cm[d] -= h;
+            let ep = pot.calc_energy_forces(&cp).0;
+            let em = pot.calc_energy_forces(&cm).0;
+            let fd = -(ep - em) / (2.0 * h);
+            assert!(
+                (forces[d] - fd).abs() < 1e-5,
+                "comp {d}: analytic {} vs fd {fd}",
+                forces[d]
+            );
+        }
+    }
+
+    #[test]
+    fn newtons_third_law() {
+        let pot = single([(1.0, 0.0), (0.5, 1.0), (0.3, 0.5)]);
+        let coords: Vec<F> = vec![0.1, 1.0, 0.2, 0.0, 0.0, 0.0, 1.0, 0.0, -0.1, 1.2, -0.8, 0.5];
+        let (_, f) = pot.calc_energy_forces(&coords);
+        for dim in 0..3 {
+            let s: F = (0..4).map(|a| f[a * 3 + dim]).sum();
+            assert!(s.abs() < 1e-9, "dim {dim} force sum {s}");
+        }
+    }
+}

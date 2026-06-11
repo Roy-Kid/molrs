@@ -104,8 +104,8 @@ pub fn bond_harmonic_ctor(
             .get(label.as_str())
             .ok_or_else(|| format!("BondHarmonic: unknown bond type '{}'", label))?;
         let k0 = params
-            .get("k0")
-            .ok_or_else(|| format!("BondHarmonic type '{}': missing 'k0'", label))?
+            .get("k")
+            .ok_or_else(|| format!("BondHarmonic type '{}': missing 'k'", label))?
             as F;
         let r0 = params
             .get("r0")
@@ -168,7 +168,7 @@ mod tests {
     fn test_forcefield_compile_integration() {
         let mut ff = ForceField::new("test");
         ff.def_bondstyle("harmonic")
-            .def_type("CT-CT", &[("k0", 300.0), ("r0", 1.5)]);
+            .def_type("CT-CT", &[("k", 300.0), ("r0", 1.5)]);
 
         let mut frame = Frame::new();
         frame.insert("atoms", make_atoms(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]));

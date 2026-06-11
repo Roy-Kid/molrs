@@ -25,11 +25,11 @@ def test_empty_forcefield_constructs():
 
 def test_def_bondtype_creates_style_and_type():
     ff = molrs.ForceField("bond-only")
-    ff.def_bondtype("harmonic", "CT", "CT", {"k0": 300.0, "r0": 1.5})
+    ff.def_bondtype("harmonic", "CT", "CT", {"k": 300.0, "r0": 1.5})
     assert ff.style_names() == ["bond:harmonic"]
     (name, params), = ff.types("bond", "harmonic")
     assert name == "CT-CT"
-    assert params == {"k0": 300.0, "r0": 1.5}
+    assert params == {"k": 300.0, "r0": 1.5}
 
 
 def test_def_pairstyle_carries_style_level_params():
@@ -44,8 +44,8 @@ def test_def_pairstyle_carries_style_level_params():
 
 def test_def_style_is_idempotent():
     ff = molrs.ForceField("dup")
-    ff.def_bondtype("harmonic", "A", "B", {"k0": 1.0, "r0": 1.0})
-    ff.def_bondtype("harmonic", "A", "C", {"k0": 2.0, "r0": 1.1})
+    ff.def_bondtype("harmonic", "A", "B", {"k": 1.0, "r0": 1.0})
+    ff.def_bondtype("harmonic", "A", "C", {"k": 2.0, "r0": 1.1})
     # one style, two types
     assert ff.style_names() == ["bond:harmonic"]
     assert len(ff.types("bond", "harmonic")) == 2
@@ -53,8 +53,8 @@ def test_def_style_is_idempotent():
 
 def test_unified_def_type_matches_typed_methods():
     ff = molrs.ForceField("unified")
-    ff.def_type("bond", "harmonic", "CT-CT", {"k0": 300.0, "r0": 1.5})
-    ff.def_type("angle", "harmonic", "CT-CT-CT", {"k0": 40.0, "theta0": 1.9})
+    ff.def_type("bond", "harmonic", "CT-CT", {"k": 300.0, "r0": 1.5})
+    ff.def_type("angle", "harmonic", "CT-CT-CT", {"k": 40.0, "theta0": 1.9})
     assert set(ff.style_names()) == {"bond:harmonic", "angle:harmonic"}
     assert ff.types("angle", "harmonic")[0][0] == "CT-CT-CT"
 
@@ -66,7 +66,7 @@ def test_unified_def_type_matches_typed_methods():
 def test_def_type_arity_raises_not_panics(category, name):
     ff = molrs.ForceField("guard")
     with pytest.raises(ValueError):
-        ff.def_type(category, "s", name, {"k0": 1.0})
+        ff.def_type(category, "s", name, {"k": 1.0})
 
 
 def test_types_on_missing_style_raises():
@@ -78,7 +78,7 @@ def test_types_on_missing_style_raises():
 def test_builder_compiles_and_evaluates():
     """Built FF -> to_potentials -> calc_energy gives the closed-form value."""
     ff = molrs.ForceField("bond-only")
-    ff.def_bondtype("harmonic", "CT", "CT", {"k0": 300.0, "r0": 1.5})
+    ff.def_bondtype("harmonic", "CT", "CT", {"k": 300.0, "r0": 1.5})
 
     frame = molrs.Frame()
     atoms = molrs.Block()
