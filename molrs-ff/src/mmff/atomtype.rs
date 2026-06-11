@@ -351,11 +351,10 @@ fn aliphatic_heavy_type(topo: &Topo, i: usize) -> u8 {
                         return 54; // N+=C/N+=N
                     }
                 }
-                if tbo >= 3 {
-                    if let Some(t) = nitrogen_3nbr_deloc_type(topo, i, &mut is_nso2_or_nso3_or_ncn)
-                    {
-                        return t;
-                    }
+                if tbo >= 3
+                    && let Some(t) = nitrogen_3nbr_deloc_type(topo, i, &mut is_nso2_or_nso3_or_ncn)
+                {
+                    return t;
                 }
             }
             if td == 2 {

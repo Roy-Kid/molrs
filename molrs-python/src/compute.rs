@@ -21,7 +21,6 @@
 
 use crate::frame::PyFrame;
 use crate::helpers::NpF;
-use crate::linkedcell::PyNeighborList;
 
 use molrs::spatial::neighbors::NeighborList;
 use molrs::store::frame::Frame as CoreFrame;
@@ -36,30 +35,7 @@ use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayDyn, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-pub(crate) fn py_value_err<E: std::fmt::Display>(e: E) -> PyErr {
-    PyValueError::new_err(e.to_string())
-}
-
-// Clone owned CoreFrames out of a single PyFrame or a Python list of PyFrames.
-// The returned Vec<Frame> is then wrapped into Vec<&Frame> at the call site.
-fn clone_frames(frames: &Bound<'_, PyAny>) -> PyResult<Vec<CoreFrame>> {
-    if let Ok(single) = frames.extract::<PyRef<'_, PyFrame>>() {
-        return Ok(vec![single.clone_core_frame()?]);
-    }
-    let list: Vec<PyRef<'_, PyFrame>> = frames.extract()?;
-    list.iter().map(|f| f.clone_core_frame()).collect()
-}
-
-// Collect &NeighborList references from a single wrapper or a list.
-fn collect_nlists<'py>(
-    arg: &'py Bound<'py, PyAny>,
-) -> PyResult<Vec<molrs::spatial::neighbors::NeighborList>> {
-    if let Ok(single) = arg.extract::<PyRef<'_, PyNeighborList>>() {
-        return Ok(vec![single.inner.clone()]);
-    }
-    let list: Vec<PyRef<'_, PyNeighborList>> = arg.extract()?;
-    Ok(list.iter().map(|n| n.inner.clone()).collect())
-}
+pub(crate) use crate::helpers::{collect_frames, collect_nlists, py_value_err};
 
 fn was_batched(frames: &Bound<'_, PyAny>) -> bool {
     frames.extract::<PyRef<'_, PyFrame>>().is_err()
@@ -163,7 +139,7 @@ impl PyRDF {
         frames: &Bound<'_, PyAny>,
         nlists: &Bound<'_, PyAny>,
     ) -> PyResult<PyRDFResult> {
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let nlists_vec: Vec<NeighborList> = collect_nlists(nlists)?;
         if nlists_vec.len() != refs.len() {
@@ -294,7 +270,7 @@ impl PyMSD {
 
     /// Compute MSD time series against frames[0].
     fn compute(&self, frames: &Bound<'_, PyAny>) -> PyResult<PyMSDTimeSeries> {
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         if owned.is_empty() {
             return Err(PyValueError::new_err("MSD.compute requires >= 1 frame"));
         }
@@ -371,7 +347,7 @@ impl PyCluster {
         nlists: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let nlists_vec = collect_nlists(nlists)?;
         if nlists_vec.len() != refs.len() {
@@ -477,7 +453,7 @@ impl PyClusterCenters {
         clusters: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         if cl_vec.len() != refs.len() {
@@ -583,7 +559,7 @@ impl PyCenterOfMass {
         clusters: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         if cl_vec.len() != refs.len() {
@@ -661,7 +637,7 @@ impl PyGyrationTensor {
         centers: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         let cc_vec = extract_centers_vec(centers)?;
@@ -724,7 +700,7 @@ impl PyInertiaTensor {
         com: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         let com_vec = extract_com_vec(com)?;
@@ -796,7 +772,7 @@ impl PyRadiusOfGyration {
         com: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         let com_vec = extract_com_vec(com)?;

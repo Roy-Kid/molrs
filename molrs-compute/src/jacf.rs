@@ -40,12 +40,11 @@ use ndarray::Array1;
 
 use crate::error::ComputeError;
 
-// MD (real units) → SI conversion constants. Kept in sync with
-// `crate::dielectric`.
-const ELEMENTARY_CHARGE_C: f64 = 1.602176634e-19; // C (SI 2019, exact)
-const K_B_SI: f64 = 1.380649e-23; // J·K⁻¹ (SI 2019, exact)
-const ANGSTROM_M: f64 = 1e-10; // m
-const PICOSECOND_S: f64 = 1e-12; // s
+// MD (real units) → SI conversion constants, sourced from `molrs-core` so the
+// SI values are defined exactly once across the workspace.
+use molrs::units::constants::{
+    ANGSTROM_M, BOLTZMANN as K_B_SI, ELEMENTARY_CHARGE as ELEMENTARY_CHARGE_C, PICOSECOND_S,
+};
 
 /// Result of a Green–Kubo current-autocorrelation conductivity computation.
 #[derive(Debug, Clone)]

@@ -8,12 +8,9 @@
 
 use molrs_compute::{jacf, onsager, persist};
 use numpy::{IntoPyArray, PyReadonlyArray2, PyReadonlyArray3};
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-fn py_value_err<E: std::fmt::Display>(e: E) -> PyErr {
-    PyValueError::new_err(e.to_string())
-}
+use crate::helpers::py_value_err;
 
 #[pyfunction]
 #[pyo3(signature = (p_i, p_j, dt, max_correlation_time))]

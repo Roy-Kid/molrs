@@ -113,7 +113,7 @@ pub(crate) fn set_mmff_aromaticity(input: &Topo) -> Topo {
                 pi_e += 2;
             }
 
-            if pi_e > 2 && ((pi_e - 2) % 4 == 0) {
+            if pi_e > 2 && (pi_e - 2).is_multiple_of(4) {
                 arom_ring[ri] = true;
                 for &a in &ring {
                     topo.is_aromatic[a] = true;

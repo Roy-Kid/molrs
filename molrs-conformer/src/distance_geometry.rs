@@ -7,9 +7,9 @@
 //! 4. Metrized (correlated) distance sampling
 //! 5. Metric-matrix eigenvalue embedding (Crippen-Havel)
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
-use rand::Rng;
+use rand::RngExt;
 
 use super::builder::BuildSummary;
 use super::geom::{add, dot, norm, random_unit, scale, sub};
@@ -25,7 +25,7 @@ const BOND_TOL: f64 = 0.06;
 /// Embed initial 3D coordinates with an improved distance-geometry workflow.
 pub(crate) fn embed_distance_geometry(
     mol: &mut Atomistic,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> Result<BuildSummary, MolRsError> {
     let atom_ids: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
     if atom_ids.is_empty() {
@@ -41,7 +41,7 @@ pub(crate) fn embed_distance_geometry(
         .collect();
 
     let adjacency = build_adjacency(mol, &atom_ids, &id_to_idx);
-    let topo_dist = topological_distances(&adjacency);
+    let topo_dist = crate::graph::bfs_distance_matrix(&adjacency);
     let cov_r: Vec<f64> = atom_ids
         .iter()
         .map(|&id| covalent_radius(mol, id))
@@ -109,27 +109,6 @@ fn build_adjacency(
         adj[i] = nlist;
     }
     adj
-}
-
-#[allow(clippy::needless_range_loop)]
-fn topological_distances(adjacency: &[Vec<usize>]) -> Vec<Vec<usize>> {
-    let n = adjacency.len();
-    let mut dist = vec![vec![usize::MAX; n]; n];
-    for start in 0..n {
-        let mut q = VecDeque::new();
-        dist[start][start] = 0;
-        q.push_back(start);
-        while let Some(i) = q.pop_front() {
-            let d = dist[start][i];
-            for &j in &adjacency[i] {
-                if dist[start][j] == usize::MAX {
-                    dist[start][j] = d + 1;
-                    q.push_back(j);
-                }
-            }
-        }
-    }
-    dist
 }
 
 // ───────────────────── precise geometric bounds ─────────────────────
@@ -498,7 +477,7 @@ fn fix_inconsistencies(lower: &mut [Vec<f64>], upper: &mut [Vec<f64>], warnings:
 /// re-smooth the bounds for all pairs involving i or j before sampling the
 /// next pair.  Produces much more geometrically consistent distance matrices
 /// than independent uniform sampling.
-fn metrize_sample(lower: &[Vec<f64>], upper: &[Vec<f64>], rng: &mut impl Rng) -> Vec<Vec<f64>> {
+fn metrize_sample(lower: &[Vec<f64>], upper: &[Vec<f64>], rng: &mut impl RngExt) -> Vec<Vec<f64>> {
     let n = lower.len();
     let mut d = vec![vec![0.0_f64; n]; n];
 
@@ -706,7 +685,7 @@ fn jacobi_eigendecomp(a: &mut [Vec<f64>]) -> (Vec<f64>, Vec<Vec<f64>>) {
 
 // ───────────────────── stress optimisation (refinement) ─────────────────────
 
-fn random_init_coords(n: usize, rng: &mut impl Rng) -> Vec<[f64; 3]> {
+fn random_init_coords(n: usize, rng: &mut impl RngExt) -> Vec<[f64; 3]> {
     (0..n)
         .map(|_| {
             let r = rng.random_range(0.6..1.8);

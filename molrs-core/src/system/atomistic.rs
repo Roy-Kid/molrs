@@ -404,10 +404,10 @@ impl Atomistic {
             atoms.iter().enumerate().map(|(i, &a)| (a, i)).collect();
         let mut edges: Vec<[usize; 2]> = Vec::new();
         for id in self.graph.relation_ids(self.bond) {
-            if let Ok(n) = self.graph.relation_nodes(self.bond, id) {
-                if n.len() == 2 {
-                    edges.push([pos[&n[0]], pos[&n[1]]]);
-                }
+            if let Ok(n) = self.graph.relation_nodes(self.bond, id)
+                && n.len() == 2
+            {
+                edges.push([pos[&n[0]], pos[&n[1]]]);
             }
         }
         crate::system::topology::Topology::from_edges(atoms.len(), &edges)

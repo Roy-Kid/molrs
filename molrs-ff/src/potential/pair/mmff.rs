@@ -2,16 +2,12 @@
 
 use std::collections::HashMap;
 
+use crate::constants::{COULOMB_MMFF as COULOMB_CONST, ELE_BUFFER as ELE_DELTA};
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::{mag3, sub3, validate_coords};
 use molrs::store::frame::Frame;
 use molrs::types::F;
-
-/// e^2/(4*pi*eps0) in kcal*A/(mol*e^2).
-const COULOMB_CONST: f64 = 332.0716;
-/// Electrostatic buffering distance (A).
-const ELE_DELTA: f64 = 0.05;
 
 // ---------------------------------------------------------------------------
 // MMFFVdW: Buffered 14-7 potential

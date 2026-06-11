@@ -25,11 +25,8 @@
 //! | `PMFTXY`                      | list[NeighborList], orientations?   | (raw_counts, density, pmf)               |
 
 use crate::compute::{PyClusterResult, py_value_err};
-use crate::frame::PyFrame;
-use crate::helpers::NpF;
-use crate::linkedcell::PyNeighborList;
+use crate::helpers::{NpF, collect_frames, collect_nlists};
 
-use molrs::spatial::neighbors::NeighborList;
 use molrs::store::frame::Frame as CoreFrame;
 use molrs::types::F;
 use molrs_compute::{
@@ -41,26 +38,6 @@ use ndarray::{Array1, Array2, Array3};
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyArray3};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
-
-// ---------------------------------------------------------------------------
-// Frame / NeighborList collectors (local copies — mirror compute.rs)
-// ---------------------------------------------------------------------------
-
-fn collect_frames(frames: &Bound<'_, PyAny>) -> PyResult<Vec<CoreFrame>> {
-    if let Ok(single) = frames.extract::<PyRef<'_, PyFrame>>() {
-        return Ok(vec![single.clone_core_frame()?]);
-    }
-    let list: Vec<PyRef<'_, PyFrame>> = frames.extract()?;
-    list.iter().map(|f| f.clone_core_frame()).collect()
-}
-
-fn collect_nlists(arg: &Bound<'_, PyAny>) -> PyResult<Vec<NeighborList>> {
-    if let Ok(single) = arg.extract::<PyRef<'_, PyNeighborList>>() {
-        return Ok(vec![single.inner.clone()]);
-    }
-    let list: Vec<PyRef<'_, PyNeighborList>> = arg.extract()?;
-    Ok(list.iter().map(|n| n.inner.clone()).collect())
-}
 
 // ---------------------------------------------------------------------------
 // Steinhardt

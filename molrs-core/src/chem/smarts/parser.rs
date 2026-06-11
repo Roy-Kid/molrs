@@ -569,18 +569,17 @@ impl<'s> Parser<'s> {
         // Two-letter symbol: a following lowercase letter that forms a known
         // element. For aromatic (lowercase-first) atoms, the second letter is
         // not consumed (aromatic symbols here are single-letter: c,n,o,s,p).
-        if !aromatic {
-            if let Some(next) = self.peek() {
-                if next.is_ascii_lowercase() {
-                    let mut two = sym.clone();
-                    two.push(next);
-                    let recognized = crate::system::element::Element::by_symbol(&two).is_some();
-                    let two_letter_organic = !in_bracket && matches!(two.as_str(), "Cl" | "Br");
-                    if (in_bracket && recognized) || two_letter_organic {
-                        self.bump();
-                        return Ok((two, false));
-                    }
-                }
+        if !aromatic
+            && let Some(next) = self.peek()
+            && next.is_ascii_lowercase()
+        {
+            let mut two = sym.clone();
+            two.push(next);
+            let recognized = crate::system::element::Element::by_symbol(&two).is_some();
+            let two_letter_organic = !in_bracket && matches!(two.as_str(), "Cl" | "Br");
+            if (in_bracket && recognized) || two_letter_organic {
+                self.bump();
+                return Ok((two, false));
             }
         }
         Ok((sym, aromatic))

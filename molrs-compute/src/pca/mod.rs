@@ -277,7 +277,7 @@ mod tests {
     use super::*;
     use molrs::Frame;
     use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
 
     /// Descriptor row wrapping a Vec<F>.
     #[derive(Clone)]

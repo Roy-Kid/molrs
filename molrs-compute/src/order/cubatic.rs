@@ -28,7 +28,7 @@
 //! The output is `(order, director_basis)` where `director_basis` is the
 //! 3 × 3 rotation matrix sending the lab frame to the optimal cubic frame.
 
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 

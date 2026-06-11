@@ -11,6 +11,7 @@
 //! Like [`GaussianDensity`](super::gaussian_density::GaussianDensity), this
 //! is orthorhombic-box only and PBC-aware via wrap-around grid indexing.
 
+use super::wrap_index;
 use ndarray::Array3;
 
 use molrs::spatial::region::simbox::BoxKind;
@@ -143,18 +144,6 @@ impl SphereVoxelization {
             voxels,
             raw_counts: counts,
         })
-    }
-}
-
-#[inline]
-fn wrap_index(i: isize, n: isize, pbc: bool) -> (bool, usize) {
-    if pbc {
-        let r = i.rem_euclid(n);
-        (true, r as usize)
-    } else if i < 0 || i >= n {
-        (false, 0)
-    } else {
-        (true, i as usize)
     }
 }
 

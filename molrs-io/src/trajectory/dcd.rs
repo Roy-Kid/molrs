@@ -515,7 +515,7 @@ fn parse_header<R: BufRead + Seek>(reader: &mut R) -> std::io::Result<DcdHeader>
                 continue;
             }
             let after_first = trailing - f_first;
-            if after_first % f_rest != 0 {
+            if !after_first.is_multiple_of(f_rest) {
                 continue;
             }
             candidates.push((has_box_candidate, has_4d_candidate, f_first, f_rest));

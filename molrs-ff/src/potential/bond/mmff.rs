@@ -8,8 +8,7 @@ use crate::potential::geometry::{mag3, sub3, validate_coords};
 use molrs::store::frame::Frame;
 use molrs::types::F;
 
-/// md/A -> kcal/mol conversion.
-const MDYNE_A_TO_KCAL: f64 = 143.9325;
+use crate::constants::MDYNE_A_TO_KCAL;
 /// Cubic stretch constant (A^-1).
 const CS: f64 = -2.0;
 

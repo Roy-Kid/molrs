@@ -30,6 +30,7 @@ pub mod distgeom;
 mod fragment_data;
 #[allow(dead_code)]
 mod geom;
+mod graph;
 #[allow(dead_code)]
 mod optimizer;
 mod options;

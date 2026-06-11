@@ -603,12 +603,12 @@ fn apply_huckel_to_fused(
                     }
                 }
                 for (&bid, &cnt) in &bond_count {
-                    if cnt == 1 {
-                        if let Ok(bond) = mol.get_bond(bid) {
-                            aromatic_bonds.insert(bid);
-                            aromatic_atoms.insert(bond.nodes[0]);
-                            aromatic_atoms.insert(bond.nodes[1]);
-                        }
+                    if cnt == 1
+                        && let Ok(bond) = mol.get_bond(bid)
+                    {
+                        aromatic_bonds.insert(bid);
+                        aromatic_atoms.insert(bond.nodes[0]);
+                        aromatic_atoms.insert(bond.nodes[1]);
                     }
                 }
             }

@@ -17,8 +17,10 @@ use crate::potential::geometry::validate_coords;
 use molrs::store::frame::Frame;
 use molrs::types::F;
 
-/// Electrostatic constant `k_e` in kcal·Å·mol⁻¹·e⁻².
-pub const COULOMB_CONSTANT: F = 332.063_71;
+/// Electrostatic constant `k_e` in kcal·Å·mol⁻¹·e⁻². Re-exported from
+/// [`molrs::units::constants::COULOMB_REAL`] — the single CODATA-derived source
+/// shared with the dielectric/conductivity analyses.
+pub use molrs::units::constants::COULOMB_REAL as COULOMB_CONSTANT;
 
 /// Coulomb-with-cutoff pair potential with pre-resolved flat arrays.
 pub struct PairCoulCut {

@@ -4,12 +4,9 @@ use molrs_compute::dielectric as diel;
 use numpy::{
     IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3,
 };
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-fn py_value_err<E: std::fmt::Display>(e: E) -> PyErr {
-    PyValueError::new_err(e.to_string())
-}
+use crate::helpers::py_value_err;
 
 #[pyfunction]
 pub(crate) fn dielectric_compute_dipole_moment<'py>(

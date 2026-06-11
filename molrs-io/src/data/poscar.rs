@@ -382,11 +382,11 @@ fn group_by_symbol(
         let mut runs: Vec<(String, Vec<usize>)> = Vec::new();
         for i in 0..n {
             let s = col[[i]].clone();
-            if let Some((sym, idxs)) = runs.last_mut() {
-                if *sym == s {
-                    idxs.push(i);
-                    continue;
-                }
+            if let Some((sym, idxs)) = runs.last_mut()
+                && *sym == s
+            {
+                idxs.push(i);
+                continue;
             }
             runs.push((s, vec![i]));
         }

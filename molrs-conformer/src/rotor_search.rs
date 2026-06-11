@@ -1,6 +1,6 @@
 //! Rotatable bond sampling stage.
 
-use rand::Rng;
+use rand::RngExt;
 
 use super::geom::{add, norm, rotate_about_axis, scale, sub};
 use super::optimizer::{EnergyModel, steepest_descent};
@@ -22,7 +22,7 @@ pub(crate) fn run(
     model: &EnergyModel,
     coords: &mut [[f64; 3]],
     opts: &ConformerOptions,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> RotorSearchResult {
     let rot_bonds = detect_rotatable_bonds_with_downstream(mol);
     let attempts = opts.rotor_attempts(rot_bonds.len());

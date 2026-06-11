@@ -94,20 +94,20 @@ pub struct StaticDielectricResult {
 }
 
 // ── Physical constants (MD real units: kcal, mol, Angstrom, e, K) ─────────
+//
+// MD-real and SI values are defined once in `molrs-core::units::constants`;
+// the names below are the local spellings the kernels use.
 
-const KAPPA: f64 = 332.0637; // 1/(4*pi*epsilon_0) in kcal·Å·mol⁻¹·e⁻²
+use molrs::units::constants::{
+    ANGSTROM_M, BOLTZMANN as K_B_SI, COULOMB_REAL as KAPPA,
+    ELEMENTARY_CHARGE as ELEMENTARY_CHARGE_C, PICOSECOND_S,
+};
+
 /// Boltzmann constant in kcal/(mol·K) — MD "real" units. Shared with the
 /// spectral validation checks ([`crate::validate`]) so there is one value.
-pub const K_B: f64 = 1.98720425864083e-3;
-const FOUR_PI_OVER_3: f64 = 4.1887902047863905; // 4π/3
+pub use molrs::units::constants::BOLTZMANN_REAL as K_B;
 
-// SI constants for the Einstein–Helfand conductivity unit conversion. The
-// dipole MSD slope is built in MD units (e·Å for the collective dipole, ps for
-// time, Å³ for volume); these convert the final σ to SI siemens·metre⁻¹.
-const ELEMENTARY_CHARGE_C: f64 = 1.602176634e-19; // C (SI 2019, exact)
-const K_B_SI: f64 = 1.380649e-23; // J·K⁻¹ (SI 2019, exact)
-const ANGSTROM_M: f64 = 1e-10; // m
-const PICOSECOND_S: f64 = 1e-12; // s
+const FOUR_PI_OVER_3: f64 = 4.1887902047863905; // 4π/3
 
 // ── Basic observables ─────────────────────────────────────────────────────
 
@@ -1069,7 +1069,7 @@ pub fn einstein_helfand_conductivity(
 mod tests {
     use super::*;
     use ndarray::{Axis, arr1};
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
 
     #[test]
     fn test_conductivity_msd_exact_small() {
@@ -1351,7 +1351,7 @@ mod tests {
         // χ(0) = (β/(3V))·⟨M²⟩, i.e. ε(0) - ε_∞ = (4π·KAPPA/(3·V·k_B·T))·⟨|δM|²⟩.
         // The spectrum's DC bin must therefore equal `static_dielectric_constant`
         // exactly (up to FP roundoff).
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(42);
@@ -1391,7 +1391,7 @@ mod tests {
         // average, so individual bins of a finite-sample spectrum may dip
         // slightly negative — but the *macroscopic* envelope must be non-
         // negative within statistical noise.
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(11);
@@ -1429,7 +1429,7 @@ mod tests {
         // and — crucially — *decaying* toward the Nyquist frequency. Forming
         // the loss as ω·X(ω) instead of the derivative transform makes ε″
         // diverge at high ω and dip strongly negative; this test guards that.
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(7);

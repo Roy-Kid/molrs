@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn larger_random_system_matches_brute_force() {
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(7);
@@ -694,7 +694,7 @@ mod tests {
 
     #[test]
     fn knn_matches_brute_force_random() {
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(11);

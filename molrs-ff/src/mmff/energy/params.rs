@@ -19,16 +19,12 @@ use crate::mmff::tables::{
 };
 use crate::mmff::topo::{BondOrder, Topo};
 
-/// mdyne*Angstrom -> kcal/mol (RDKit `MDYNE_A_TO_KCAL_MOL`, Params.h).
-pub(super) const MDYNE_A_TO_KCAL: f64 = 143.9325;
-/// degrees -> radians (RDKit `DEG2RAD`).
-pub(super) const DEG2RAD: f64 = std::f64::consts::PI / 180.0;
-/// radians -> degrees (RDKit `RAD2DEG`).
-pub(super) const RAD2DEG: f64 = 180.0 / std::f64::consts::PI;
-/// Coulomb constant in kcal*Angstrom/(mol*e^2) (RDKit `Nonbonded.cpp`).
-pub(super) const COULOMB: f64 = 332.0716;
-/// Electrostatic buffering distance (Angstrom), RDKit `calcEleEnergy`.
-pub(super) const ELE_BUFFER: f64 = 0.05;
+// MMFF numeric constants live in the crate-level `constants` module so the
+// `potential` adapters share one definition; re-exported here under the names
+// the energy kernels already import (`COULOMB` keeps its short local name).
+pub(super) use crate::constants::{
+    COULOMB_MMFF as COULOMB, DEG2RAD, ELE_BUFFER, MDYNE_A_TO_KCAL, RAD2DEG,
+};
 
 // vdW combining-rule globals (RDKit `MMFFVdWCollection`, Params.cpp:
 // "power B Beta DARAD DAEPS" = "0.25 0.2 12. 0.8 0.5").

@@ -978,15 +978,15 @@ impl FrameIndexBuilder for PdbIndexBuilder {
                             byte_len: len,
                         });
                     }
-                } else if trimmed.starts_with("ENDMDL") {
-                    if let Some(prev) = pending_frame_start.take() {
-                        let line_end = line_offset + line_len as u64;
-                        let len = (line_end - prev) as u32;
-                        pending_entries.push(FrameIndexEntry {
-                            byte_offset: prev,
-                            byte_len: len,
-                        });
-                    }
+                } else if trimmed.starts_with("ENDMDL")
+                    && let Some(prev) = pending_frame_start.take()
+                {
+                    let line_end = line_offset + line_len as u64;
+                    let len = (line_end - prev) as u32;
+                    pending_entries.push(FrameIndexEntry {
+                        byte_offset: prev,
+                        byte_len: len,
+                    });
                 }
             });
     }
@@ -1010,15 +1010,15 @@ impl FrameIndexBuilder for PdbIndexBuilder {
                         byte_len: len,
                     });
                 }
-            } else if trimmed.starts_with("ENDMDL") {
-                if let Some(prev) = pending_frame_start.take() {
-                    let line_end = line_offset + line_len as u64;
-                    let len = (line_end - prev) as u32;
-                    pending_entries.push(FrameIndexEntry {
-                        byte_offset: prev,
-                        byte_len: len,
-                    });
-                }
+            } else if trimmed.starts_with("ENDMDL")
+                && let Some(prev) = pending_frame_start.take()
+            {
+                let line_end = line_offset + line_len as u64;
+                let len = (line_end - prev) as u32;
+                pending_entries.push(FrameIndexEntry {
+                    byte_offset: prev,
+                    byte_len: len,
+                });
             }
         });
 

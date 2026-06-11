@@ -4,7 +4,7 @@ use molrs_core::spatial::region::simbox::SimBox;
 use molrs_core::types::F;
 use ndarray::{Array1, Array2, array};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 /// Generate N random points inside a cubic box using the crate float type.
 pub fn random_points(n: usize, box_size: F, seed: u64) -> Array2<F> {

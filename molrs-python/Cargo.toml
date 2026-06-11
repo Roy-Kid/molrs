@@ -2,7 +2,7 @@
 name = "molrs-python"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.91"
 authors = ["MolCrafts"]
 license = "BSD-3-Clause"
 description = "Python bindings for molrs molecular simulation library"

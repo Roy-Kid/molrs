@@ -1,6 +1,6 @@
 //! Small 3D geometry helpers used by the Embed pipeline.
 
-use rand::Rng;
+use rand::RngExt;
 
 #[inline]
 pub(crate) fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -68,7 +68,7 @@ pub(crate) fn rotate_about_axis(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64
     ]
 }
 
-pub(crate) fn random_unit(rng: &mut impl Rng) -> [f64; 3] {
+pub(crate) fn random_unit(rng: &mut impl RngExt) -> [f64; 3] {
     loop {
         let x = rng.random_range(-1.0..1.0);
         let y = rng.random_range(-1.0..1.0);

@@ -10,8 +10,7 @@ use crate::potential::geometry::{
 use molrs::store::frame::Frame;
 use molrs::types::F;
 
-/// md/A -> kcal/mol conversion.
-const MDYNE_A_TO_KCAL: f64 = 143.9325;
+use crate::constants::MDYNE_A_TO_KCAL;
 /// Cubic bend constant (rad^-1), = -0.007 * 180/pi.
 const CB_RAD: f64 = -0.40107;
 

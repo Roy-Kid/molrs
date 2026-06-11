@@ -15,7 +15,7 @@ use molrs::store::frame::Frame;
 use molrs::types::F;
 use ndarray::{Array2, ArrayD, IxDyn, array};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use molrs_compute::center_of_mass::{COMResult, CenterOfMass};
 use molrs_compute::cluster::{Cluster, ClusterResult};

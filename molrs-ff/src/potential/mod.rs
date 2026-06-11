@@ -264,10 +264,10 @@ impl ForceField {
                 "pair" => Some("pairs"),
                 _ => None,
             };
-            if let Some(b) = block {
-                if frame.get(b).is_none() {
-                    continue;
-                }
+            if let Some(b) = block
+                && frame.get(b).is_none()
+            {
+                continue;
             }
             if let Some(pot) = style.to_potential(frame)? {
                 pots.push(pot);

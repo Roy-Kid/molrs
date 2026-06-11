@@ -12,7 +12,7 @@
 //! `etmin`). Negative eigenvalues are replaced with small random jitter when
 //! `rand_neg_eig` is set (RDKit `randNegEig`), matching `computeInitialCoords`.
 
-use rand::Rng;
+use rand::RngExt;
 
 use crate::distgeom::BoundsMatrix;
 
@@ -24,7 +24,7 @@ const EIGVAL_TOL: f64 = 0.001;
 /// RDKit `pickRandomDistMat`: for every pair `(i, j)` draws
 /// `d = lb + r·(ub − lb)` with `r ∈ [0, 1)`. Returns the full symmetric
 /// `n×n` distance matrix (row-major).
-pub fn pick_random_dist_mat<R: Rng + ?Sized>(bounds: &BoundsMatrix, rng: &mut R) -> Vec<f64> {
+pub fn pick_random_dist_mat<R: RngExt + ?Sized>(bounds: &BoundsMatrix, rng: &mut R) -> Vec<f64> {
     let n = bounds.len();
     let mut dist = vec![0.0; n * n];
     for i in 1..n {
@@ -49,7 +49,7 @@ pub fn pick_random_dist_mat<R: Rng + ?Sized>(bounds: &BoundsMatrix, rng: &mut R)
 ///
 /// `dist` is the full symmetric `n×n` distance matrix from
 /// [`pick_random_dist_mat`]. `dim` is the embedding dimension (4 for ETKDG).
-pub fn compute_initial_coords<R: Rng + ?Sized>(
+pub fn compute_initial_coords<R: RngExt + ?Sized>(
     dist: &[f64],
     n: usize,
     dim: usize,
@@ -140,7 +140,7 @@ pub fn compute_initial_coords<R: Rng + ?Sized>(
 /// Random box coordinates fallback (RDKit `computeRandomCoords`): every
 /// component uniform in `[−boxSize/2, boxSize/2)`. Used by the
 /// `useRandomCoords` retry path.
-pub fn compute_random_coords<R: Rng + ?Sized>(
+pub fn compute_random_coords<R: RngExt + ?Sized>(
     n: usize,
     dim: usize,
     box_size: f64,

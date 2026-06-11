@@ -162,12 +162,11 @@ impl PyBlock {
         // even an empty object array fails fast instead of slipping through as
         // an empty string column. Python lists (the list[str] path) carry no
         // `.dtype` and are untouched here.
-        if let Ok(dtype) = array.getattr("dtype") {
-            if let Ok(kind) = dtype.getattr("kind").and_then(|k| k.extract::<String>()) {
-                if kind == "O" {
-                    return Err(crate::error::dtype_reject(key, array));
-                }
-            }
+        if let Ok(dtype) = array.getattr("dtype")
+            && let Ok(kind) = dtype.getattr("kind").and_then(|k| k.extract::<String>())
+            && kind == "O"
+        {
+            return Err(crate::error::dtype_reject(key, array));
         }
 
         // Matched-dtype, C-contiguous numpy arrays get forged into a

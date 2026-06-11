@@ -66,16 +66,16 @@ fn test_all_lammps_data_files_parse() {
     for path in all_lammps_data_files() {
         let frame =
             read_lammps_data(&path).unwrap_or_else(|e| panic!("{:?}: read failed: {}", path, e));
-        if let Some(atoms) = frame.get("atoms") {
-            if atoms.nrows().unwrap_or(0) > 0 {
-                assert!(
-                    atoms.get_float("x").is_some()
-                        && atoms.get_float("y").is_some()
-                        && atoms.get_float("z").is_some(),
-                    "{:?}: atoms block missing x/y/z float columns",
-                    path
-                );
-            }
+        if let Some(atoms) = frame.get("atoms")
+            && atoms.nrows().unwrap_or(0) > 0
+        {
+            assert!(
+                atoms.get_float("x").is_some()
+                    && atoms.get_float("y").is_some()
+                    && atoms.get_float("z").is_some(),
+                "{:?}: atoms block missing x/y/z float columns",
+                path
+            );
         }
     }
 }

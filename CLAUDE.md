@@ -148,7 +148,7 @@ Key type aliases: `F3 = Array1<F>`, `F3x3 = Array2<F>`, `FN = Array1<F>`, `FNx3 
 
 ### MolGraph (molecular topology)
 
-Graph-based molecular structure with atoms, bonds, stereochemistry, ring detection. Uses petgraph. (`molrs-core/src/system/molgraph.rs`).
+Graph-based molecular structure with atoms, bonds, stereochemistry, ring detection. Built on generational arenas (`slotmap`) with kind-tagged, multi-arity relations over a `smallvec`-backed adjacency map. (`molrs-core/src/system/molgraph.rs`). The petgraph-backed graph is `Topology` (`molrs-core/src/system/topology.rs`), used for connectivity queries (connected components, BFS distances, angle/dihedral enumeration).
 
 ## Trait-Based Extensibility
 

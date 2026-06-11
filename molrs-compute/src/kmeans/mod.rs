@@ -8,7 +8,7 @@
 use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use crate::error::ComputeError;
 use crate::pca::PcaResult;
@@ -112,7 +112,7 @@ impl Compute for KMeans {
         pca: &'a PcaResult,
     ) -> Result<KMeansResult, ComputeError> {
         let n_dims = 2usize;
-        if pca.coords.len() % n_dims != 0 {
+        if !pca.coords.len().is_multiple_of(n_dims) {
             return Err(ComputeError::BadShape {
                 expected: "coords length divisible by 2".into(),
                 got: format!("len = {}", pca.coords.len()),
@@ -250,7 +250,7 @@ mod tests {
     use super::*;
     use molrs::Frame;
     use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
     use std::collections::HashSet;
 
     fn box_muller(rng: &mut StdRng) -> F {

@@ -118,7 +118,7 @@ fn parse_array_from_quoted(s: &str) -> ExtValue {
 fn parse_properties(spec: &str) -> Option<Vec<PropertySpec>> {
     // Expect a colon-separated stream of triplets: name:T:m: name2:T:m: ...
     let parts: Vec<&str> = spec.split(':').filter(|s| !s.is_empty()).collect();
-    if parts.len() < 3 || parts.len() % 3 != 0 {
+    if parts.len() < 3 || !parts.len().is_multiple_of(3) {
         return None;
     }
     let mut out = Vec::new();
@@ -1325,12 +1325,12 @@ pub fn write_xyz_frame<W: Write>(writer: &mut W, frame: &impl FrameAccess) -> st
 
         let priority_keys = ["id", "mol"];
         for pk in &priority_keys {
-            if keys.contains(pk) {
-                if let (Some(dt), Some(shape)) = (atoms.column_dtype(pk), atoms.column_shape(pk)) {
-                    let m: usize = shape.iter().skip(1).product();
-                    let m = if m == 0 { 1 } else { m };
-                    props_parts.push(format!("{}:{}:{}", pk, dtype_to_char(dt), m));
-                }
+            if keys.contains(pk)
+                && let (Some(dt), Some(shape)) = (atoms.column_dtype(pk), atoms.column_shape(pk))
+            {
+                let m: usize = shape.iter().skip(1).product();
+                let m = if m == 0 { 1 } else { m };
+                props_parts.push(format!("{}:{}:{}", pk, dtype_to_char(dt), m));
             }
         }
 

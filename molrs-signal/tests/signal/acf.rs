@@ -99,7 +99,7 @@ fn acf_of_cosine_is_periodic() {
 /// White-noise ACF peaks at lag 0 and is small elsewhere.
 #[test]
 fn acf_white_noise_peaks_at_zero() {
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
     let n = 4096;
     let data: Array1<f64> = Array1::from_iter((0..n).map(|_| rng.random::<f64>() * 2.0 - 1.0));

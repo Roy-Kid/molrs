@@ -20,6 +20,21 @@ use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
+/// Build the `(n_pairs, 2)` int64 `[query_index, point_index]` array exposed by
+/// the `.pairs()` accessors on both `NeighborList` and `LinkedCell`.
+fn pairs_to_i64_array<'py>(
+    nl: &RsNeighborList,
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PyArray2<i64>>> {
+    let n = nl.n_pairs();
+    let qi = nl.query_point_indices();
+    let pi = nl.point_indices();
+    let flat: Vec<i64> = (0..n).flat_map(|k| [qi[k] as i64, pi[k] as i64]).collect();
+    ndarray::Array2::from_shape_vec((n, 2), flat)
+        .map(|array| array.into_pyarray(py))
+        .map_err(|e| PyValueError::new_err(format!("failed to build output array: {}", e)))
+}
+
 // ---------------------------------------------------------------------------
 // PyNeighborList
 // ---------------------------------------------------------------------------
@@ -179,13 +194,7 @@ impl PyNeighborList {
     /// ValueError
     ///     On internal shape error (should not happen).
     fn pairs<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<i64>>> {
-        let n = self.inner.n_pairs();
-        let qi = self.inner.query_point_indices();
-        let pi = self.inner.point_indices();
-        let flat: Vec<i64> = (0..n).flat_map(|k| [qi[k] as i64, pi[k] as i64]).collect();
-        let array = ndarray::Array2::from_shape_vec((n, 2), flat)
-            .map_err(|e| PyValueError::new_err(format!("failed to build output array: {}", e)))?;
-        Ok(array.into_pyarray(py))
+        pairs_to_i64_array(&self.inner, py)
     }
 
     fn __repr__(&self) -> String {
@@ -383,14 +392,7 @@ impl PyLinkedCell {
     ///     On internal shape error (should not happen).
     fn pairs<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<i64>>> {
         use molrs::spatial::neighbors::NbListAlgo;
-        let result = self.inner.query();
-        let n = result.n_pairs();
-        let qi = result.query_point_indices();
-        let pi = result.point_indices();
-        let flat: Vec<i64> = (0..n).flat_map(|k| [qi[k] as i64, pi[k] as i64]).collect();
-        let array = ndarray::Array2::from_shape_vec((n, 2), flat)
-            .map_err(|e| PyValueError::new_err(format!("failed to build output array: {}", e)))?;
-        Ok(array.into_pyarray(py))
+        pairs_to_i64_array(self.inner.query(), py)
     }
 
     /// Rebuild the neighbor list with new positions.

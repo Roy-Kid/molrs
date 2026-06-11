@@ -26,19 +26,19 @@ u64 = []
 
 [dependencies]
 ndarray = "0.17"
-rayon = "1.11"
+rayon = "1.12"
 zarrs = { version = "0.23", optional = true, default-features = false }
 ndarray-linalg = { version = "0.18", optional = true, default-features = true }
 slotmap = "1"
 smallvec = "1"
-petgraph = "0.7"
+petgraph = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 libm = "0.2"
 
 [dev-dependencies]
-criterion = "0.5"
-rand = "0.9"
+criterion = "0.8"
+rand = "0.10"
 tempfile = "3.0"
 
 [[bench]]

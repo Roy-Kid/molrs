@@ -221,7 +221,7 @@ mod tests {
     fn s_large_k_approaches_one() {
         // For random-ish positions and large k, the oscillating sin(k r)/(k r)
         // off-diagonal terms average to ≈ 0 → S(k) → 1.
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(7);

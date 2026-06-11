@@ -22,3 +22,19 @@ pub use correlation_function::{CorrelationFunction, CorrelationFunctionResult};
 pub use gaussian_density::{GaussianDensity, GaussianDensityResult};
 pub use local_density::{LocalDensity, LocalDensityResult};
 pub use sphere_voxelization::{SphereVoxelization, SphereVoxelizationResult};
+
+/// Map a (possibly out-of-range) grid index onto a valid voxel.
+///
+/// Under periodic boundaries the index wraps via `rem_euclid`; otherwise an
+/// index outside `[0, n)` is rejected as `(false, 0)`. Shared by the
+/// grid-smearing analyzers ([`GaussianDensity`], [`SphereVoxelization`]).
+#[inline]
+pub(crate) fn wrap_index(i: isize, n: isize, pbc: bool) -> (bool, usize) {
+    if pbc {
+        (true, i.rem_euclid(n) as usize)
+    } else if i < 0 || i >= n {
+        (false, 0)
+    } else {
+        (true, i as usize)
+    }
+}

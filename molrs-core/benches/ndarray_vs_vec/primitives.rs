@@ -227,7 +227,7 @@ fn bench_matmul(c: &mut Criterion) {
 }
 
 fn random_square(n: usize, seed: u64) -> Array2<f32> {
-    use rand::{Rng, SeedableRng, rngs::StdRng};
+    use rand::{RngExt, SeedableRng, rngs::StdRng};
     let mut rng = StdRng::seed_from_u64(seed);
     Array2::from_shape_fn((n, n), |_| rng.random::<f32>())
 }

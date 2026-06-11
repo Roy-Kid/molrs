@@ -388,43 +388,54 @@ impl Style {
     /// - **Pair**: `"A"` -> self-pair (itom=A, jtom=A); `"A-B"` -> cross-pair
     /// - **Dihedral/Improper**: `"A-B-C-D"` -> itom=A, jtom=B, ktom=C, ltom=D
     pub fn def_type(&mut self, name: &str, params: &[(&str, f64)]) -> &mut Self {
+        // Infallible chaining form: a malformed name is a programmer error here
+        // (literal call sites). The Python binding uses the fallible
+        // [`Style::try_def_type`] so user input raises instead of aborting.
+        if let Err(e) = self.try_def_type(name, params) {
+            panic!("{e}");
+        }
+        self
+    }
+
+    /// Add a type to this style from its dash-form `name`, validating the part
+    /// count against the style's category. This is the single source of truth
+    /// for the type-name grammar; [`Self::def_type`] and
+    /// [`ForceField::def_type`] both go through it.
+    pub fn try_def_type(&mut self, name: &str, params: &[(&str, f64)]) -> Result<(), DefTypeError> {
         let parts: Vec<&str> = name.split('-').collect();
-        // Extract category before mutable borrow (category() returns &'static str, no borrow)
         let category = self.category();
+        let arity = |expected: &'static str| DefTypeError::Arity {
+            category,
+            expected,
+            name: name.to_string(),
+            got: parts.len(),
+        };
         match category {
             "atom" => {
                 self.def_atomtype(name, params);
             }
             "bond" => {
-                assert!(
-                    parts.len() == 2,
-                    "bond type name must be \"A-B\", got \"{}\"",
-                    name
-                );
+                if parts.len() != 2 {
+                    return Err(arity("A-B"));
+                }
                 self.def_bondtype(parts[0], parts[1], params);
             }
             "angle" => {
-                assert!(
-                    parts.len() == 3,
-                    "angle type name must be \"A-B-C\", got \"{}\"",
-                    name
-                );
+                if parts.len() != 3 {
+                    return Err(arity("A-B-C"));
+                }
                 self.def_angletype(parts[0], parts[1], parts[2], params);
             }
             "dihedral" => {
-                assert!(
-                    parts.len() == 4,
-                    "dihedral type name must be \"A-B-C-D\", got \"{}\"",
-                    name
-                );
+                if parts.len() != 4 {
+                    return Err(arity("A-B-C-D"));
+                }
                 self.def_dihedraltype(parts[0], parts[1], parts[2], parts[3], params);
             }
             "improper" => {
-                assert!(
-                    parts.len() == 4,
-                    "improper type name must be \"A-B-C-D\", got \"{}\"",
-                    name
-                );
+                if parts.len() != 4 {
+                    return Err(arity("A-B-C-D"));
+                }
                 self.def_impropertype(parts[0], parts[1], parts[2], parts[3], params);
             }
             "pair" => match parts.len() {
@@ -434,17 +445,55 @@ impl Style {
                 2 => {
                     self.def_pairtype(parts[0], Some(parts[1]), params);
                 }
-                _ => panic!("pair type name must be \"A\" or \"A-B\", got \"{}\"", name),
+                _ => return Err(arity("A\" or \"A-B")),
             },
-            "kspace" => {
-                // KSpace styles have no per-type definitions.
-                panic!("kspace styles do not support per-type definitions");
-            }
-            _ => unreachable!(),
+            "kspace" => return Err(DefTypeError::Unsupported(category)),
+            other => return Err(DefTypeError::UnknownCategory(other.to_string())),
         }
-        self
+        Ok(())
     }
 }
+
+/// Error from the dash-form type-name grammar used by [`Style::try_def_type`]
+/// and [`ForceField::def_type`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefTypeError {
+    /// `name` has the wrong number of dash-separated parts for `category`.
+    Arity {
+        category: &'static str,
+        expected: &'static str,
+        name: String,
+        got: usize,
+    },
+    /// The category accepts no per-type definitions (e.g. `kspace`).
+    Unsupported(&'static str),
+    /// Unknown style category string.
+    UnknownCategory(String),
+}
+
+impl std::fmt::Display for DefTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DefTypeError::Arity {
+                category,
+                expected,
+                name,
+                got,
+            } => write!(
+                f,
+                "{category} type name must be \"{expected}\", got \"{name}\" ({got} parts)"
+            ),
+            DefTypeError::Unsupported(category) => {
+                write!(f, "{category} styles do not support per-type definitions")
+            }
+            DefTypeError::UnknownCategory(category) => {
+                write!(f, "unknown style category '{category}'")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DefTypeError {}
 
 /// In-place mutators backing the Python handle-view layer (Style/Type views read
 /// through [`collect_type_params`](StyleDefs::collect_type_params) and write
@@ -656,6 +705,32 @@ impl ForceField {
 
     pub fn def_kspacestyle(&mut self, name: &str, params: &[(&str, f64)]) -> &mut Style {
         self.def_style(StyleDefs::KSpace, name, Params::from_pairs(params))
+    }
+
+    /// Define a type in one call: ensure the `category` style named `style`
+    /// exists, then add the type whose dash-form `name` is validated against
+    /// the category's arity. Owns the type-name grammar so bindings forward the
+    /// raw `name` instead of re-parsing it.
+    ///
+    /// `category` is one of `atom`/`bond`/`angle`/`dihedral`/`improper`/`pair`.
+    pub fn def_type(
+        &mut self,
+        category: &str,
+        style: &str,
+        name: &str,
+        params: &[(&str, f64)],
+    ) -> Result<(), DefTypeError> {
+        let target = match category {
+            "atom" => self.def_atomstyle(style),
+            "bond" => self.def_bondstyle(style),
+            "angle" => self.def_anglestyle(style),
+            "dihedral" => self.def_dihedralstyle(style),
+            "improper" => self.def_improperstyle(style),
+            "pair" => self.def_pairstyle(style, &[]),
+            "kspace" => return Err(DefTypeError::Unsupported("kspace")),
+            other => return Err(DefTypeError::UnknownCategory(other.to_string())),
+        };
+        target.try_def_type(name, params)
     }
 
     // -- with_* builder pattern (consumes and returns self) --

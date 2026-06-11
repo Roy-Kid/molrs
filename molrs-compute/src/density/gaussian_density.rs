@@ -30,6 +30,7 @@ use molrs::spatial::region::simbox::BoxKind;
 use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
+use super::wrap_index;
 use crate::error::ComputeError;
 use crate::result::ComputeResult;
 use crate::traits::Compute;
@@ -191,21 +192,6 @@ impl GaussianDensity {
         }
 
         Ok(GaussianDensityResult { density })
-    }
-}
-
-/// Wrap a (possibly negative or out-of-range) grid index respecting `pbc`.
-/// Returns `(in_bounds, wrapped_index)`. If `!pbc` and out-of-range,
-/// `(false, 0)` is returned.
-#[inline]
-fn wrap_index(i: isize, n: isize, pbc: bool) -> (bool, usize) {
-    if pbc {
-        let r = i.rem_euclid(n);
-        (true, r as usize)
-    } else if i < 0 || i >= n {
-        (false, 0)
-    } else {
-        (true, i as usize)
     }
 }
 

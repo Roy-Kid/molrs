@@ -560,11 +560,11 @@ impl TopologyRingInfo {
 /// Try to add `vec` to `basis` over GF(2). Returns true if independent.
 fn gf2_independent(basis: &mut Vec<Vec<u64>>, mut vec: Vec<u64>, words: usize) -> bool {
     for basis_vec in basis.iter() {
-        if let Some(lead) = leading_bit(basis_vec, words) {
-            if (vec[lead / 64] >> (lead % 64)) & 1 == 1 {
-                for w in 0..words {
-                    vec[w] ^= basis_vec[w];
-                }
+        if let Some(lead) = leading_bit(basis_vec, words)
+            && (vec[lead / 64] >> (lead % 64)) & 1 == 1
+        {
+            for w in 0..words {
+                vec[w] ^= basis_vec[w];
             }
         }
     }

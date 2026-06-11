@@ -197,14 +197,14 @@ pub fn assign_with_provenance(mol: &Atomistic, p: &Perceived) -> Vec<AssignedTor
             let mut idx = [usize::MAX; 4];
             let mut ok = true;
             for (qi, &aid) in m.iter().enumerate() {
-                if let Some(lbl) = cp.pattern.map_label(qi) {
-                    if (1..=4).contains(&lbl) {
-                        match idx_of.get(&aid) {
-                            Some(&ix) => idx[(lbl - 1) as usize] = ix,
-                            None => {
-                                ok = false;
-                                break;
-                            }
+                if let Some(lbl) = cp.pattern.map_label(qi)
+                    && (1..=4).contains(&lbl)
+                {
+                    match idx_of.get(&aid) {
+                        Some(&ix) => idx[(lbl - 1) as usize] = ix,
+                        None => {
+                            ok = false;
+                            break;
                         }
                     }
                 }

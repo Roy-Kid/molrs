@@ -8,8 +8,7 @@ use crate::potential::geometry::{cross3, dot3, mag3, sub3, validate_coords};
 use molrs::store::frame::Frame;
 use molrs::types::F;
 
-/// md/A -> kcal/mol conversion.
-const MDYNE_A_TO_KCAL: f64 = 143.9325;
+use crate::constants::MDYNE_A_TO_KCAL;
 
 pub struct MMFFOutOfPlane {
     atom_i: Vec<usize>,

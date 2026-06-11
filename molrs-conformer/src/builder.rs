@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use rand::Rng;
+use rand::RngExt;
 
 use super::fragment_data::{RigidTemplate, rigid_templates, ring_templates};
 use super::geom::{
@@ -30,7 +30,7 @@ pub(crate) struct BuildSummary {
 /// Embed initial 3D coordinates using a fragment/rule strategy.
 pub(crate) fn embed_fragment_rules(
     mol: &mut Atomistic,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> Result<BuildSummary, MolRsError> {
     let atom_ids: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
     if atom_ids.is_empty() {
@@ -176,7 +176,7 @@ fn embed_rigid_fragment_local(
     frag_atoms: &[usize],
     ring_idx: &[Vec<usize>],
     local_coords: &mut [[f64; 3]],
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
     warnings: &mut Vec<String>,
 ) {
     if frag_atoms.is_empty() {
@@ -388,7 +388,7 @@ fn try_embed_rigid_template(
     id_to_idx: &HashMap<AtomId, usize>,
     frag_atoms: &[usize],
     coords: &mut [[f64; 3]],
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> Option<String> {
     let templates = rigid_templates();
     if templates.is_empty() || frag_atoms.is_empty() {
@@ -620,7 +620,7 @@ fn place_template_on_fragment(
     tpl: &RigidTemplate,
     frag_to_tpl: &[usize],
     coords: &mut [[f64; 3]],
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) {
     let n = frag_atoms.len();
     if n == 0 {
@@ -776,7 +776,7 @@ fn assemble_fragments(
     fragments: &[Vec<usize>],
     frag_of: &[usize],
     local_coords: &[[f64; 3]],
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> Vec<[f64; 3]> {
     let n = atom_ids.len();
     let mut frag_edges: Vec<Vec<(usize, usize, usize)>> = vec![Vec::new(); fragments.len()];
@@ -926,7 +926,7 @@ fn connection_direction(
     coords: &[[f64; 3]],
     frag_atoms: &[usize],
     anchor: usize,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> [f64; 3] {
     let centroid = centroid_of_fragment(coords, frag_atoms);
     let mut dir = sub(coords[anchor], centroid);
@@ -986,7 +986,7 @@ fn propose_child_position_fragment(
     parent_id: AtomId,
     child_id: AtomId,
     child_ord: usize,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
 ) -> [f64; 3] {
     let parent = coords[parent_idx];
     let bond_len = ideal_bond_length(mol, parent_id, child_id);

@@ -509,27 +509,27 @@ pub fn write_mol2_frame<W: Write>(writer: &mut W, frame: &Frame) -> Result<()> {
         writeln!(writer)?;
     }
 
-    if let Some(b) = bonds {
-        if n_bonds > 0 {
-            writeln!(writer, "@<TRIPOS>BOND")?;
-            let atomi = b
-                .get_uint("atomi")
-                .ok_or_else(|| invalid_data("bonds.atomi missing"))?;
-            let atomj = b
-                .get_uint("atomj")
-                .ok_or_else(|| invalid_data("bonds.atomj missing"))?;
-            let btype_col = b.get_string("bond_type");
-            for i in 0..n_bonds {
-                let bt = btype_col.map(|c| c[[i]].as_str()).unwrap_or("1");
-                writeln!(
-                    writer,
-                    "{:>6} {:>6} {:>6} {}",
-                    i + 1,
-                    atomi[[i]] + 1,
-                    atomj[[i]] + 1,
-                    bt
-                )?;
-            }
+    if let Some(b) = bonds
+        && n_bonds > 0
+    {
+        writeln!(writer, "@<TRIPOS>BOND")?;
+        let atomi = b
+            .get_uint("atomi")
+            .ok_or_else(|| invalid_data("bonds.atomi missing"))?;
+        let atomj = b
+            .get_uint("atomj")
+            .ok_or_else(|| invalid_data("bonds.atomj missing"))?;
+        let btype_col = b.get_string("bond_type");
+        for i in 0..n_bonds {
+            let bt = btype_col.map(|c| c[[i]].as_str()).unwrap_or("1");
+            writeln!(
+                writer,
+                "{:>6} {:>6} {:>6} {}",
+                i + 1,
+                atomi[[i]] + 1,
+                atomj[[i]] + 1,
+                bt
+            )?;
         }
     }
     Ok(())

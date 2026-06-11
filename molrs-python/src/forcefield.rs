@@ -26,7 +26,7 @@ use molrs_ff::typifier::mmff::MMFFTypifier;
 use molrs_ff::{LBFGS, LbfgsConfig, OptReport};
 
 use crate::frame::PyFrame;
-use crate::helpers::NpF;
+use crate::helpers::{NpF, py_value_err};
 use crate::molgraph::PyAtomistic;
 
 use ndarray::{Array2, Array3};
@@ -284,7 +284,7 @@ impl PyLBFGS {
             1 | 2 => {
                 let mut flat: Vec<NpF> = arr.iter().copied().collect();
                 let n_elem = flat.len();
-                if n_elem % 3 != 0 {
+                if !n_elem.is_multiple_of(3) {
                     return Err(pyo3::exceptions::PyValueError::new_err(format!(
                         "coords has {n_elem} elements, not a multiple of 3 (expected (N, 3) or (3N,))"
                     )));
@@ -743,7 +743,8 @@ impl PyForceField {
     /// Unified type definition. ``category`` is one of ``atom``/``bond``/
     /// ``angle``/``dihedral``/``improper``/``pair``; ``name`` encodes the atom
     /// types in the dash form for that category (``"A"``, ``"A-B"``,
-    /// ``"A-B-C"``, ``"A-B-C-D"``). Validated here so a malformed name raises
+    /// ``"A-B-C"``, ``"A-B-C-D"``). The name grammar and arity validation live
+    /// in ``molrs-ff`` (``ForceField::def_type``); a malformed name raises
     /// ``ValueError`` rather than panicking across the FFI boundary.
     #[pyo3(signature = (category, style, name, params = None))]
     fn def_type(
@@ -755,76 +756,9 @@ impl PyForceField {
     ) -> PyResult<()> {
         let owned = params_from_dict(params)?;
         let pairs = as_pairs(&owned);
-        let parts: Vec<&str> = name.split('-').collect();
-        let arity_err = |shape: &str| -> PyErr {
-            PyValueError::new_err(format!(
-                "{category} type name must be \"{shape}\", got \"{name}\" ({} parts)",
-                parts.len()
-            ))
-        };
-        match category {
-            "atom" => {
-                self.inner.def_atomstyle(style).def_atomtype(name, &pairs);
-            }
-            "bond" => {
-                if parts.len() != 2 {
-                    return Err(arity_err("A-B"));
-                }
-                self.inner
-                    .def_bondstyle(style)
-                    .def_bondtype(parts[0], parts[1], &pairs);
-            }
-            "angle" => {
-                if parts.len() != 3 {
-                    return Err(arity_err("A-B-C"));
-                }
-                self.inner
-                    .def_anglestyle(style)
-                    .def_angletype(parts[0], parts[1], parts[2], &pairs);
-            }
-            "dihedral" => {
-                if parts.len() != 4 {
-                    return Err(arity_err("A-B-C-D"));
-                }
-                self.inner
-                    .def_dihedralstyle(style)
-                    .def_dihedraltype(parts[0], parts[1], parts[2], parts[3], &pairs);
-            }
-            "improper" => {
-                if parts.len() != 4 {
-                    return Err(arity_err("A-B-C-D"));
-                }
-                self.inner
-                    .def_improperstyle(style)
-                    .def_impropertype(parts[0], parts[1], parts[2], parts[3], &pairs);
-            }
-            "pair" => match parts.len() {
-                1 => {
-                    self.inner
-                        .def_pairstyle(style, &[])
-                        .def_pairtype(parts[0], None, &pairs);
-                }
-                2 => {
-                    self.inner.def_pairstyle(style, &[]).def_pairtype(
-                        parts[0],
-                        Some(parts[1]),
-                        &pairs,
-                    );
-                }
-                _ => return Err(arity_err("A\" or \"A-B")),
-            },
-            "kspace" => {
-                return Err(PyValueError::new_err(
-                    "kspace styles do not support per-type definitions",
-                ));
-            }
-            other => {
-                return Err(PyValueError::new_err(format!(
-                    "unknown style category '{other}'"
-                )));
-            }
-        }
-        Ok(())
+        self.inner
+            .def_type(category, style, name, &pairs)
+            .map_err(py_value_err)
     }
 
     // -- read accessors (round-trip + P1-A migration) ------------------------

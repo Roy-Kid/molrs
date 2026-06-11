@@ -214,7 +214,7 @@ mod tests {
     use molrs::spatial::region::simbox::SimBox;
     use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
-    use rand::Rng;
+    use rand::RngExt;
 
     fn random_frame(n: usize, box_len: F, seed: u64) -> Frame {
         use rand::SeedableRng;

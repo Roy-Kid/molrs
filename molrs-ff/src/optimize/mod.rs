@@ -90,7 +90,7 @@ impl<'p> LBFGS<'p> {
                 final_fmax: 0.0,
             });
         }
-        if coords.len() % 3 != 0 {
+        if !coords.len().is_multiple_of(3) {
             return Err(format!(
                 "coords length {} is not a multiple of 3 (expected 3·n_atoms)",
                 coords.len()

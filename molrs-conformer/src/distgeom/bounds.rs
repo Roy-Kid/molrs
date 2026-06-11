@@ -22,7 +22,7 @@
     clippy::nonminimal_bool
 )]
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use super::matrix::BoundsMatrix;
 use super::perceive::{Hybridization, Perceived};
@@ -145,25 +145,23 @@ fn build_bond_index(p: &Perceived) -> BondIndex {
     }
 }
 
-/// Breadth-first topological distance matrix (number of bonds between atoms).
+/// Breadth-first topological distance matrix (number of bonds between atoms),
+/// as `f64` with [`f64::INFINITY`] for unreachable pairs.
 fn topo_distances(p: &Perceived) -> Vec<Vec<f64>> {
-    let n = p.atoms.len();
-    let mut dist = vec![vec![f64::INFINITY; n]; n];
-    for start in 0..n {
-        let mut q = VecDeque::new();
-        dist[start][start] = 0.0;
-        q.push_back(start);
-        while let Some(u) = q.pop_front() {
-            let d = dist[start][u];
-            for &v in &p.adj[u] {
-                if dist[start][v].is_infinite() {
-                    dist[start][v] = d + 1.0;
-                    q.push_back(v);
-                }
-            }
-        }
-    }
-    dist
+    crate::graph::bfs_distance_matrix(&p.adj)
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|d| {
+                    if d == usize::MAX {
+                        f64::INFINITY
+                    } else {
+                        d as f64
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }
 
 // ── geometry helpers (RDGeom::Utils) ───────────────────────────────────────
