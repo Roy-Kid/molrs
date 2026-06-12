@@ -41,6 +41,8 @@ tools and the docs build.
 
 ::: molrs.translate
 
+::: molrs.scale
+
 ## I/O
 
 ::: molrs.read_pdb
@@ -83,6 +85,8 @@ tools and the docs build.
 
 ::: molrs.HollowSphere
 
+::: molrs.Cuboid
+
 ::: molrs.Region
 
 ::: molrs.LinkedCell
@@ -102,11 +106,39 @@ tools and the docs build.
 ## Force Fields
 
 The native force-field model exposes a `Style`/`Type` hierarchy
-(`BondStyle`/`BondType`, `PairStyle`/`PairType`, …) and `Parameters`. Those
-classes are pending in the `molrs.pyi` stub and will appear here once the stub
-is completed; the runtime surface is already importable from `molrs`.
+(`BondStyle`/`BondType`, `PairStyle`/`PairType`, …) and `Parameters`.
 
 ::: molrs.ForceField
+
+::: molrs.Style
+
+::: molrs.AtomStyle
+
+::: molrs.BondStyle
+
+::: molrs.AngleStyle
+
+::: molrs.DihedralStyle
+
+::: molrs.ImproperStyle
+
+::: molrs.PairStyle
+
+::: molrs.Type
+
+::: molrs.AtomType
+
+::: molrs.BondType
+
+::: molrs.AngleType
+
+::: molrs.DihedralType
+
+::: molrs.ImproperType
+
+::: molrs.PairType
+
+::: molrs.Parameters
 
 ::: molrs.MMFFTypifier
 

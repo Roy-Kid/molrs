@@ -177,13 +177,27 @@ class HollowSphere:
     def __or__(self, other: Sphere | HollowSphere | Region) -> Region: ...
     def __invert__(self) -> Region: ...
 
+class Cuboid:
+    """Axis-aligned cuboid (box) region, exposed to Python as `molrs.Cuboid`.
+
+    A point is inside when `origin[d] <= p[d] <= origin[d] + lengths[d]` on
+    every axis. Supports `&` / `|` / `~` composition like the other regions.
+    """
+
+    def __init__(self, origin: ArrayF, lengths: ArrayF) -> None: ...
+    def contains(self, points: ArrayF) -> ArrayBool: ...
+    def bounds(self) -> ArrayF: ...
+    def __and__(self, other: Sphere | HollowSphere | Cuboid | Region) -> Region: ...
+    def __or__(self, other: Sphere | HollowSphere | Cuboid | Region) -> Region: ...
+    def __invert__(self) -> Region: ...
+
 class Region:
     """Composed geometric region (result of &, |, ~ operators)."""
 
     def contains(self, points: ArrayF) -> ArrayBool: ...
     def bounds(self) -> ArrayF: ...
-    def __and__(self, other: Sphere | HollowSphere | Region) -> Region: ...
-    def __or__(self, other: Sphere | HollowSphere | Region) -> Region: ...
+    def __and__(self, other: Sphere | HollowSphere | Cuboid | Region) -> Region: ...
+    def __or__(self, other: Sphere | HollowSphere | Cuboid | Region) -> Region: ...
     def __invert__(self) -> Region: ...
 
 # ---------------------------------------------------------------------------
@@ -303,6 +317,13 @@ def translate(mol: Graph, delta: List[float]) -> None: ...
 def rotate(
     mol: Graph, axis: List[float], angle: float, about: Optional[List[float]] = None
 ) -> None: ...
+def scale(
+    mol: Graph, factor: List[float], about: Optional[List[float]] = None
+) -> None:
+    """Scale node coordinates by a per-axis `factor` about an optional center
+    (defaults to the origin). Pass `[s, s, s]` for a uniform scale. Generic
+    geometry system."""
+    ...
 def perceive_aromaticity(mol: Atomistic) -> int: ...
 def add_hydrogens(mol: Atomistic) -> Atomistic: ...
 def find_rings(mol: Atomistic) -> List[List[int]]: ...
@@ -350,6 +371,10 @@ def parse_smiles(smiles: str) -> SmilesIR: ...
 # ---------------------------------------------------------------------------
 
 def read_pdb(path: str) -> Frame: ...
+def read_pdb_trajectory(path: str) -> list[Frame]:
+    """Read every MODEL of a PDB file as a trajectory (one Frame per MODEL)."""
+    ...
+
 def read_xyz(path: str) -> Frame: ...
 def read_xyz_trajectory(path: str) -> list[Frame]: ...
 def read_lammps(path: str) -> Frame: ...
@@ -459,6 +484,10 @@ def read_chgcar_file(path: str) -> Frame: ...
 def read_cube_file(path: str) -> Frame: ...
 def write_cube_file(path: str, frame: Frame) -> None: ...
 def write_pdb(path: str, frame: Frame) -> None: ...
+def write_pdb_trajectory(path: str, frames: list[Frame]) -> None:
+    """Write a list of Frames to a multi-MODEL PDB trajectory."""
+    ...
+
 def write_xyz(path: str, frame: Frame) -> None: ...
 def write_lammps(path: str, frame: Frame) -> None: ...
 def write_lammps_traj(path: str, frames: Sequence[Frame]) -> None: ...
@@ -519,8 +548,202 @@ class Conformer:
     def generate(self, mol: Atomistic) -> tuple[Atomistic, ConformerReport]: ...
 
 # ---------------------------------------------------------------------------
-# Force field
+# Force field — Style / Type / Parameters model
+#
+# A ForceField owns category-keyed Styles; each Style owns named Types; each
+# Type carries a Parameters view. The classes below are handle *views* over a
+# parent ForceField — they read/write through to it rather than holding owned
+# state.
 # ---------------------------------------------------------------------------
+
+class Parameters:
+    """The parameter view of a :class:`Type` — keyword access plus the
+    ``.kwargs`` mapping consumers read. The model is keyword-only, so ``.args``
+    is always empty.
+    """
+
+    @property
+    def args(self) -> list[Any]: ...
+    @property
+    def kwargs(self) -> dict[str, Any]: ...
+    def get(self, key: str) -> Any: ...
+    def keys(self) -> list[str]: ...
+    def values(self) -> list[Any]: ...
+    def items(self) -> list[tuple[str, Any]]: ...
+
+class Type:
+    """Handle view of one force-field type over a :class:`ForceField`."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def category(self) -> str: ...
+    @property
+    def endpoints(self) -> tuple["AtomType", ...]: ...
+    @property
+    def params(self) -> Parameters: ...
+    def get(self, key: str) -> Any: ...
+    def keys(self) -> list[str]: ...
+    def items(self) -> list[tuple[str, Any]]: ...
+
+class AtomType(Type):
+    """A single atom type (endpoints only — no bonded arity)."""
+
+class BondType(Type):
+    """A bond type spanning two atom-type endpoints ``itom``-``jtom``."""
+
+    @property
+    def itom(self) -> AtomType: ...
+    @property
+    def jtom(self) -> AtomType: ...
+    def matches(self, at1: str, at2: str) -> bool:
+        """Test whether endpoint atom-type names ``at1``-``at2`` match this type."""
+        ...
+
+class AngleType(Type):
+    """An angle type spanning three atom-type endpoints ``itom``-``jtom``-``ktom``."""
+
+    @property
+    def itom(self) -> AtomType: ...
+    @property
+    def jtom(self) -> AtomType: ...
+    @property
+    def ktom(self) -> AtomType: ...
+    def matches(self, at1: str, at2: str, at3: str) -> bool:
+        """Test whether endpoint atom-type names match this type."""
+        ...
+
+class DihedralType(Type):
+    """A dihedral type spanning four atom-type endpoints ``itom``-``jtom``-``ktom``-``ltom``."""
+
+    @property
+    def itom(self) -> AtomType: ...
+    @property
+    def jtom(self) -> AtomType: ...
+    @property
+    def ktom(self) -> AtomType: ...
+    @property
+    def ltom(self) -> AtomType: ...
+    def matches(self, at1: str, at2: str, at3: str, at4: str) -> bool:
+        """Test whether endpoint atom-type names match this type."""
+        ...
+
+class ImproperType(Type):
+    """An improper type spanning four atom-type endpoints ``itom``-``jtom``-``ktom``-``ltom``."""
+
+    @property
+    def itom(self) -> AtomType: ...
+    @property
+    def jtom(self) -> AtomType: ...
+    @property
+    def ktom(self) -> AtomType: ...
+    @property
+    def ltom(self) -> AtomType: ...
+    def matches(self, at1: str, at2: str, at3: str, at4: str) -> bool:
+        """Test whether endpoint atom-type names match this type."""
+        ...
+
+class PairType(Type):
+    """A pair (non-bonded) type spanning two atom-type endpoints ``itom``-``jtom``."""
+
+    @property
+    def itom(self) -> AtomType: ...
+    @property
+    def jtom(self) -> AtomType: ...
+    def matches(self, at1: str, at2: str) -> bool:
+        """Test whether endpoint atom-type names ``at1``-``at2`` match this type."""
+        ...
+
+class Style:
+    """Handle view of one style over a :class:`ForceField`."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def category(self) -> str: ...
+    @property
+    def types(self) -> list[Type]: ...
+    def get_types(self) -> list[Type]: ...
+    def get_type_by_name(self, name: str) -> Optional[Type]: ...
+
+class AtomStyle(Style):
+    """Atom style — defines :class:`AtomType` entries.
+
+    ``types`` / ``get_types`` / ``get_type_by_name`` are inherited from
+    :class:`Style` and yield :class:`AtomType` instances at runtime.
+    """
+
+    def def_type(
+        self, name: str, params: Optional[dict[str, Any]] = None
+    ) -> AtomType: ...
+
+class BondStyle(Style):
+    """Bond style — defines :class:`BondType` entries.
+
+    ``types`` / ``get_types`` / ``get_type_by_name`` are inherited from
+    :class:`Style` and yield :class:`BondType` instances at runtime.
+    """
+
+    def def_type(
+        self, itom: str, jtom: str, params: Optional[dict[str, Any]] = None
+    ) -> BondType: ...
+
+class AngleStyle(Style):
+    """Angle style — defines :class:`AngleType` entries.
+
+    ``types`` / ``get_types`` / ``get_type_by_name`` are inherited from
+    :class:`Style` and yield :class:`AngleType` instances at runtime.
+    """
+
+    def def_type(
+        self, itom: str, jtom: str, ktom: str, params: Optional[dict[str, Any]] = None
+    ) -> AngleType: ...
+
+class DihedralStyle(Style):
+    """Dihedral style — defines :class:`DihedralType` entries.
+
+    ``types`` / ``get_types`` / ``get_type_by_name`` are inherited from
+    :class:`Style` and yield :class:`DihedralType` instances at runtime.
+    """
+
+    def def_type(
+        self,
+        itom: str,
+        jtom: str,
+        ktom: str,
+        ltom: str,
+        params: Optional[dict[str, Any]] = None,
+    ) -> DihedralType: ...
+
+class ImproperStyle(Style):
+    """Improper style — defines :class:`ImproperType` entries.
+
+    ``types`` / ``get_types`` / ``get_type_by_name`` are inherited from
+    :class:`Style` and yield :class:`ImproperType` instances at runtime.
+    """
+
+    def def_type(
+        self,
+        itom: str,
+        jtom: str,
+        ktom: str,
+        ltom: str,
+        params: Optional[dict[str, Any]] = None,
+    ) -> ImproperType: ...
+
+class PairStyle(Style):
+    """Pair (non-bonded) style — defines :class:`PairType` entries.
+
+    ``types`` / ``get_types`` / ``get_type_by_name`` are inherited from
+    :class:`Style` and yield :class:`PairType` instances at runtime.
+    """
+
+    def def_type(
+        self,
+        itom: str,
+        jtom: Optional[str] = None,
+        params: Optional[dict[str, Any]] = None,
+    ) -> PairType: ...
 
 class ForceField:
     @property
