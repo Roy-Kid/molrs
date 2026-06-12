@@ -1,10 +1,11 @@
 //! Ring detection for molecular graphs.
 //!
 //! Computes the **Smallest Set of Smallest Rings (SSSR)** — equivalently the
-//! minimum cycle basis — using a Horton-style algorithm with petgraph BFS.
+//! minimum cycle basis — using a Horton-style algorithm with a native
+//! adjacency BFS.
 //!
 //! # Algorithm
-//! 1. Build an undirected `petgraph::UnGraph` from the molecular bonds.
+//! 1. Build a native adjacency snapshot from the molecular bonds.
 //! 2. For each edge `(u, v)`, temporarily remove it and BFS from `u` to `v`.
 //!    If a path exists, the path + the removed edge = a candidate cycle.
 //! 3. Sort candidates by length (ascending).
@@ -16,10 +17,7 @@
 //! O(E × (V + E)) for candidate generation, O(R × E²) for independence check.
 //! For typical molecular graphs (small, sparse) this is fast.
 
-use std::collections::{HashMap, HashSet, VecDeque};
-
-use petgraph::graph::{NodeIndex, UnGraph};
-use petgraph::visit::EdgeRef;
+use std::collections::{HashMap, VecDeque};
 
 use crate::system::atomistic::{AtomId, Atomistic, BondId};
 
@@ -117,28 +115,24 @@ pub fn find_rings(mol: &Atomistic) -> RingInfo {
 
     let bond_vec: Vec<BondId> = mol.bonds().map(|(id, _)| id).collect();
 
-    // ---- 2. Build petgraph::UnGraph -----------------------------------------
-    let mut graph = UnGraph::<(), ()>::new_undirected();
-    for _ in &atom_vec {
-        graph.add_node(());
-    }
-
-    // Map from graph edge index (usize) → bond_vec index
-    let mut edge_to_bond: Vec<usize> = Vec::with_capacity(bond_vec.len());
-    for (bi, &bid) in bond_vec.iter().enumerate() {
+    // ---- 2. Build native adjacency snapshot over atom_vec indices ----------
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); atom_vec.len()];
+    let mut edges: Vec<[usize; 2]> = Vec::with_capacity(bond_vec.len());
+    for &bid in &bond_vec {
         let (n0, n1) = mol.bond_endpoints(bid).expect("bond must exist");
         let u = atom_to_idx[&n0];
         let v = atom_to_idx[&n1];
-        graph.add_edge(NodeIndex::new(u), NodeIndex::new(v), ());
-        edge_to_bond.push(bi);
+        edges.push([u, v]);
+        adj[u].push(v);
+        adj[v].push(u);
     }
 
-    let n_edges = graph.edge_count();
+    let n_edges = edges.len();
 
     // ---- 3. Expected cycle basis size = E - V + C ---------------------------
     // (C = number of connected components)
-    let n_components = petgraph::algo::connected_components(&graph);
-    let cycle_rank = n_edges as isize - graph.node_count() as isize + n_components as isize;
+    let n_components = count_components(&adj);
+    let cycle_rank = n_edges as isize - atom_vec.len() as isize + n_components as isize;
     if cycle_rank <= 0 {
         return RingInfo::empty();
     }
@@ -148,11 +142,12 @@ pub fn find_rings(mol: &Atomistic) -> RingInfo {
     // For each edge, remove it, BFS for shortest path, reconstruct cycle.
     let mut candidates: Vec<Vec<usize>> = Vec::new(); // each is a list of node indices
 
-    for edge_idx in graph.edge_indices() {
-        let (u, v) = graph.edge_endpoints(edge_idx).unwrap();
+    for edge in &edges {
+        let (u, v) = (edge[0], edge[1]);
+        let skip = if u < v { (u, v) } else { (v, u) };
 
-        // BFS from u to v in graph, skipping the direct edge between u and v
-        if let Some(path) = bfs_shortest_path(&graph, u, v, edge_idx) {
+        // BFS from u to v, skipping the direct edge between u and v.
+        if let Some(path) = bfs_shortest_path(&adj, u, v, skip) {
             // path is [u, ..., v], which forms a cycle with the edge u-v
             candidates.push(path);
         }
@@ -165,14 +160,10 @@ pub fn find_rings(mol: &Atomistic) -> RingInfo {
     // Represent each cycle as a bit vector over edges.
     // Build a lookup: (min_node, max_node) → edge index for quick edge lookup
     let mut edge_lookup: HashMap<(usize, usize), usize> = HashMap::new();
-    for edge_idx in graph.edge_indices() {
-        let (a, b) = graph.edge_endpoints(edge_idx).unwrap();
-        let key = if a.index() < b.index() {
-            (a.index(), b.index())
-        } else {
-            (b.index(), a.index())
-        };
-        edge_lookup.insert(key, edge_idx.index());
+    for (ei, edge) in edges.iter().enumerate() {
+        let (a, b) = (edge[0], edge[1]);
+        let key = if a < b { (a, b) } else { (b, a) };
+        edge_lookup.insert(key, ei);
     }
 
     let mut basis_vectors: Vec<Vec<u64>> = Vec::new();
@@ -243,53 +234,80 @@ pub fn find_rings(mol: &Atomistic) -> RingInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Connected-component count (native flood fill)
+// ---------------------------------------------------------------------------
+
+/// Count connected components of an undirected graph given as adjacency lists.
+fn count_components(adj: &[Vec<usize>]) -> usize {
+    let n = adj.len();
+    let mut visited = vec![false; n];
+    let mut components = 0usize;
+    for start in 0..n {
+        if visited[start] {
+            continue;
+        }
+        components += 1;
+        let mut queue = VecDeque::new();
+        visited[start] = true;
+        queue.push_back(start);
+        while let Some(current) = queue.pop_front() {
+            for &neighbor in &adj[current] {
+                if !visited[neighbor] {
+                    visited[neighbor] = true;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+    }
+    components
+}
+
+// ---------------------------------------------------------------------------
 // BFS shortest path avoiding a specific edge
 // ---------------------------------------------------------------------------
 
-/// BFS from `start` to `goal` in `graph`, but do not traverse edge `skip_edge`.
-/// Returns the node-index path `[start, ..., goal]` if reachable.
+/// BFS from `start` to `goal` over `adj`, but do not traverse the edge whose
+/// endpoint pair equals `skip = (min, max)`. Returns the node-index path
+/// `[start, ..., goal]` if reachable.
 fn bfs_shortest_path(
-    graph: &UnGraph<(), ()>,
-    start: NodeIndex,
-    goal: NodeIndex,
-    skip_edge: petgraph::graph::EdgeIndex,
+    adj: &[Vec<usize>],
+    start: usize,
+    goal: usize,
+    skip: (usize, usize),
 ) -> Option<Vec<usize>> {
-    let mut visited = HashSet::new();
-    let mut parent: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+    let n = adj.len();
+    let mut visited = vec![false; n];
+    let mut parent: Vec<i64> = vec![-1; n];
     let mut queue = VecDeque::new();
 
-    visited.insert(start);
+    visited[start] = true;
     queue.push_back(start);
 
     while let Some(current) = queue.pop_front() {
         if current == goal {
             // Reconstruct path
-            let mut path = vec![goal.index()];
+            let mut path = vec![goal];
             let mut node = goal;
             while node != start {
-                node = parent[&node];
-                path.push(node.index());
+                node = parent[node] as usize;
+                path.push(node);
             }
             path.reverse();
             return Some(path);
         }
 
-        // Walk edges manually to check edge identity
-        let edges = graph.edges(current);
-        for edge_ref in edges {
-            if edge_ref.id() == skip_edge {
+        for &neighbor in &adj[current] {
+            let key = if current < neighbor {
+                (current, neighbor)
+            } else {
+                (neighbor, current)
+            };
+            if key == skip {
                 continue;
             }
-            let neighbor = edge_ref.target();
-            // In petgraph's undirected graph, edges() can return the source
-            // as target, so pick the other endpoint.
-            let neighbor = if neighbor == current {
-                edge_ref.source()
-            } else {
-                neighbor
-            };
-            if visited.insert(neighbor) {
-                parent.insert(neighbor, current);
+            if !visited[neighbor] {
+                visited[neighbor] = true;
+                parent[neighbor] = current as i64;
                 queue.push_back(neighbor);
             }
         }

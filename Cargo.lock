@@ -981,7 +981,6 @@ dependencies = [
  "libm",
  "ndarray",
  "ndarray-linalg",
- "petgraph",
  "rand 0.10.1",
  "rayon",
  "serde",

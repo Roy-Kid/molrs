@@ -2,7 +2,7 @@
 //! distances over the bond graph. These exercise the Python-reachable
 //! `generate_topology` / `topo_distances` entry points — the core graph kernels
 //! that molpy's `Atomistic` now delegates to after the core-sink — and guard
-//! the petgraph-backed 2-edge / 3-edge path enumeration against an accidental
+//! the native 2-edge / 3-edge path enumeration against an accidental
 //! super-linear regression.
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group};

@@ -1,5 +1,5 @@
 //! Graph hot-path benches: aromaticity perception (per-atom valence over
-//! incident bonds) and ring perception (petgraph cycle basis). These exercise
+//! incident bonds) and ring perception (native cycle basis). These exercise
 //! the Python-reachable `perceive_aromaticity` / `find_rings` entry points and
 //! guard the O(N) adjacency path against an accidental O(N^2) all-bonds scan.
 

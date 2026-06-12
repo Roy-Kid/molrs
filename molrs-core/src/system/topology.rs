@@ -1,50 +1,55 @@
-//! Graph-based molecular topology using petgraph.
+//! Graph-based molecular topology.
 //!
 //! Provides graph-based representation of molecular connectivity with
 //! automated detection of angles, dihedrals, and impropers via neighbor
 //! traversal.
 
-use std::collections::{HashMap, HashSet, VecDeque};
-
-use petgraph::graph::{EdgeIndex, NodeIndex, UnGraph};
-use petgraph::visit::EdgeRef;
+use std::collections::{HashMap, VecDeque};
 
 /// Graph-based molecular topology.
 ///
-/// Wraps an undirected `petgraph::UnGraph<(), ()>` where vertices are atoms
-/// and edges are bonds. Angles, dihedrals, and impropers are detected
-/// automatically from bond connectivity using neighbor traversal.
+/// Holds a native adjacency snapshot where vertices are contiguous atom
+/// indices `0..n` and edges are bonds. Angles, dihedrals, and impropers are
+/// detected automatically from bond connectivity using neighbor traversal.
 pub struct Topology {
-    graph: UnGraph<(), ()>,
+    /// Node count.
+    n: usize,
+    /// `adj[node]` = neighbor node indices, in insertion order.
+    adj: Vec<Vec<usize>>,
+    /// Edges in insertion order, `[i, j]` as added.
+    edges: Vec<[usize; 2]>,
 }
 
 impl Topology {
     /// Create an empty topology with no atoms or bonds.
     pub fn new() -> Self {
         Self {
-            graph: UnGraph::new_undirected(),
+            n: 0,
+            adj: Vec::new(),
+            edges: Vec::new(),
         }
     }
 
     /// Create a topology with `n` atoms and no bonds.
     pub fn with_atoms(n: usize) -> Self {
-        let mut graph = UnGraph::new_undirected();
-        for _ in 0..n {
-            graph.add_node(());
+        Self {
+            n,
+            adj: vec![Vec::new(); n],
+            edges: Vec::new(),
         }
-        Self { graph }
     }
 
     /// Create a topology from edge pairs.
     pub fn from_edges(n_atoms: usize, edges: &[[usize; 2]]) -> Self {
-        let mut graph = UnGraph::new_undirected();
-        for _ in 0..n_atoms {
-            graph.add_node(());
-        }
+        let mut topo = Self::with_atoms(n_atoms);
+        // `from_edges` does not deduplicate (matching the prior graph backend),
+        // so push every edge as-is.
         for e in edges {
-            graph.add_edge(NodeIndex::new(e[0]), NodeIndex::new(e[1]), ());
+            topo.edges.push([e[0], e[1]]);
+            topo.adj[e[0]].push(e[1]);
+            topo.adj[e[1]].push(e[0]);
         }
-        Self { graph }
+        topo
     }
 
     // -----------------------------------------------------------------------
@@ -53,12 +58,12 @@ impl Topology {
 
     /// Number of atoms (vertices).
     pub fn n_atoms(&self) -> usize {
-        self.graph.node_count()
+        self.n
     }
 
     /// Number of bonds (edges).
     pub fn n_bonds(&self) -> usize {
-        self.graph.edge_count()
+        self.edges.len()
     }
 
     /// Number of unique angles (i-j-k triplets).
@@ -77,33 +82,27 @@ impl Topology {
 
     /// All atom indices.
     pub fn atoms(&self) -> Vec<usize> {
-        self.graph.node_indices().map(|n| n.index()).collect()
+        (0..self.n).collect()
     }
 
     /// All bond pairs as `[i, j]`.
     pub fn bonds(&self) -> Vec<[usize; 2]> {
-        self.graph
-            .edge_indices()
-            .map(|e| {
-                let (a, b) = self.graph.edge_endpoints(e).unwrap();
-                [a.index(), b.index()]
-            })
-            .collect()
+        self.edges.clone()
     }
 
     /// All unique angle triplets `[i, j, k]`, deduplicated (i < k).
     pub fn angles(&self) -> Vec<[usize; 3]> {
         let mut result = Vec::new();
-        for j in self.graph.node_indices() {
-            let neighbors: Vec<NodeIndex> = self.graph.neighbors(j).collect();
+        for j in 0..self.n {
+            let neighbors = &self.adj[j];
             for a in 0..neighbors.len() {
                 for b in (a + 1)..neighbors.len() {
-                    let i = neighbors[a].index();
-                    let k = neighbors[b].index();
+                    let i = neighbors[a];
+                    let k = neighbors[b];
                     if i < k {
-                        result.push([i, j.index(), k]);
+                        result.push([i, j, k]);
                     } else {
-                        result.push([k, j.index(), i]);
+                        result.push([k, j, i]);
                     }
                 }
             }
@@ -114,22 +113,18 @@ impl Topology {
     /// All unique proper dihedral quartets `[i, j, k, l]`, deduplicated (j < k).
     pub fn dihedrals(&self) -> Vec<[usize; 4]> {
         let mut result = Vec::new();
-        for edge in self.graph.edge_indices() {
-            let (a, b) = self.graph.edge_endpoints(edge).unwrap();
+        for edge in &self.edges {
+            let (a, b) = (edge[0], edge[1]);
             // Canonical ordering: j < k
-            let (j, k) = if a.index() < b.index() {
-                (a, b)
-            } else {
-                (b, a)
-            };
+            let (j, k) = if a < b { (a, b) } else { (b, a) };
 
-            let j_neighbors: Vec<NodeIndex> = self.graph.neighbors(j).filter(|&n| n != k).collect();
-            let k_neighbors: Vec<NodeIndex> = self.graph.neighbors(k).filter(|&n| n != j).collect();
+            let j_neighbors: Vec<usize> = self.adj[j].iter().copied().filter(|&n| n != k).collect();
+            let k_neighbors: Vec<usize> = self.adj[k].iter().copied().filter(|&n| n != j).collect();
 
             for &i in &j_neighbors {
                 for &l in &k_neighbors {
                     if i != l {
-                        result.push([i.index(), j.index(), k.index(), l.index()]);
+                        result.push([i, j, k, l]);
                     }
                 }
             }
@@ -143,9 +138,8 @@ impl Topology {
     /// of its neighbors.
     pub fn impropers(&self) -> Vec<[usize; 4]> {
         let mut result = Vec::new();
-        for center in self.graph.node_indices() {
-            let mut neighbors: Vec<usize> =
-                self.graph.neighbors(center).map(|n| n.index()).collect();
+        for center in 0..self.n {
+            let mut neighbors: Vec<usize> = self.adj[center].clone();
             if neighbors.len() < 3 {
                 continue;
             }
@@ -154,7 +148,7 @@ impl Topology {
             for a in 0..n {
                 for b in (a + 1)..n {
                     for c in (b + 1)..n {
-                        result.push([center.index(), neighbors[a], neighbors[b], neighbors[c]]);
+                        result.push([center, neighbors[a], neighbors[b], neighbors[c]]);
                     }
                 }
             }
@@ -168,22 +162,17 @@ impl Topology {
 
     /// Neighbor atom indices of atom `idx`.
     pub fn neighbors(&self, idx: usize) -> Vec<usize> {
-        self.graph
-            .neighbors(NodeIndex::new(idx))
-            .map(|n| n.index())
-            .collect()
+        self.adj[idx].clone()
     }
 
     /// Degree (number of bonds) of atom `idx`.
     pub fn degree(&self, idx: usize) -> usize {
-        self.graph.neighbors(NodeIndex::new(idx)).count()
+        self.adj[idx].len()
     }
 
     /// Whether atoms `i` and `j` are directly bonded.
     pub fn are_bonded(&self, i: usize, j: usize) -> bool {
-        self.graph
-            .find_edge(NodeIndex::new(i), NodeIndex::new(j))
-            .is_some()
+        self.adj[i].contains(&j)
     }
 
     // -----------------------------------------------------------------------
@@ -196,7 +185,7 @@ impl Topology {
     /// component ID (0-based, contiguous). Isolated atoms each form their own
     /// component.
     pub fn connected_components(&self) -> Vec<i64> {
-        let n = self.graph.node_count();
+        let n = self.n;
         let mut labels = vec![-1i64; n];
         let mut label = 0i64;
 
@@ -205,15 +194,14 @@ impl Topology {
                 continue;
             }
             let mut queue = VecDeque::new();
-            queue.push_back(NodeIndex::new(start));
+            queue.push_back(start);
             labels[start] = label;
 
             while let Some(current) = queue.pop_front() {
-                for neighbor in self.graph.neighbors(current) {
-                    let ni = neighbor.index();
+                for &ni in &self.adj[current] {
                     if labels[ni] < 0 {
                         labels[ni] = label;
-                        queue.push_back(neighbor);
+                        queue.push_back(ni);
                     }
                 }
             }
@@ -230,21 +218,20 @@ impl Topology {
     /// connected component). `source` itself has distance 0. An out-of-range
     /// `source` yields an all-`-1` vector.
     pub fn distances(&self, source: usize) -> Vec<i64> {
-        let n = self.graph.node_count();
+        let n = self.n;
         let mut dist = vec![-1i64; n];
         if source >= n {
             return dist;
         }
         dist[source] = 0;
         let mut queue = VecDeque::new();
-        queue.push_back(NodeIndex::new(source));
+        queue.push_back(source);
         while let Some(current) = queue.pop_front() {
-            let d = dist[current.index()];
-            for neighbor in self.graph.neighbors(current) {
-                let ni = neighbor.index();
+            let d = dist[current];
+            for &ni in &self.adj[current] {
                 if dist[ni] < 0 {
                     dist[ni] = d + 1;
-                    queue.push_back(neighbor);
+                    queue.push_back(ni);
                 }
             }
         }
@@ -253,7 +240,10 @@ impl Topology {
 
     /// Number of connected components.
     pub fn n_components(&self) -> usize {
-        petgraph::algo::connected_components(&self.graph)
+        self.connected_components()
+            .iter()
+            .max()
+            .map_or(0, |&m| (m + 1) as usize)
     }
 
     // -----------------------------------------------------------------------
@@ -265,14 +255,14 @@ impl Topology {
     /// Returns a [`TopologyRingInfo`] containing all detected rings and
     /// lookup tables for per-atom and per-bond ring membership.
     pub fn find_rings(&self) -> TopologyRingInfo {
-        let n_nodes = self.graph.node_count();
-        let n_edges = self.graph.edge_count();
+        let n_nodes = self.n;
+        let n_edges = self.edges.len();
         if n_nodes == 0 || n_edges == 0 {
             return TopologyRingInfo::empty();
         }
 
         // Expected cycle basis size = E - V + C
-        let n_comp = petgraph::algo::connected_components(&self.graph);
+        let n_comp = self.n_components();
         let cycle_rank = n_edges as isize - n_nodes as isize + n_comp as isize;
         if cycle_rank <= 0 {
             return TopologyRingInfo::empty();
@@ -281,9 +271,10 @@ impl Topology {
 
         // Generate candidate cycles (Horton-style)
         let mut candidates: Vec<Vec<usize>> = Vec::new();
-        for edge_idx in self.graph.edge_indices() {
-            let (u, v) = self.graph.edge_endpoints(edge_idx).unwrap();
-            if let Some(path) = self.bfs_skip_edge(u, v, edge_idx) {
+        for edge in &self.edges {
+            let (u, v) = (edge[0], edge[1]);
+            let skip = if u < v { (u, v) } else { (v, u) };
+            if let Some(path) = self.bfs_skip_edge(u, v, skip) {
                 candidates.push(path);
             }
         }
@@ -291,14 +282,10 @@ impl Topology {
 
         // Edge lookup for bit vector construction
         let mut edge_lookup: HashMap<(usize, usize), usize> = HashMap::new();
-        for edge_idx in self.graph.edge_indices() {
-            let (a, b) = self.graph.edge_endpoints(edge_idx).unwrap();
-            let key = if a.index() < b.index() {
-                (a.index(), b.index())
-            } else {
-                (b.index(), a.index())
-            };
-            edge_lookup.insert(key, edge_idx.index());
+        for (ei, edge) in self.edges.iter().enumerate() {
+            let (a, b) = (edge[0], edge[1]);
+            let key = if a < b { (a, b) } else { (b, a) };
+            edge_lookup.insert(key, ei);
         }
 
         // Select linearly independent cycles via GF(2) Gaussian elimination
@@ -351,42 +338,39 @@ impl Topology {
         }
     }
 
-    /// BFS from `start` to `goal`, skipping one specific edge.
-    fn bfs_skip_edge(
-        &self,
-        start: NodeIndex,
-        goal: NodeIndex,
-        skip: petgraph::graph::EdgeIndex,
-    ) -> Option<Vec<usize>> {
-        let mut visited = HashSet::new();
-        let mut parent: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+    /// BFS from `start` to `goal`, skipping one specific edge identified by its
+    /// endpoint pair `skip = (min, max)`.
+    fn bfs_skip_edge(&self, start: usize, goal: usize, skip: (usize, usize)) -> Option<Vec<usize>> {
+        let mut visited = vec![false; self.n];
+        let mut parent: Vec<i64> = vec![-1; self.n];
         let mut queue = VecDeque::new();
 
-        visited.insert(start);
+        visited[start] = true;
         queue.push_back(start);
 
         while let Some(current) = queue.pop_front() {
             if current == goal {
-                let mut path = vec![goal.index()];
+                let mut path = vec![goal];
                 let mut node = goal;
                 while node != start {
-                    node = parent[&node];
-                    path.push(node.index());
+                    node = parent[node] as usize;
+                    path.push(node);
                 }
                 path.reverse();
                 return Some(path);
             }
-            for edge_ref in self.graph.edges(current) {
-                if edge_ref.id() == skip {
+            for &neighbor in &self.adj[current] {
+                let key = if current < neighbor {
+                    (current, neighbor)
+                } else {
+                    (neighbor, current)
+                };
+                if key == skip {
                     continue;
                 }
-                let neighbor = if edge_ref.target() == current {
-                    edge_ref.source()
-                } else {
-                    edge_ref.target()
-                };
-                if visited.insert(neighbor) {
-                    parent.insert(neighbor, current);
+                if !visited[neighbor] {
+                    visited[neighbor] = true;
+                    parent[neighbor] = current as i64;
                     queue.push_back(neighbor);
                 }
             }
@@ -400,22 +384,55 @@ impl Topology {
 
     /// Add a single atom.
     pub fn add_atom(&mut self) {
-        self.graph.add_node(());
+        self.adj.push(Vec::new());
+        self.n += 1;
     }
 
     /// Add `n` atoms.
     pub fn add_atoms(&mut self, n: usize) {
         for _ in 0..n {
-            self.graph.add_node(());
+            self.add_atom();
         }
     }
 
     /// Delete an atom by index.
     ///
-    /// Note: petgraph swaps the last node into the removed node's slot,
-    /// so indices of other nodes may change.
+    /// Note: uses swap-remove semantics — the last node is moved into the
+    /// removed node's slot, so indices of other nodes may change.
     pub fn delete_atom(&mut self, idx: usize) {
-        self.graph.remove_node(NodeIndex::new(idx));
+        if idx >= self.n {
+            return;
+        }
+        let last = self.n - 1;
+
+        // Remove edges incident to `idx` and drop `idx` from every adj list.
+        self.edges.retain(|e| e[0] != idx && e[1] != idx);
+        for list in &mut self.adj {
+            list.retain(|&x| x != idx);
+        }
+
+        // Relabel the last node into `idx` (swap-remove semantics).
+        if idx != last {
+            for e in &mut self.edges {
+                if e[0] == last {
+                    e[0] = idx;
+                }
+                if e[1] == last {
+                    e[1] = idx;
+                }
+            }
+            for list in &mut self.adj {
+                for x in list.iter_mut() {
+                    if *x == last {
+                        *x = idx;
+                    }
+                }
+            }
+            self.adj.swap(idx, last);
+        }
+
+        self.adj.pop();
+        self.n -= 1;
     }
 
     // -----------------------------------------------------------------------
@@ -424,10 +441,10 @@ impl Topology {
 
     /// Add a bond between atoms `i` and `j` if not already connected.
     pub fn add_bond(&mut self, i: usize, j: usize) {
-        let ni = NodeIndex::new(i);
-        let nj = NodeIndex::new(j);
-        if self.graph.find_edge(ni, nj).is_none() {
-            self.graph.add_edge(ni, nj, ());
+        if !self.are_bonded(i, j) {
+            self.edges.push([i, j]);
+            self.adj[i].push(j);
+            self.adj[j].push(i);
         }
     }
 
@@ -440,7 +457,16 @@ impl Topology {
 
     /// Delete a bond by edge index.
     pub fn delete_bond(&mut self, idx: usize) {
-        self.graph.remove_edge(EdgeIndex::new(idx));
+        let [a, b] = self.edges[idx];
+        // Remove one instance of the bond from each endpoint's adjacency list.
+        if let Some(pos) = self.adj[a].iter().position(|&x| x == b) {
+            self.adj[a].remove(pos);
+        }
+        if let Some(pos) = self.adj[b].iter().position(|&x| x == a) {
+            self.adj[b].remove(pos);
+        }
+        // Swap-remove the edge slot (matching the prior graph backend).
+        self.edges.swap_remove(idx);
     }
 
     // -----------------------------------------------------------------------
@@ -865,5 +891,78 @@ mod tests {
     fn test_find_rings_empty() {
         let topo = Topology::new();
         assert_eq!(topo.find_rings().num_rings(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Edge-case parity tests (native adjacency rewrite)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_empty_graph_enumerations() {
+        // Empty graph: no angles/dihedrals/impropers, no panic.
+        let topo = Topology::new();
+        assert!(topo.angles().is_empty());
+        assert!(topo.dihedrals().is_empty());
+        assert!(topo.impropers().is_empty());
+        assert_eq!(topo.n_components(), 0);
+        assert_eq!(topo.find_rings().num_rings(), 0);
+        // with_atoms(0) is equivalent to new() for enumeration.
+        let topo0 = Topology::with_atoms(0);
+        assert!(topo0.angles().is_empty());
+        assert!(topo0.dihedrals().is_empty());
+        assert!(topo0.impropers().is_empty());
+    }
+
+    #[test]
+    fn test_single_edge_graph() {
+        // A single bond 0-1: one angle path is impossible (degree 1 each), no
+        // dihedral, no improper; two connected atoms.
+        let topo = Topology::from_edges(2, &[[0, 1]]);
+        assert_eq!(topo.n_atoms(), 2);
+        assert_eq!(topo.n_bonds(), 1);
+        assert!(topo.angles().is_empty());
+        assert!(topo.dihedrals().is_empty());
+        assert!(topo.impropers().is_empty());
+        assert_eq!(topo.n_components(), 1);
+        assert_eq!(topo.distances(0), vec![0, 1]);
+        assert_eq!(topo.distances(1), vec![1, 0]);
+        assert_eq!(topo.find_rings().num_rings(), 0);
+    }
+
+    #[test]
+    fn test_disconnected_distances_multiple_sources() {
+        // Two components: {0-1-2} and {3-4}.
+        let topo = Topology::from_edges(5, &[[0, 1], [1, 2], [3, 4]]);
+        assert_eq!(topo.n_components(), 2);
+        // Source in first component never reaches second.
+        assert_eq!(topo.distances(0), vec![0, 1, 2, -1, -1]);
+        assert_eq!(topo.distances(2), vec![2, 1, 0, -1, -1]);
+        // Source in second component never reaches first.
+        assert_eq!(topo.distances(3), vec![-1, -1, -1, 0, 1]);
+        assert_eq!(topo.distances(4), vec![-1, -1, -1, 1, 0]);
+    }
+
+    #[test]
+    fn test_delete_atom_swap_remove_relabels() {
+        // 0-1-2-3 chain; deleting atom 1 swaps node 3 into slot 1.
+        let mut topo = Topology::from_edges(4, &[[0, 1], [1, 2], [2, 3]]);
+        topo.delete_atom(1);
+        assert_eq!(topo.n_atoms(), 3);
+        // Edge [0,1] and [1,2] are removed; edge [2,3] survives but relabeled
+        // (old node 3 -> slot 1). So node 2 and new node 1 stay bonded.
+        assert_eq!(topo.n_bonds(), 1);
+        assert!(topo.are_bonded(2, 1));
+    }
+
+    #[test]
+    fn test_delete_bond_swap_remove() {
+        let mut topo = Topology::with_atoms(4);
+        topo.add_bonds(&[[0, 1], [1, 2], [2, 3]]);
+        assert_eq!(topo.n_bonds(), 3);
+        topo.delete_bond(0); // remove edge [0,1]; [2,3] swaps into slot 0
+        assert_eq!(topo.n_bonds(), 2);
+        assert!(!topo.are_bonded(0, 1));
+        assert!(topo.are_bonded(1, 2));
+        assert!(topo.are_bonded(2, 3));
     }
 }

@@ -1,3 +1,11 @@
+> **SUPERSEDED (2026-06-12) by [core-drop-petgraph](core-drop-petgraph.md).**
+> The implementation note below ("reuse petgraph Topology, don't reinvent") is
+> reversed there: a PoC showed native-over-MolGraph is faster and removes the
+> dependency, and the only genuinely complex graph algorithm (VF2) lives in
+> molrs-io SMARTS, not core. `core-drop-petgraph` realizes this spec's original
+> native intent and broadens it (distances, components, rings, impropers,
+> petgraph dependency removal). Do not implement this spec; implement that one.
+
 # Spec: Graph-theoretic topology in molgraph; Atomistic.generate_topology
 
 > **Implementation note (2026-06-10).** Per the directive "use petgraph like

@@ -312,8 +312,8 @@ impl Atomistic {
 
     /// Perceive angle and dihedral relations from the bond graph.
     ///
-    /// Builds a [`Topology`](crate::system::topology::Topology) (a `petgraph`
-    /// undirected graph) from the current bonds and reuses its
+    /// Builds a [`Topology`](crate::system::topology::Topology) (a native
+    /// adjacency snapshot) from the current bonds and reuses its
     /// `angles()` / `dihedrals()` enumeration — angles are 2-edge paths
     /// `i-j-k` (deduplicated `i < k`), proper dihedrals are 3-edge paths
     /// `i-j-k-l` (each central edge once). `Atomistic` is just the domain leaf
@@ -346,7 +346,7 @@ impl Atomistic {
             }
         }
 
-        // Build the petgraph topology from bonds (atoms in node-id order).
+        // Build the native topology snapshot from bonds (atoms in node-id order).
         let atoms: Vec<AtomId> = self.graph.node_ids().collect();
         let pos: std::collections::HashMap<AtomId, usize> =
             atoms.iter().enumerate().map(|(i, &a)| (a, i)).collect();
@@ -395,39 +395,36 @@ impl Atomistic {
         Ok((n_ang, n_dih))
     }
 
-    /// Build the bond-graph [`Topology`](crate::system::topology::Topology) over the
-    /// atoms in node-id (row) order. The Topology's contiguous indices map to
-    /// `self.node_ids()` in order.
-    pub fn bond_topology(&self) -> crate::system::topology::Topology {
-        let atoms: Vec<AtomId> = self.graph.node_ids().collect();
-        let pos: std::collections::HashMap<AtomId, usize> =
-            atoms.iter().enumerate().map(|(i, &a)| (a, i)).collect();
-        let mut edges: Vec<[usize; 2]> = Vec::new();
-        for id in self.graph.relation_ids(self.bond) {
-            if let Ok(n) = self.graph.relation_nodes(self.bond, id)
-                && n.len() == 2
-            {
-                edges.push([pos[&n[0]], pos[&n[1]]]);
-            }
-        }
-        crate::system::topology::Topology::from_edges(atoms.len(), &edges)
-    }
-
     /// BFS shortest-path distances over the bond graph from `source`, as
     /// `(atom_id, hops)` pairs for every atom reachable from `source`
     /// (including `source` at distance 0). Unreachable atoms are omitted; an
     /// unknown `source` yields an empty vector.
+    ///
+    /// The BFS runs directly on the native `MolGraph` adjacency (relations
+    /// filtered to the bond kind), keyed by a `SecondaryMap` (O(1),
+    /// slot-indexed) — no `Topology` materialization and no
+    /// AtomId→contiguous-index remap.
     pub fn topo_distances(&self, source: AtomId) -> Vec<(AtomId, i64)> {
-        let atoms: Vec<AtomId> = self.graph.node_ids().collect();
-        let Some(src_idx) = atoms.iter().position(|&a| a == source) else {
+        use slotmap::SecondaryMap;
+        use std::collections::VecDeque;
+
+        if self.graph.get_node(source).is_err() {
             return Vec::new();
-        };
-        self.bond_topology()
-            .distances(src_idx)
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, d)| if d >= 0 { Some((atoms[i], d)) } else { None })
-            .collect()
+        }
+        let mut dist: SecondaryMap<AtomId, i64> = SecondaryMap::new();
+        dist.insert(source, 0);
+        let mut queue = VecDeque::new();
+        queue.push_back(source);
+        while let Some(cur) = queue.pop_front() {
+            let d = dist[cur];
+            for (kind, _rid, other) in self.graph.neighbor_relations(cur) {
+                if kind == self.bond && !dist.contains_key(other) {
+                    dist.insert(other, d + 1);
+                    queue.push_back(other);
+                }
+            }
+        }
+        dist.into_iter().collect()
     }
 
     // ---- impropers ----
@@ -631,6 +628,77 @@ mod tests {
         assert_eq!(n_ang, 12);
         assert_eq!(n_dih, 0);
         assert_eq!(mol.n_dihedrals(), 0);
+    }
+
+    #[test]
+    fn topo_distances_parity() {
+        // Native BFS over the bond graph. Asserts the (atom, hops) set directly
+        // against the expected hop multisets.
+        let hops = |mut v: Vec<(AtomId, i64)>| -> Vec<i64> {
+            v.sort();
+            v.into_iter().map(|(_, d)| d).collect::<Vec<i64>>()
+        };
+        let sorted_hops = |v: Vec<(AtomId, i64)>| {
+            let mut d: Vec<i64> = v.into_iter().map(|(_, d)| d).collect();
+            d.sort_unstable();
+            d
+        };
+
+        let eth = ethane();
+        let atoms: Vec<AtomId> = eth.node_ids().collect();
+        // Ethane: C0(0)-C1(1) with H2,H3,H4 on C0 and H5,H6,H7 on C1.
+        // From C0: self 0; C1 1; its own H's 1; far H's 2.
+        let expected_per_source: [Vec<i64>; 8] = [
+            // C0
+            vec![0, 1, 1, 1, 1, 2, 2, 2],
+            // C1
+            vec![1, 0, 2, 2, 2, 1, 1, 1],
+            // H2 (on C0)
+            vec![1, 2, 0, 2, 2, 3, 3, 3],
+            // H3 (on C0)
+            vec![1, 2, 2, 0, 2, 3, 3, 3],
+            // H4 (on C0)
+            vec![1, 2, 2, 2, 0, 3, 3, 3],
+            // H5 (on C1)
+            vec![2, 1, 3, 3, 3, 0, 2, 2],
+            // H6 (on C1)
+            vec![2, 1, 3, 3, 3, 2, 0, 2],
+            // H7 (on C1)
+            vec![2, 1, 3, 3, 3, 2, 2, 0],
+        ];
+        for (i, &src) in atoms.iter().enumerate() {
+            assert_eq!(
+                sorted_hops(eth.topo_distances(src)),
+                sorted_hops(expected_per_source[i].iter().map(|&d| (src, d)).collect()),
+                "ethane source {src:?}"
+            );
+        }
+
+        // 12-atom linear chain: an endpoint sees every hop count 0..=11 once.
+        let mut chain = Atomistic::new();
+        let ids: Vec<_> = (0..12).map(|_| chain.add_atom_bare("C")).collect();
+        for k in 0..ids.len() - 1 {
+            chain.add_bond(ids[k], ids[k + 1]).unwrap();
+        }
+        assert_eq!(
+            sorted_hops(chain.topo_distances(ids[0])),
+            (0..12).collect::<Vec<_>>(),
+        );
+        // The mid-chain atom 5 sees a symmetric profile.
+        assert_eq!(
+            hops(chain.topo_distances(ids[0])),
+            (0..12).collect::<Vec<_>>(),
+            "chain endpoint ordered by atom id"
+        );
+
+        // Unknown source → empty vec (error path). Use a genuinely-stale id
+        // from the same arena (add then remove bumps the slot generation so
+        // the old id no longer resolves) — a foreign arena's id can collide on
+        // slot+generation and is not a reliable "absent" probe.
+        let mut solo = Atomistic::new();
+        let stale = solo.add_atom_bare("C");
+        solo.remove_atom(stale).unwrap();
+        assert!(solo.topo_distances(stale).is_empty());
     }
 
     #[test]
