@@ -69,7 +69,7 @@ toggle.name = "Switch to light mode"
 default_handler = "python"
 
 [project.plugins.mkdocstrings.handlers.python]
-paths = ["../python"]
+paths = ["python"]
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "numpy"
