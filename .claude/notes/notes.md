@@ -17,6 +17,25 @@ status change) and conflicts with `CLAUDE.md`.
 
 ---
 
+## 2026-06-12 — petgraph: removed from molrs-core, KEPT in molrs-io (VF2)
+**Decision:** `molrs-core` no longer depends on petgraph (spec `core-drop-petgraph`,
+commit eedc1e6): `Topology`/`topo_distances`/`chem::rings` run on native MolGraph
+adjacency. `molrs-io` **keeps** petgraph (feature-gated behind `smiles`) — do NOT
+remove it; do NOT move VF2 into molrs-core/molgraph.
+**Why:** The two uses are opposite. In core, petgraph was a redundant adjacency
+wrapper over a graph MolGraph already holds; the algorithms (path enumeration,
+BFS, flood-fill, Horton SSSR) were already hand-rolled — removing it was ~free and
+slimmed the foundation crate (topo_distances also got faster, 100k 7.61ms→4.36ms).
+In molrs-io, petgraph does real work: `subgraph_isomorphisms_iter` (VF2) powers
+SMARTS substructure matching (validated vs RDKit), plus the weighted `UnGraph<N,E>`
+containers for the target + query pattern. Re-implementing VF2 = ~500–800 lines of
+correctness-critical backtracking we'd self-maintain, for a dep that's mature,
+MIT/Apache, and only pulled when `smiles` is enabled. Moving VF2 into molgraph is
+wrong layer (core uses no VF2; query semantics don't fit the domain-agnostic graph).
+Revisit ONLY under a hard constraint (WASM size budget, zero-dep policy, petgraph
+deprecation).
+**Status:** provisional
+
 ## 2026-05-28 — BLAS/LAPACK backend selection is the binary's job, not molrs's
 
 **Decision:** `molrs-core/Cargo.toml` keeps `ndarray-linalg = "0.18"` with
