@@ -24,8 +24,8 @@
 //! - Square grid `(n_grid × n_grid)`; rectangular grids are a follow-up.
 //! - Orthorhombic boxes only (matches `freud.DiffractionPattern.compute`).
 
-use molrs::frame_access::FrameAccess;
-use molrs::region::simbox::BoxKind;
+use molrs::spatial::region::simbox::BoxKind;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::Array2;
 use rustfft::FftPlanner;
@@ -239,8 +239,8 @@ impl Compute for DiffractionPattern {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F) -> Frame {

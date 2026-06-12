@@ -15,7 +15,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build molrs-capi (generates header via cbindgen)
-        run: cargo build --manifest-path molrs-capi/Cargo.toml
+        run: cargo build --manifest-path molrs-capi/Cargo.toml --locked
 
       - name: Configure C++ integration tests
         working-directory: molrs-capi

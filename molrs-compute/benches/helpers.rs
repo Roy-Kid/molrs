@@ -8,14 +8,14 @@ use std::time::Duration;
 
 use criterion::BenchmarkGroup;
 use criterion::measurement::Measurement;
-use molrs::block::Block;
-use molrs::frame::Frame;
-use molrs::neighbors::{LinkCell, NbList, NeighborList};
-use molrs::region::simbox::SimBox;
+use molrs::spatial::neighbors::{LinkCell, NbList, NeighborList};
+use molrs::spatial::region::simbox::SimBox;
+use molrs::store::block::Block;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 use ndarray::{Array2, ArrayD, IxDyn, array};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use molrs_compute::center_of_mass::{COMResult, CenterOfMass};
 use molrs_compute::cluster::{Cluster, ClusterResult};

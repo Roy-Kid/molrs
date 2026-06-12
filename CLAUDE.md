@@ -1,3 +1,24 @@
+---
+mol_project:
+  name: molrs
+  language: rust
+  stage: experimental
+  build:
+    install: "cargo build && bash scripts/fetch-test-data.sh"
+    check: "cargo fmt --all --check && cargo clippy -- -D warnings && cargo check"
+    test: "cargo test --all-features"
+    test_single: "cargo test {path}"
+  arch:
+    style: crate-graph
+    rules_section: "## Workspace Crates & Dependency Flow"
+  doc:
+    style: rustdoc
+  science:
+    required: true
+  notes_path: .claude/notes/notes.md
+  specs_path: .claude/specs/
+---
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -11,20 +32,26 @@ molrs is a Rust workspace for molecular simulation: core data structures, file I
 **NEVER write synthetic/hand-crafted test data for IO tests.**
 
 Every file-format reader/writer MUST be tested against **all** real files in
-`molrs-core/target/tests-data/<format>/` (the test-data submodule is shared across
-crates from this location). Rules:
+`tests-data/<format>/` — a binding-neutral directory at the **workspace root**
+(gitignored; cloned by `scripts/fetch-test-data.sh`), shared by every Rust crate
+and by the Python / C / WASM bindings. Rules:
 
 1. When adding a new format reader (e.g. CHGCAR), add matching real files to
    the `tests-data` repo (`https://github.com/MolCrafts/tests-data`) under a
    new `<format>/` subdirectory before writing tests.
 2. Tests iterate over **every** file in that directory — not a hardcoded subset.
-   Use a helper that globs `tests-data/<format>/*` and runs assertions on each.
-3. Unit tests inside `src/` may use `include_str!` with a **minimal** but
-   structurally valid fixture only to cover parser edge-cases that are hard to
-   produce from real data (e.g. malformed input → expected error). Keep these
-   fixtures as small as possible and document where the snippet comes from.
-4. Integration tests live in `molrs-io/tests/test_io/test_<format>.rs` and
-   use `crate::test_data::get_test_data_path("<format>/<file>")`.
+   Use the small local `common` helper in the io test target
+   (`common::format_files("<format>")`) and run assertions on each.
+3. **Inline `#[cfg(test)]` tests in `src/` are pure function unit tests only** —
+   logic, edge cases, error paths. They must NOT read real files from
+   `tests-data/`. A minimal `include_str!` fixture is permitted ONLY to cover a
+   parser edge-case hard to produce from real data (e.g. malformed input →
+   expected error); keep it tiny and document its origin.
+4. Data-driven integration tests live in each crate's `tests/` tree, mirroring
+   that crate's `src/` module layout (e.g. `molrs-io/tests/io/data/<format>.rs`), and
+   resolve files via the io test target's local `common` module
+   (`common::{tests_data_dir, data_path, format_files}`), which simply reads
+   `../tests-data` (or `$MOLRS_TESTS_DATA`). No helper crate.
 
 Violation: writing `let content = "..."; read_from_str(content)` for happy-path
 format tests instead of reading a real file is **forbidden**.
@@ -35,12 +62,12 @@ format tests instead of reading a real file is **forbidden**.
 # Build
 cargo build
 # Test (requires test data on first run)
-bash scripts/fetch-test-data.sh      # clones to molrs-core/target/tests-data/
+bash scripts/fetch-test-data.sh      # clones to <root>/tests-data/ (binding-neutral)
 cargo test --all-features
 cargo test -p molcrafts-molrs-core              # single crate (-p takes the package name)
 cargo test -p molcrafts-molrs-core test_name    # single test
 cargo test --features slow-tests                # expensive integration tests
-cargo test -p molcrafts-molrs-io                # IO format tests (uses tests-data submodule)
+cargo test -p molcrafts-molrs-io                # IO format tests (iterate every file in tests-data/)
 
 # Lint & Format
 cargo fmt --all
@@ -59,7 +86,7 @@ foundation; everything else depends on it (plus, in a few cases, on each other a
 molrs-core ── molrs-io ── molrs-cxxapi
             ── molrs-signal ── molrs-compute
             ── molrs-ff (may also depend on molrs-io for parameter files)
-            ── molrs-embed
+            ── molrs-conformer
             └─ molrs (umbrella façade re-exporting all sub-crates)
 ```
 
@@ -70,9 +97,9 @@ molrs-core ── molrs-io ── molrs-cxxapi
 | `molrs-signal` | `molcrafts-molrs-signal` | Signal processing: FFT-based autocorrelation, window functions, frequency grids |
 | `molrs-compute` | `molcrafts-molrs-compute` | Trajectory analysis: RDF, MSD, clustering, gyration/inertia tensors (depends on `molrs-signal`) |
 | `molrs-ff` | `molcrafts-molrs-ff` | Force fields, potentials (KernelRegistry), atom typifier |
-| `molrs-embed` | `molcrafts-molrs-embed` | 3D coordinate generation: distance geometry, fragment assembly, optimizer, rotor search |
+| `molrs-conformer` | `molcrafts-molrs-conformer` | 3D conformer generation: distance geometry, fragment assembly, optimizer, rotor search |
 | `molrs-cxxapi` | `molcrafts-molrs-cxxapi` | CXX bridge to Atomiverse C++ (zero-copy I/O via `FrameView`) |
-| `molrs` | `molcrafts-molrs` | Umbrella façade crate re-exporting the sub-crates behind feature flags (`io`, `compute`, `smiles`, `ff`, `embed`, `signal`, `full`) |
+| `molrs` | `molcrafts-molrs` | Umbrella façade crate re-exporting the sub-crates behind feature flags (`io`, `compute`, `smiles`, `ff`, `conformer`, `signal`, `full`) |
 
 Molecular packing (Packmol port) used to live here as `molrs-pack`; it now lives in the
 standalone repo `MolCrafts/molpack` (crates.io: `molcrafts-molpack`, PyPI:
@@ -95,7 +122,7 @@ workspace members; treat as inactive / future work.
 - `zarr` / `filesystem` — Zarr V3 trajectory I/O
 
 The `molrs` umbrella crate gates each sub-crate behind a feature (`io`, `compute`,
-`smiles`, `ff`, `embed`, `signal`) with `full` enabling all of them.
+`smiles`, `ff`, `conformer`, `signal`) with `full` enabling all of them.
 
 ## Core Data Model
 
@@ -113,7 +140,7 @@ Key type aliases: `F3 = Array1<F>`, `F3x3 = Array2<F>`, `FN = Array1<F>`, `FNx3 
 
 ### Block (heterogeneous column store)
 
-`Block` maps string keys to typed ndarray columns (f32, f64, i64, bool). Enforces consistent `nrows` across all columns. Type-safe access via `get_float()`, `get_int()`, `get_bool()`, `get_uint()`, `get_u8()`, `get_string()`. (`molrs-core/src/block/`).
+`Block` maps string keys to typed ndarray columns (f32, f64, i64, bool). Enforces consistent `nrows` across all columns. Type-safe access via `get_float()`, `get_int()`, `get_bool()`, `get_uint()`, `get_u8()`, `get_string()`. (`molrs-core/src/store/block/`).
 
 ### Frame (hierarchical data container)
 
@@ -121,7 +148,7 @@ Key type aliases: `F3 = Array1<F>`, `F3x3 = Array2<F>`, `FN = Array1<F>`, `FNx3 
 
 ### MolGraph (molecular topology)
 
-Graph-based molecular structure with atoms, bonds, stereochemistry, ring detection. Uses petgraph. (`molrs-core/src/molgraph.rs`).
+Graph-based molecular structure with atoms, bonds, stereochemistry, ring detection. Built on generational arenas (`slotmap`) with kind-tagged, multi-arity relations over a `smallvec`-backed adjacency map. (`molrs-core/src/system/molgraph.rs`). The petgraph-backed graph is `Topology` (`molrs-core/src/system/topology.rs`), used for connectivity queries (connected components, BFS distances, angle/dihedral enumeration).
 
 ## Trait-Based Extensibility
 
@@ -144,9 +171,9 @@ in the standalone `molcrafts-molpack` crate.
 
 `SimBox::free(points, padding)` creates a non-periodic bounding box from atom positions. `NeighborQuery::free(points, cutoff)` auto-generates this box when no SimBox is present. RDF normalization (`molrs-compute`) falls back to bounding-box volume for free-boundary systems.
 
-### Embed Pipeline (molrs-embed/)
+### Conformer Pipeline (molrs-conformer/)
 
-Multi-stage 3D coordinate generation: distance geometry → fragment assembly → coarse minimization → rotor search → final minimization → stereo guards. Public API: `generate_3d(mol, opts) -> Result<(MolGraph, EmbedReport)>`.
+Multi-stage 3D coordinate generation: distance geometry → fragment assembly → coarse minimization → rotor search → final minimization → stereo guards. Public API: `Conformer::new(opts).generate(mol) -> Result<(Atomistic, ConformerReport)>`.
 
 ### Packing
 
@@ -167,33 +194,33 @@ CXX bridge to Atomiverse C++. Zero-copy I/O via `FrameView` (borrowed) into exis
 Packmol-port specific conventions (gradient sign, two-scale contract, LEFT
 rotation multiplication) now live in the molpack repo's CLAUDE.md.
 
-## Development Skills & Agents
+## Development Workflow (mol plugin)
 
-Reference skills (the WHAT — standards) and agents (the HOW — executors) are
-paired by domain. Reference skills are loaded by their paired agent and are
-not user-invocable workflows.
-
-| Domain | Reference skill | Agent |
-|---|---|---|
-| Architecture | `molrs-arch` | `molrs-architect` |
-| Performance | `molrs-perf` | `molrs-optimizer` |
-| Documentation (rustdoc) | `molrs-doc` | `molrs-documenter` |
-| Testing | `molrs-test` | `molrs-tester` |
-| Scientific correctness | `molrs-science` | `molrs-scientist` |
-| FFI safety | `molrs-ffi` | `molrs-ffi-safety` |
-| Documentation (docs system) | `molrs-docs` (workflow) | `molrs-docs-engineer` |
+Process workflows come from the molcrafts `mol` plugin; project-specific
+standards live in `.claude/notes/` topic pages (see next section).
 
 Workflow skills (user-invocable):
 
-- `/molrs-impl <feature>` — orchestrator for new feature work; Plan → TDD → Implement → Verify → Document.
-- `/molrs-spec <requirement>` — NL requirement → spec in `.claude/specs/` with an index entry.
-- `/molrs-review [path]` — parallel multi-axis review; aggregates all agents above.
-- `/molrs-fix <bug>` — minimal-diff bug fix, regression test first.
-- `/molrs-refactor <scope>` — in-place restructure without behavior change; enforces hot-path extraction discipline.
-- `/molrs-debug <symptom>` — read-only diagnosis; never edits.
-- `/molrs-docs <kind>` — docs-system operations (Zensical, `.pyi`, READMEs, `docs.yml`).
-- `/molrs-note <decision> | sweep | promote <slug>` — capture evolving decisions into `.claude/NOTES.md`; promote stable entries into this CLAUDE.md.
+- `/mol:spec <requirement>` — NL requirement → spec + acceptance contract in `.claude/specs/`.
+- `/mol:impl <spec>` — orchestrator for new feature work; spec → TDD → implement → verify → simplify → close.
+- `/mol:review [path]` — parallel multi-axis review (architecture, performance, science, FFI via `--axis=ffi`, …).
+- `/mol:fix <bug>` — minimal-diff bug fix, regression test first.
+- `/mol:refactor <scope>` — in-place restructure without behavior change; enforces hot-path extraction discipline (see `.claude/notes/performance.md`).
+- `/mol:debug <symptom>` — read-only diagnosis; never edits.
+- `/mol:docs <kind>` — docs work (rustdoc, Zensical site, `.pyi`, READMEs, `docs.yml`); site rules in `.claude/notes/docs.md`.
+- `/mol:note <decision> | sweep | promote <slug>` — capture evolving decisions into `.claude/notes/notes.md`; promote stable entries into this CLAUDE.md.
 
-Evolving decisions live in `.claude/NOTES.md`; specs live in `.claude/specs/`
-indexed by `.claude/specs/INDEX.md`. See `.claude/skills/` and
-`.claude/agents/` for the full text of each.
+Agent mapping by domain (plugin agents read the notes pages below):
+
+| Domain | Standard (notes page) | Agent |
+|---|---|---|
+| Architecture | `.claude/notes/architecture-rules.md` | `mol:architect` |
+| Performance | `.claude/notes/performance.md` | `mol:optimizer` |
+| Documentation (rustdoc) | `.claude/notes/docs.md` (Part A) | `mol:documenter` |
+| Documentation (docs system) | `.claude/notes/docs.md` (Part B) | `mol:documenter` |
+| Testing | `.claude/notes/testing.md` | `mol:tester` |
+| Scientific correctness | `.claude/notes/science.md` | `mol:scientist` |
+| FFI safety | `.claude/notes/ffi.md` | `mol:ffi-guard` (`/mol:review --axis=ffi`) |
+
+Evolving decisions live in `.claude/notes/notes.md`; specs live in
+`.claude/specs/` indexed by `.claude/specs/INDEX.md`.

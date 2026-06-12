@@ -30,7 +30,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use molrs::block::Block as RsBlock;
+use molrs::store::block::Block as RsBlock;
 use molrs_ffi::{BlockRef, FrameRef};
 
 use super::block::Block;
@@ -504,7 +504,7 @@ impl Default for Frame {
 
 /// Internal helpers (not exposed to JS).
 impl Frame {
-    pub(crate) fn from_rs(rs_frame: molrs::frame::Frame) -> Result<Self, JsValue> {
+    pub(crate) fn from_rs(rs_frame: molrs::store::frame::Frame) -> Result<Self, JsValue> {
         let store = molrs_ffi::new_shared();
         let id = store.borrow_mut().frame_new();
         store.borrow_mut().set_frame(id, rs_frame).map_err(js_err)?;
@@ -519,7 +519,7 @@ impl Frame {
     /// immutably borrowed, so it must not attempt to mutate the store.
     pub(crate) fn with_frame<R>(
         &self,
-        f: impl FnOnce(&molrs::frame::Frame) -> Result<R, JsValue>,
+        f: impl FnOnce(&molrs::store::frame::Frame) -> Result<R, JsValue>,
     ) -> Result<R, JsValue> {
         self.inner
             .store
@@ -545,7 +545,7 @@ mod tests {
     /// Helper: build a wrapped `Frame` with two meta entries mirroring what
     /// an ExtXYZ parser would emit for `energy=-1.23 config=trans`.
     fn frame_with_meta() -> Frame {
-        let mut rs_frame = molrs::frame::Frame::new();
+        let mut rs_frame = molrs::store::frame::Frame::new();
         rs_frame
             .meta
             .insert("energy".to_string(), "-1.23".to_string());

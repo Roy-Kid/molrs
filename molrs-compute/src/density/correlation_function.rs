@@ -12,8 +12,8 @@
 //! variant requires only a handful of extra lines and will follow when the
 //! first downstream consumer (e.g. `LocalDescriptors` in Phase 6) needs it.
 
-use molrs::frame_access::FrameAccess;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::Array1;
 
@@ -103,7 +103,10 @@ impl CorrelationFunction {
         let j_idx = nlist.point_indices();
         let dist_sq = nlist.dist_sq();
         let n_pairs = nlist.n_pairs();
-        let symmetric = matches!(nlist.mode(), molrs::neighbors::QueryMode::SelfQuery);
+        let symmetric = matches!(
+            nlist.mode(),
+            molrs::spatial::neighbors::QueryMode::SelfQuery
+        );
 
         let mut sum = Array1::<F>::zeros(self.n_bins);
         let mut counts = Array1::<u64>::zeros(self.n_bins);
@@ -197,9 +200,9 @@ impl Compute for CorrelationFunction {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F) -> Frame {
@@ -222,7 +225,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("x")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -231,7 +234,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("y")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -240,7 +243,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("z")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()

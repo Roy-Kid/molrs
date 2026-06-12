@@ -10,7 +10,7 @@ use molrs_compute::dielectric::{
 };
 use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::time::Duration;
 
 // ── Sweep constants ──────────────────────────────────────────────────────────

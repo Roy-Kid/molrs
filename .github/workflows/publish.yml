@@ -39,7 +39,7 @@ permissions:
 #                          ┌─ publish-core ─┬─ publish-io ──────┐
 #                          │                ├─ publish-compute  │
 #   ci ────────────────────┤                ├─ publish-ff       ├─ publish-facade
-#      │                   │                └─ publish-embed ───┘
+#      │                   │                └─ publish-conformer ───┘
 #      ├─ publish-wasm
 #      └─ build-python (matrix: linux, macos)  ─→  publish-python
 #         (maturin build per-runner → trusted publishing via gh-action-pypi-publish)
@@ -168,7 +168,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
-  publish-embed:
+  publish-conformer:
     needs: publish-core
     if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
@@ -179,8 +179,8 @@ jobs:
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
       - run: sleep 30
-      - name: Publish molcrafts-molrs-embed (skip if already on crates.io)
-        run: bash scripts/publish-if-new.sh molrs-embed/Cargo.toml molcrafts-molrs-embed
+      - name: Publish molcrafts-molrs-conformer (skip if already on crates.io)
+        run: bash scripts/publish-if-new.sh molrs-conformer/Cargo.toml molcrafts-molrs-conformer
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
@@ -189,7 +189,7 @@ jobs:
       - publish-io
       - publish-compute
       - publish-ff
-      - publish-embed
+      - publish-conformer
     if: github.repository == 'MolCrafts/molrs'
     runs-on: ubuntu-latest
     environment: release

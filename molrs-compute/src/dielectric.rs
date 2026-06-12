@@ -94,9 +94,19 @@ pub struct StaticDielectricResult {
 }
 
 // ── Physical constants (MD real units: kcal, mol, Angstrom, e, K) ─────────
+//
+// MD-real and SI values are defined once in `molrs-core::units::constants`;
+// the names below are the local spellings the kernels use.
 
-const KAPPA: f64 = 332.0637; // 1/(4*pi*epsilon_0) in kcal·Å·mol⁻¹·e⁻²
-const K_B: f64 = 1.98720425864083e-3; // Boltzmann constant in kcal/(mol·K)
+use molrs::units::constants::{
+    ANGSTROM_M, BOLTZMANN as K_B_SI, COULOMB_REAL as KAPPA,
+    ELEMENTARY_CHARGE as ELEMENTARY_CHARGE_C, PICOSECOND_S,
+};
+
+/// Boltzmann constant in kcal/(mol·K) — MD "real" units. Shared with the
+/// spectral validation checks ([`crate::validate`]) so there is one value.
+pub use molrs::units::constants::BOLTZMANN_REAL as K_B;
+
 const FOUR_PI_OVER_3: f64 = 4.1887902047863905; // 4π/3
 
 // ── Basic observables ─────────────────────────────────────────────────────
@@ -902,10 +912,271 @@ pub fn decompose_current(
     Ok((j_water, j_ion))
 }
 
+/// Result of an Einstein–Helfand ionic-conductivity computation.
+#[derive(Debug, Clone)]
+pub struct ConductivityResult {
+    /// Lag times τ = i·dt, **ps**, length `max_lag + 1`.
+    pub lag_times: Array1<f64>,
+    /// Collective dipole MSD ⟨|**M_J**(t+τ) − **M_J**(t)|²⟩ averaged over time
+    /// origins, **(e·Å)²**, length `max_lag + 1`.
+    pub msd: Array1<f64>,
+    /// Static ionic conductivity σ, **S·m⁻¹**.
+    pub sigma: f64,
+    /// Slope d⟨|Δ**M_J**|²⟩/dt of the linear fit over the diffusive window,
+    /// **(e·Å)²·ps⁻¹**.
+    pub slope: f64,
+    /// Inclusive start index of the linear-fit window into `lag_times`.
+    pub fit_start: usize,
+    /// Inclusive end index of the linear-fit window into `lag_times`.
+    pub fit_end: usize,
+}
+
+/// Static ionic conductivity via the Einstein–Helfand relation.
+///
+/// `σ = lim_{t→∞} (1 / (6·V·k_B·T)) · d/dt ⟨|**M_J**(t) − **M_J**(0)|²⟩`,
+///
+/// where `**M_J**(t) = Σᵢ qᵢ **rᵢ**(t)` is the collective *translational*
+/// (charge) dipole. The factor `1/6` is the 3-D Einstein factor `1/(2d)`
+/// with `d = 3`. The routine
+///
+/// 1. forms the collective-dipole MSD over time origins,
+/// 2. least-squares fits its slope over the diffusive window
+///    `[fit_start_frac, fit_end_frac]·max_lag`, and
+/// 3. converts `slope / (6·V·k_B·T)` to **S·m⁻¹**.
+///
+/// # Arguments
+/// * `translational_dipole` — `(n_frames, 3)` collective dipole **M_J**, **e·Å**.
+///   Decomposition is the caller's job: zero the charge on immobile species so
+///   only mobile ions contribute (the rotational solvent dipole would
+///   contaminate the translational MSD).
+/// * `dt` — frame spacing, **ps**.
+/// * `volume` — system volume, **Å³**.
+/// * `temperature` — temperature, **K**.
+/// * `max_correlation_time` — longest MSD lag in **frames** (clamped to
+///   `n_frames − 1`).
+/// * `fit_start_frac`, `fit_end_frac` — fractions of `max_lag` bounding the
+///   linear-fit window (`0 ≤ start < end ≤ 1`).
+///
+/// # Units
+/// Inputs use MD units (e·Å, ps, Å³, K); the output σ is SI **S·m⁻¹**. The
+/// prefactor folds in `e²`, `Å→m`, and `ps→s`, so callers do no conversion.
+///
+/// # Reference
+/// Frenkel & Smit, *Understanding Molecular Simulation*, 2nd ed. (2002),
+/// §4.4.2 (Einstein relation for transport coefficients). In the ideal,
+/// uncorrelated-ion limit this reduces to the Nernst–Einstein conductivity
+/// `σ = n·q²·D / (k_B·T)` — verified numerically in
+/// `test_einstein_helfand_recovers_nernst_einstein`.
+#[allow(clippy::too_many_arguments)]
+pub fn einstein_helfand_conductivity(
+    translational_dipole: &Array2<f64>,
+    dt: f64,
+    volume: f64,
+    temperature: f64,
+    max_correlation_time: usize,
+    fit_start_frac: f64,
+    fit_end_frac: f64,
+) -> Result<ConductivityResult, ComputeError> {
+    validate_thermo_series_3d(
+        translational_dipole,
+        dt,
+        volume,
+        temperature,
+        "translational_dipole",
+    )?;
+    if !(0.0..1.0).contains(&fit_start_frac)
+        || !(0.0..=1.0).contains(&fit_end_frac)
+        || fit_start_frac >= fit_end_frac
+    {
+        return Err(ComputeError::OutOfRange {
+            field: "fit_start_frac/fit_end_frac (require 0 <= start < end <= 1)",
+            value: format!("{fit_start_frac}/{fit_end_frac}"),
+        });
+    }
+
+    let n_frames = translational_dipole.shape()[0];
+    let max_lag = max_correlation_time.min(n_frames - 1);
+
+    // Collective-dipole MSD by direct time-origin averaging:
+    //   msd[τ] = ⟨|M_J(t+τ) − M_J(t)|²⟩_t.
+    let mut msd = Array1::<f64>::zeros(max_lag + 1);
+    for tau in 1..=max_lag {
+        let count = n_frames - tau;
+        let mut acc = 0.0;
+        for t in 0..count {
+            let mut s = 0.0;
+            for d in 0..3 {
+                let dx = translational_dipole[[t + tau, d]] - translational_dipole[[t, d]];
+                s += dx * dx;
+            }
+            acc += s;
+        }
+        msd[tau] = acc / count as f64;
+    }
+    let lag_times = Array1::from_iter((0..=max_lag).map(|i| i as f64 * dt));
+
+    // Diffusive-window indices from the fractions; guarantee ≥ 2 fit points.
+    let mut fit_start = ((max_lag as f64) * fit_start_frac).round() as usize;
+    let mut fit_end = ((max_lag as f64) * fit_end_frac).round() as usize;
+    if fit_end >= max_lag {
+        fit_end = max_lag;
+    }
+    if fit_end < fit_start + 1 {
+        fit_start = fit_start.min(max_lag.saturating_sub(1));
+        fit_end = (fit_start + 1).min(max_lag);
+    }
+
+    // Ordinary least-squares slope of msd vs lag_times over [fit_start, fit_end].
+    let np = (fit_end - fit_start + 1) as f64;
+    let (mut sx, mut sy, mut sxx, mut sxy) = (0.0, 0.0, 0.0, 0.0);
+    for i in fit_start..=fit_end {
+        let x = lag_times[i];
+        let y = msd[i];
+        sx += x;
+        sy += y;
+        sxx += x * x;
+        sxy += x * y;
+    }
+    let denom = np * sxx - sx * sx;
+    if denom.abs() < f64::EPSILON {
+        return Err(ComputeError::OutOfRange {
+            field: "fit window (degenerate: all lag times equal)",
+            value: format!("[{fit_start}, {fit_end}]"),
+        });
+    }
+    let slope = (np * sxy - sx * sy) / denom;
+
+    // σ = slope / (6·V·k_B·T), with MD→SI unit conversion.
+    //   slope: (e·Å)²·ps⁻¹   →   C²·m²·s⁻¹
+    //   volume: Å³           →   m³
+    // The folded prefactor has units S·m⁻¹ per [(e·Å)²·ps⁻¹ · Å⁻³ · K⁻¹].
+    let prefactor = (ELEMENTARY_CHARGE_C * ELEMENTARY_CHARGE_C * ANGSTROM_M * ANGSTROM_M
+        / PICOSECOND_S)
+        / (6.0 * ANGSTROM_M * ANGSTROM_M * ANGSTROM_M * K_B_SI);
+    let sigma = prefactor * slope / (volume * temperature);
+
+    Ok(ConductivityResult {
+        lag_times,
+        msd,
+        sigma,
+        slope,
+        fit_start,
+        fit_end,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ndarray::{Axis, arr1};
+    use rand::{RngExt, SeedableRng};
+
+    #[test]
+    fn test_conductivity_msd_exact_small() {
+        // Hand-checkable collective MSD on a 3-frame, purely-x ramp:
+        // M_J = [0, 1, 3] along x.  msd[1] = mean((1-0)², (3-1)²) = mean(1,4)=2.5,
+        // msd[2] = (3-0)² = 9.
+        let dipole = ndarray::arr2(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [3.0, 0.0, 0.0]]);
+        let r = einstein_helfand_conductivity(&dipole, 1.0, 1000.0, 300.0, 2, 0.1, 0.9).unwrap();
+        assert!((r.msd[0] - 0.0).abs() < 1e-12);
+        assert!((r.msd[1] - 2.5).abs() < 1e-12);
+        assert!((r.msd[2] - 9.0).abs() < 1e-12);
+        assert_eq!(r.lag_times.len(), 3);
+
+        // Deterministic unit-conversion check: σ must equal the documented
+        // MD→SI prefactor × slope / (6·V·T). Guards against conversion drift.
+        let expect_prefactor =
+            (ELEMENTARY_CHARGE_C * ELEMENTARY_CHARGE_C * ANGSTROM_M * ANGSTROM_M / PICOSECOND_S)
+                / (6.0 * ANGSTROM_M * ANGSTROM_M * ANGSTROM_M * K_B_SI);
+        let expect_sigma = expect_prefactor * r.slope / (1000.0 * 300.0);
+        assert!((r.sigma - expect_sigma).abs() <= 1e-9 * expect_sigma.abs().max(1.0));
+        // Numeric value of the folded constant ≈ 3.0988e6 S·m⁻¹ per
+        // [(e·Å)²·ps⁻¹·Å⁻³·K⁻¹].
+        assert!((expect_prefactor - 3.0988e6).abs() / 3.0988e6 < 1e-3);
+    }
+
+    #[test]
+    fn test_einstein_helfand_recovers_nernst_einstein() {
+        // N independent ions of charge q on uncorrelated 3-D random walks.
+        // For independent carriers the Einstein–Helfand conductivity must
+        // reduce to the Nernst–Einstein value σ = n·q²·D/(k_B·T), with
+        // D = var/(2·dt) the single-particle diffusion constant.
+        //
+        // M_J(t) is ONE stochastic trajectory (summing ions only scales it,
+        // it does not add independent MSD samples), so a single realisation's
+        // slope scatters ~20 %. We therefore ENSEMBLE-AVERAGE σ over many
+        // independent realisations — the mean converges to Nernst–Einstein.
+        // The collective MSD is over 3 components only (independent of N), so
+        // many realisations stay cheap.
+        let n_realisations = 48usize;
+        let n_ions = 50usize;
+        let n_frames = 1500usize;
+        let dt = 1.0_f64; // ps
+        let q = 1.0_f64; // e
+        let volume = 1.0e5_f64; // Å³
+        let temperature = 300.0_f64; // K
+        let step = 0.5_f64; // Å, uniform per-axis displacement amplitude
+        let prefactor = (ELEMENTARY_CHARGE_C * ELEMENTARY_CHARGE_C * ANGSTROM_M * ANGSTROM_M
+            / PICOSECOND_S)
+            / (ANGSTROM_M * ANGSTROM_M * ANGSTROM_M * K_B_SI);
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(20260601);
+        let mut sigma_eh_sum = 0.0_f64;
+        let mut sigma_ne_sum = 0.0_f64;
+        for _ in 0..n_realisations {
+            let mut pos = vec![[0.0_f64; 3]; n_ions];
+            let mut dipole = Array2::<f64>::zeros((n_frames, 3));
+            let mut step_sq_sum = 0.0_f64;
+            let mut step_count = 0.0_f64;
+            for f in 0..n_frames {
+                for ion in &mut pos {
+                    if f > 0 {
+                        for c in ion.iter_mut() {
+                            let s = rng.random_range(-step..step);
+                            *c += s;
+                            step_sq_sum += s * s;
+                            step_count += 1.0;
+                        }
+                    }
+                }
+                let mut m = [0.0_f64; 3];
+                for p in &pos {
+                    for d in 0..3 {
+                        m[d] += q * p[d];
+                    }
+                }
+                for d in 0..3 {
+                    dipole[[f, d]] = m[d];
+                }
+            }
+
+            let max_corr = n_frames / 5;
+            let r =
+                einstein_helfand_conductivity(&dipole, dt, volume, temperature, max_corr, 0.1, 0.5)
+                    .unwrap();
+            sigma_eh_sum += r.sigma;
+
+            // Realised per-axis step variance → D = var/(2·dt); analytic
+            // Nernst–Einstein σ = n·q²·D/(k_B·T).
+            let var_axis = step_sq_sum / step_count; // Å²
+            let d_diff = var_axis / (2.0 * dt); // Å²·ps⁻¹
+            let number_density = n_ions as f64 / volume; // Å⁻³
+            sigma_ne_sum += prefactor * number_density * q * q * d_diff / temperature;
+        }
+
+        let sigma_eh = sigma_eh_sum / n_realisations as f64;
+        let sigma_ne = sigma_ne_sum / n_realisations as f64;
+        let rel_err = (sigma_eh - sigma_ne).abs() / sigma_ne.abs();
+        // A single collective trajectory's EH conductivity scatters at the
+        // ~10 % level (M_J is one stochastic path); the 48-member ensemble mean
+        // converges to Nernst–Einstein well inside this tolerance. The seed is
+        // fixed, so this comparison is deterministic across runs/CI.
+        assert!(
+            rel_err < 0.13,
+            "ensemble EH σ = {sigma_eh} S/m vs Nernst–Einstein {sigma_ne} S/m (rel err {rel_err:.3})"
+        );
+        assert!(sigma_eh > 0.0);
+    }
 
     #[test]
     fn test_dipole_moment_two_charges() {
@@ -1080,7 +1351,7 @@ mod tests {
         // χ(0) = (β/(3V))·⟨M²⟩, i.e. ε(0) - ε_∞ = (4π·KAPPA/(3·V·k_B·T))·⟨|δM|²⟩.
         // The spectrum's DC bin must therefore equal `static_dielectric_constant`
         // exactly (up to FP roundoff).
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(42);
@@ -1120,7 +1391,7 @@ mod tests {
         // average, so individual bins of a finite-sample spectrum may dip
         // slightly negative — but the *macroscopic* envelope must be non-
         // negative within statistical noise.
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(11);
@@ -1158,7 +1429,7 @@ mod tests {
         // and — crucially — *decaying* toward the Nyquist frequency. Forming
         // the loss as ω·X(ω) instead of the derivative transform makes ε″
         // diverge at high ω and dip strongly negative; this test guards that.
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(7);

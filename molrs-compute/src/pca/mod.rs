@@ -19,7 +19,7 @@
 
 use std::marker::PhantomData;
 
-use molrs::frame_access::FrameAccess;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
 use crate::error::ComputeError;
@@ -277,7 +277,7 @@ mod tests {
     use super::*;
     use molrs::Frame;
     use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
 
     /// Descriptor row wrapping a Vec<F>.
     #[derive(Clone)]

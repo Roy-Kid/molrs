@@ -11,10 +11,11 @@
 //! Like [`GaussianDensity`](super::gaussian_density::GaussianDensity), this
 //! is orthorhombic-box only and PBC-aware via wrap-around grid indexing.
 
+use super::wrap_index;
 use ndarray::Array3;
 
-use molrs::frame_access::FrameAccess;
-use molrs::region::simbox::BoxKind;
+use molrs::spatial::region::simbox::BoxKind;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
 use crate::error::ComputeError;
@@ -146,18 +147,6 @@ impl SphereVoxelization {
     }
 }
 
-#[inline]
-fn wrap_index(i: isize, n: isize, pbc: bool) -> (bool, usize) {
-    if pbc {
-        let r = i.rem_euclid(n);
-        (true, r as usize)
-    } else if i < 0 || i >= n {
-        (false, 0)
-    } else {
-        (true, i as usize)
-    }
-}
-
 impl Compute for SphereVoxelization {
     type Args<'a> = ();
     type Output = Vec<SphereVoxelizationResult>;
@@ -182,8 +171,8 @@ impl Compute for SphereVoxelization {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]], box_len: F, pbc: [bool; 3]) -> Frame {

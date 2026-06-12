@@ -12,9 +12,9 @@
 
 use molrs::Block;
 use molrs::Frame;
-use molrs::block::BlockDtype;
-use molrs::frame_access::FrameAccess;
-use molrs::region::simbox::{BoxKind, SimBox};
+use molrs::spatial::region::simbox::{BoxKind, SimBox};
+use molrs::store::block::BlockDtype;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::array;
 

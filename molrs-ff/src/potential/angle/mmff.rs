@@ -7,11 +7,10 @@ use crate::potential::Potential;
 use crate::potential::geometry::{
     accumulate_angle_forces, compute_angle, mag3, sub3, validate_coords,
 };
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
-/// md/A -> kcal/mol conversion.
-const MDYNE_A_TO_KCAL: f64 = 143.9325;
+use crate::constants::MDYNE_A_TO_KCAL;
 /// Cubic bend constant (rad^-1), = -0.007 * 180/pi.
 const CB_RAD: f64 = -0.40107;
 
@@ -28,7 +27,7 @@ pub struct MMFFAngleBend {
 }
 
 impl Potential for MMFFAngleBend {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0 as F; coords.len()];
@@ -106,7 +105,7 @@ pub struct MMFFStretchBend {
 }
 
 impl Potential for MMFFStretchBend {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0 as F; coords.len()];
@@ -218,7 +217,7 @@ mod tests {
             -r * half.sin(),
             0.0,
         ];
-        let (e, _) = pot.eval(&coords);
+        let (e, _) = pot.calc_energy_forces(&coords);
         assert!(e.abs() < 1e-4, "angle energy at eq should be ~0, got {}", e);
     }
 }

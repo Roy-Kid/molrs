@@ -25,12 +25,9 @@
 //! | `PMFTXY`                      | list[NeighborList], orientations?   | (raw_counts, density, pmf)               |
 
 use crate::compute::{PyClusterResult, py_value_err};
-use crate::frame::PyFrame;
-use crate::helpers::NpF;
-use crate::linkedcell::PyNeighborList;
+use crate::helpers::{NpF, collect_frames, collect_nlists};
 
-use molrs::frame::Frame as CoreFrame;
-use molrs::neighbors::NeighborList;
+use molrs::store::frame::Frame as CoreFrame;
 use molrs::types::F;
 use molrs_compute::{
     BondOrder, ClusterProperties, Compute, GaussianDensity, Hexatic, LocalDensity, Nematic, PMFTXY,
@@ -43,30 +40,10 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 // ---------------------------------------------------------------------------
-// Frame / NeighborList collectors (local copies — mirror compute.rs)
-// ---------------------------------------------------------------------------
-
-fn collect_frames(frames: &Bound<'_, PyAny>) -> PyResult<Vec<CoreFrame>> {
-    if let Ok(single) = frames.extract::<PyRef<'_, PyFrame>>() {
-        return Ok(vec![single.clone_core_frame()?]);
-    }
-    let list: Vec<PyRef<'_, PyFrame>> = frames.extract()?;
-    list.iter().map(|f| f.clone_core_frame()).collect()
-}
-
-fn collect_nlists(arg: &Bound<'_, PyAny>) -> PyResult<Vec<NeighborList>> {
-    if let Ok(single) = arg.extract::<PyRef<'_, PyNeighborList>>() {
-        return Ok(vec![single.inner.clone()]);
-    }
-    let list: Vec<PyRef<'_, PyNeighborList>> = arg.extract()?;
-    Ok(list.iter().map(|n| n.inner.clone()).collect())
-}
-
-// ---------------------------------------------------------------------------
 // Steinhardt
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "Steinhardt", unsendable)]
+#[pyclass(name = "Steinhardt")]
 pub struct PySteinhardt {
     inner: Steinhardt,
 }
@@ -122,7 +99,7 @@ impl PySteinhardt {
 // Nematic
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "Nematic", unsendable)]
+#[pyclass(name = "Nematic")]
 pub struct PyNematic {
     inner: Nematic,
 }
@@ -173,7 +150,7 @@ impl PyNematic {
 // Hexatic
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "Hexatic", unsendable)]
+#[pyclass(name = "Hexatic")]
 pub struct PyHexatic {
     inner: Hexatic,
 }
@@ -218,7 +195,7 @@ impl PyHexatic {
 // SolidLiquid
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "SolidLiquid", unsendable)]
+#[pyclass(name = "SolidLiquid")]
 pub struct PySolidLiquid {
     inner: SolidLiquid,
 }
@@ -261,7 +238,7 @@ impl PySolidLiquid {
 // ClusterProperties
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "ClusterProperties", unsendable)]
+#[pyclass(name = "ClusterProperties")]
 pub struct PyClusterProperties {
     inner: ClusterProperties,
 }
@@ -349,7 +326,7 @@ impl PyClusterProperties {
 // LocalDensity
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "LocalDensity", unsendable)]
+#[pyclass(name = "LocalDensity")]
 pub struct PyLocalDensity {
     inner: LocalDensity,
 }
@@ -392,7 +369,7 @@ impl PyLocalDensity {
 // GaussianDensity
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "GaussianDensity", unsendable)]
+#[pyclass(name = "GaussianDensity")]
 pub struct PyGaussianDensity {
     inner: GaussianDensity,
 }
@@ -426,7 +403,7 @@ impl PyGaussianDensity {
 // BondOrder
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "BondOrder", unsendable)]
+#[pyclass(name = "BondOrder")]
 pub struct PyBondOrder {
     inner: BondOrder,
 }
@@ -476,7 +453,7 @@ impl PyBondOrder {
 // StaticStructureFactorDebye
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "StaticStructureFactorDebye", unsendable)]
+#[pyclass(name = "StaticStructureFactorDebye")]
 pub struct PyStaticStructureFactorDebye {
     inner: StaticStructureFactorDebye,
 }
@@ -523,7 +500,7 @@ impl PyStaticStructureFactorDebye {
 // PMFTXY
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "PMFTXY", unsendable)]
+#[pyclass(name = "PMFTXY")]
 pub struct PyPMFTXY {
     inner: PMFTXY,
 }

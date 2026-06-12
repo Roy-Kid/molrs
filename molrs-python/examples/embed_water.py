@@ -1,10 +1,10 @@
 """Generate 3D coordinates for a water molecule.
 
-Demonstrates: Atomistic construction → generate_3d → inspect report.
+Demonstrates: Atomistic construction → Conformer.generate → inspect report.
 Input is just atoms + bonds, no coordinates.
 """
 
-from molrs import Atomistic, EmbedOptions, generate_3d
+from molrs import Atomistic, Conformer
 
 # Build water: O-H-H (no coordinates)
 mol = Atomistic()
@@ -15,14 +15,11 @@ mol.add_bond(o, h1)
 mol.add_bond(o, h2)
 
 print(f"Input: {mol}")
-print(f"  atoms={mol.n_atoms}, bonds={mol.n_bonds}")
+print(f"  atoms={mol.n_atoms}, bonds={mol.n_relations('bonds')}")
 
 # Generate 3D coordinates
-opts = EmbedOptions(speed="medium", seed=42)
-result = generate_3d(mol, opts)
+out, report = Conformer(speed="medium", seed=42).generate(mol)
 
-out = result.mol
-report = result.report
 
 print(f"\nOutput: {out}")
 print(f"  atoms={out.n_atoms} (hydrogens may be added)")

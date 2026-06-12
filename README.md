@@ -45,7 +45,7 @@ By becoming the dependable core the rest of the MolCrafts ecosystem builds on, m
 | `molcrafts-molrs-io` | Readers / writers for PDB, XYZ, mol2, SDF, CIF, GRO, POSCAR, CHGCAR, Cube, LAMMPS data/dump, DCD, Zarr V3 trajectories — plus a SMILES/SMARTS parser |
 | `molcrafts-molrs-compute` | Trajectory analysis: RDF, MSD, clustering, gyration / inertia tensors, PCA, k-means, density, diffraction, PMFT, order parameters, dielectric, environment matching |
 | `molcrafts-molrs-ff` | Force fields and potentials — MMFF94 bond/angle/torsion/oop/vdW/electrostatics, LJ, PME — with an atom typifier |
-| `molcrafts-molrs-embed` | 3D coordinate generation: distance geometry, fragment assembly, optimization, rotor search, stereo guards |
+| `molcrafts-molrs-conformer` | 3D conformer generation: distance geometry, fragment assembly, optimization, rotor search, stereo guards |
 | `molcrafts-molrs-signal` | Signal processing — FFT-based autocorrelation, window functions, frequency grids |
 | `molcrafts-molrs-cxxapi` | CXX bridge for zero-copy integration with Atomiverse C++ |
 
@@ -58,20 +58,65 @@ cargo add molcrafts-molrs
 Opt into sub-systems via feature flags; `full` enables everything:
 
 ```toml
-molcrafts-molrs = { version = "0.0.16", features = ["io", "smiles", "embed"] }
+molcrafts-molrs = { version = "0.0.16", features = ["io", "smiles", "conformer"] }
 ```
 
 Python: `pip install molcrafts-molrs` (import as `molrs`). Browser: `npm install @molcrafts/molrs`.
 
+> **Python nightly.** Bleeding-edge Python wheels are published to the separate
+> project `molcrafts-molrs-nightly` (versioned `X.Y.Z.devN`) on every push to the
+> `nightly` branch — Python only; crates.io and npm ship exclusively from `v*`
+> tags. Install with `pip install --pre molcrafts-molrs-nightly`. It imports as
+> `molrs`, so it cannot be installed alongside the stable `molcrafts-molrs`.
+
+## Build from source
+
+Building from source needs the Rust toolchain. The pinned channel, the
+`rustfmt` / `clippy` components, and the `wasm32-unknown-unknown` target are all
+declared in `rust-toolchain.toml`, so [`rustup`](https://rustup.rs/) selects
+them automatically on the first build.
+
+```bash
+git clone https://github.com/MolCrafts/molrs.git
+cd molrs
+cargo build --workspace            # compile every native crate
+bash scripts/fetch-test-data.sh    # fetch test fixtures (first run only)
+cargo test --all-features          # run the test suite
+```
+
+**Python bindings** are built from the `molrs-python` crate with
+[maturin](https://www.maturin.rs/). `maturin develop` compiles the PyO3
+extension and installs it editable into the active virtualenv under the import
+name `molrs`:
+
+```bash
+pip install maturin
+maturin develop -m molrs-python/Cargo.toml --release
+python -c "import molrs; print(molrs.parse_smiles('O').n_components)"
+```
+
+**WASM / npm** is built with [wasm-pack](https://rustwasm.github.io/wasm-pack/),
+using the same flags as release publishing:
+
+```bash
+cd molrs-wasm
+wasm-pack build --release --target bundler --scope molcrafts --out-name molrs
+```
+
+See the [installation guide](https://molcrafts.github.io/molrs/getting-started/installation/)
+for environment-verification snippets and the
+[contributing guide](https://molcrafts.github.io/molrs/contributing/) for the
+documentation loop.
+
 ## Quick start
 
 ```rust
-use molrs::embed::{generate_3d, EmbedOptions};
+use molrs::conformer::{Conformer, ConformerOptions};
 use molrs::smiles::{parse_smiles, to_atomistic};
 
 let ir = parse_smiles("c1ccccc1").unwrap();          // benzene
 let mol = to_atomistic(&ir).unwrap();
-let (mol3d, _report) = generate_3d(&mol, EmbedOptions::default()).unwrap();
+let (mol3d, _report) = Conformer::new(ConformerOptions::default()).generate(&mol).unwrap();
 ```
 
 Python and JavaScript/TypeScript quickstarts live in the documentation.

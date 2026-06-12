@@ -1,0 +1,148 @@
+# Installation
+
+molrs is published as separate packages for Rust, Python, and npm. The packages
+share the same core model, but each one follows the conventions of its host
+ecosystem.
+
+| Environment | Package | Command |
+| --- | --- | --- |
+| Rust | `molcrafts-molrs` | `cargo add molcrafts-molrs --features full` |
+| Python | `molcrafts-molrs` | `python -m pip install molcrafts-molrs` |
+| JavaScript / TypeScript | `@molcrafts/molrs` | `npm install @molcrafts/molrs` |
+
+The Python import name is `molrs`. The npm package uses the scoped name
+`@molcrafts/molrs`, while the generated TypeScript module exports classes such
+as `Frame`, `Block`, `Box`, and analysis helpers directly.
+
+## Python nightly builds
+
+Bleeding-edge **Python** wheels are published to a separate PyPI project,
+`molcrafts-molrs-nightly`, on every push to the `nightly` branch. This is
+Python-only — the Rust crates (crates.io) and the npm package ship exclusively
+from `v*` release tags and have no nightly channel.
+
+Each build is versioned `X.Y.Z.devN` (a PEP 440 dev release), so opt in with
+`--pre`:
+
+```bash
+pip install --pre molcrafts-molrs-nightly
+```
+
+The nightly wheel imports as `molrs`, exactly like the stable one, so the two
+**cannot be installed at the same time**. Use a dedicated virtual environment
+for nightly testing.
+
+## Verify the Environment
+
+=== "Python"
+
+    ```bash
+    python -m pip install molcrafts-molrs
+    python - <<'PY'
+    import molrs
+
+    ir = molrs.parse_smiles("O")
+    print("components:", ir.n_components)
+    print("atoms:", ir.to_atomistic().n_atoms)
+    PY
+    ```
+
+    The import name is intentionally shorter than the package name. If
+    `import molrs` fails after installation, check that the interpreter running
+    the script is the same interpreter used by `python -m pip`.
+
+=== "Rust"
+
+    ```bash
+    cargo new molrs-smoke
+    cd molrs-smoke
+    cargo add molcrafts-molrs --features full
+    ```
+
+    In `src/main.rs`:
+
+    ```rust
+    use molrs::smiles::{parse_smiles, to_atomistic};
+
+    fn main() -> Result<(), Box<dyn std::error::Error>> {
+        let ir = parse_smiles("O")?;
+        let mol = to_atomistic(&ir)?;
+        println!("atoms: {}", mol.n_atoms());
+        Ok(())
+    }
+    ```
+
+=== "TypeScript"
+
+    ```bash
+    npm install @molcrafts/molrs
+    ```
+
+    In an ESM-aware runtime or bundler:
+
+    ```ts
+    import init, { parseSMILES } from "@molcrafts/molrs";
+
+    await init();
+    console.log(parseSMILES("O").nComponents);
+    ```
+
+## Source Builds
+
+### Prerequisites
+
+Source builds need the Rust toolchain, installed via
+[`rustup`](https://rustup.rs/). The repository pins the toolchain channel, the
+`rustfmt` / `clippy` components, and the `wasm32-unknown-unknown` target in
+`rust-toolchain.toml`, so `rustup` provisions them automatically on the first
+build inside the checkout — no manual `rustup component add` needed.
+
+### Native crates
+
+Clone the workspace and build every crate. Tests need fixtures fetched by the
+helper script on the first run:
+
+```bash
+git clone https://github.com/MolCrafts/molrs.git
+cd molrs
+cargo build --workspace            # compile all native crates
+bash scripts/fetch-test-data.sh    # fetch test fixtures (first run only)
+cargo test --all-features          # run the test suite
+```
+
+### Python extension
+
+For local Python development, install the extension module in editable form
+with [maturin](https://www.maturin.rs/). This compiles the `molrs-python` PyO3
+crate and installs it into the active virtualenv as `molrs`:
+
+```bash
+pip install maturin
+maturin develop -m molrs-python/Cargo.toml --release
+python -c "import molrs; print(molrs.parse_smiles('O').n_components)"
+```
+
+### WASM / npm
+
+For the npm package, build the same bundler target used by release publishing:
+
+```bash
+cd molrs-wasm
+wasm-pack build --release --target bundler --scope molcrafts --out-name molrs
+```
+
+### Documentation
+
+For documentation work, build the local site after the Python extension is
+installed:
+
+```bash
+zensical build -f docs/zensical.toml
+```
+
+## Version Boundaries
+
+Rust, Python, and npm packages are released separately but generated from the
+same repository. If examples behave differently across languages, first check
+the package versions. The documentation site follows the repository `master`
+branch, while crates.io, PyPI, npm, and docs.rs describe released artifacts.

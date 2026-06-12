@@ -21,10 +21,9 @@
 
 use crate::frame::PyFrame;
 use crate::helpers::NpF;
-use crate::linkedcell::PyNeighborList;
 
-use molrs::frame::Frame as CoreFrame;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame::Frame as CoreFrame;
 use molrs::types::F;
 use molrs_compute::{
     COMResult, CenterOfMass, Cluster, ClusterCenters, ClusterCentersResult, ClusterResult, Compute,
@@ -36,30 +35,7 @@ use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayDyn, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-pub(crate) fn py_value_err<E: std::fmt::Display>(e: E) -> PyErr {
-    PyValueError::new_err(e.to_string())
-}
-
-// Clone owned CoreFrames out of a single PyFrame or a Python list of PyFrames.
-// The returned Vec<Frame> is then wrapped into Vec<&Frame> at the call site.
-fn clone_frames(frames: &Bound<'_, PyAny>) -> PyResult<Vec<CoreFrame>> {
-    if let Ok(single) = frames.extract::<PyRef<'_, PyFrame>>() {
-        return Ok(vec![single.clone_core_frame()?]);
-    }
-    let list: Vec<PyRef<'_, PyFrame>> = frames.extract()?;
-    list.iter().map(|f| f.clone_core_frame()).collect()
-}
-
-// Collect &NeighborList references from a single wrapper or a list.
-fn collect_nlists<'py>(
-    arg: &'py Bound<'py, PyAny>,
-) -> PyResult<Vec<molrs::neighbors::NeighborList>> {
-    if let Ok(single) = arg.extract::<PyRef<'_, PyNeighborList>>() {
-        return Ok(vec![single.inner.clone()]);
-    }
-    let list: Vec<PyRef<'_, PyNeighborList>> = arg.extract()?;
-    Ok(list.iter().map(|n| n.inner.clone()).collect())
-}
+pub(crate) use crate::helpers::{collect_frames, collect_nlists, py_value_err};
 
 fn was_batched(frames: &Bound<'_, PyAny>) -> bool {
     frames.extract::<PyRef<'_, PyFrame>>().is_err()
@@ -72,7 +48,7 @@ fn was_batched(frames: &Bound<'_, PyAny>) -> bool {
 /// Radial distribution function g(r) result.
 ///
 /// `rdf` is already normalized (RDF.compute finalizes eagerly).
-#[pyclass(name = "RDFResult", unsendable)]
+#[pyclass(name = "RDFResult")]
 pub struct PyRDFResult {
     inner: RDFResult,
 }
@@ -133,7 +109,7 @@ impl PyRDFResult {
 ///
 /// Accepts either a single `(frame, nlist)` pair or a list of each. Results
 /// accumulate across frames and are ideal-gas normalized on return.
-#[pyclass(name = "RDF", unsendable)]
+#[pyclass(name = "RDF")]
 pub struct PyRDF {
     inner: RDF,
 }
@@ -163,7 +139,7 @@ impl PyRDF {
         frames: &Bound<'_, PyAny>,
         nlists: &Bound<'_, PyAny>,
     ) -> PyResult<PyRDFResult> {
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let nlists_vec: Vec<NeighborList> = collect_nlists(nlists)?;
         if nlists_vec.len() != refs.len() {
@@ -190,7 +166,7 @@ impl PyRDF {
 // ---------------------------------------------------------------------------
 
 /// Per-frame MSD result (from a single time point).
-#[pyclass(name = "MSDResult", unsendable)]
+#[pyclass(name = "MSDResult")]
 pub struct PyMSDResult {
     inner: MSDResult,
 }
@@ -220,7 +196,7 @@ impl PyMSDResult {
 ///
 /// `series.data[0]` is the reference frame (mean = 0); `series.data[i]`
 /// compares frame `i` against frame `0`.
-#[pyclass(name = "MSDTimeSeries", unsendable)]
+#[pyclass(name = "MSDTimeSeries")]
 pub struct PyMSDTimeSeries {
     inner: MSDTimeSeries,
 }
@@ -280,7 +256,7 @@ impl PyMSDTimeSeries {
 ///
 /// ``compute(frames)`` uses ``frames[0]`` as the reference and returns a
 /// ``MSDTimeSeries`` of the same length as ``frames``.
-#[pyclass(name = "MSD", unsendable)]
+#[pyclass(name = "MSD")]
 pub struct PyMSD {
     inner: MSD,
 }
@@ -294,7 +270,7 @@ impl PyMSD {
 
     /// Compute MSD time series against frames[0].
     fn compute(&self, frames: &Bound<'_, PyAny>) -> PyResult<PyMSDTimeSeries> {
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         if owned.is_empty() {
             return Err(PyValueError::new_err("MSD.compute requires >= 1 frame"));
         }
@@ -313,7 +289,7 @@ impl PyMSD {
 // ---------------------------------------------------------------------------
 
 /// Per-frame cluster assignment.
-#[pyclass(name = "ClusterResult", unsendable, from_py_object)]
+#[pyclass(name = "ClusterResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyClusterResult {
     pub(crate) inner: ClusterResult,
@@ -346,7 +322,7 @@ impl PyClusterResult {
 }
 
 /// Distance-based cluster analysis.
-#[pyclass(name = "Cluster", unsendable)]
+#[pyclass(name = "Cluster")]
 pub struct PyCluster {
     inner: Cluster,
 }
@@ -371,7 +347,7 @@ impl PyCluster {
         nlists: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let nlists_vec = collect_nlists(nlists)?;
         if nlists_vec.len() != refs.len() {
@@ -406,7 +382,7 @@ impl PyCluster {
 // ---------------------------------------------------------------------------
 
 /// Geometric cluster centers for a single frame.
-#[pyclass(name = "ClusterCentersResult", unsendable, from_py_object)]
+#[pyclass(name = "ClusterCentersResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyClusterCentersResult {
     pub(crate) inner: ClusterCentersResult,
@@ -456,7 +432,7 @@ fn extract_centers_vec(arg: &Bound<'_, PyAny>) -> PyResult<Vec<ClusterCentersRes
     Ok(list.iter().map(|r| r.inner.clone()).collect())
 }
 
-#[pyclass(name = "ClusterCenters", unsendable)]
+#[pyclass(name = "ClusterCenters")]
 pub struct PyClusterCenters {
     inner: ClusterCenters,
 }
@@ -477,7 +453,7 @@ impl PyClusterCenters {
         clusters: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         if cl_vec.len() != refs.len() {
@@ -507,7 +483,7 @@ impl PyClusterCenters {
 // ---------------------------------------------------------------------------
 
 /// Per-frame mass-weighted cluster centers and total cluster masses.
-#[pyclass(name = "CenterOfMassResult", unsendable, from_py_object)]
+#[pyclass(name = "CenterOfMassResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyCenterOfMassResult {
     pub(crate) inner: COMResult,
@@ -556,7 +532,7 @@ fn extract_com_vec(arg: &Bound<'_, PyAny>) -> PyResult<Vec<COMResult>> {
     Ok(list.iter().map(|r| r.inner.clone()).collect())
 }
 
-#[pyclass(name = "CenterOfMass", unsendable)]
+#[pyclass(name = "CenterOfMass")]
 pub struct PyCenterOfMass {
     masses: Option<Vec<F>>,
 }
@@ -583,7 +559,7 @@ impl PyCenterOfMass {
         clusters: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         if cl_vec.len() != refs.len() {
@@ -639,7 +615,7 @@ fn tensor_list_into_pyarray<'py>(
 ///   when a list of frames is passed. For a single frame you get a `(num_clusters, 3, 3)` ndarray.
 /// - list of frames → ndarray of shape `(n_frames, num_clusters, 3, 3)` only if all frames
 ///   have identical cluster counts; otherwise a Python list of per-frame ndarrays.
-#[pyclass(name = "GyrationTensor", unsendable)]
+#[pyclass(name = "GyrationTensor")]
 pub struct PyGyrationTensor {
     inner: GyrationTensor,
 }
@@ -661,7 +637,7 @@ impl PyGyrationTensor {
         centers: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         let cc_vec = extract_centers_vec(centers)?;
@@ -696,7 +672,7 @@ impl PyGyrationTensor {
 // InertiaTensor
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "InertiaTensor", unsendable)]
+#[pyclass(name = "InertiaTensor")]
 pub struct PyInertiaTensor {
     masses: Option<Vec<F>>,
 }
@@ -724,7 +700,7 @@ impl PyInertiaTensor {
         com: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         let com_vec = extract_com_vec(com)?;
@@ -763,7 +739,7 @@ impl PyInertiaTensor {
 // RadiusOfGyration
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "RadiusOfGyration", unsendable)]
+#[pyclass(name = "RadiusOfGyration")]
 pub struct PyRadiusOfGyration {
     masses: Option<Vec<F>>,
 }
@@ -796,7 +772,7 @@ impl PyRadiusOfGyration {
         com: &Bound<'py, PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let batched = was_batched(frames);
-        let owned = clone_frames(frames)?;
+        let owned = collect_frames(frames)?;
         let refs: Vec<&CoreFrame> = owned.iter().collect();
         let (_, cl_vec) = extract_cluster_vec(clusters)?;
         let com_vec = extract_com_vec(com)?;
@@ -867,7 +843,7 @@ impl PyRadiusOfGyration {
 ///
 /// Wrap each row (a 1-D float array) with `DescriptorRow(row)`; then pass a
 /// Python list of them to ``Pca2.compute`` / ``KMeans.compute``.
-#[pyclass(name = "DescriptorRow", unsendable, from_py_object)]
+#[pyclass(name = "DescriptorRow", from_py_object)]
 #[derive(Clone)]
 pub struct PyDescriptorRow {
     row: Vec<F>,
@@ -895,7 +871,7 @@ impl molrs_compute::DescriptorRow for PyDescriptorRow {
 }
 
 /// Two-component PCA result.
-#[pyclass(name = "PcaResult", unsendable, from_py_object)]
+#[pyclass(name = "PcaResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyPcaResult {
     pub(crate) inner: PcaResult,
@@ -930,7 +906,7 @@ impl PyPcaResult {
 }
 
 /// Two-component PCA calculator.
-#[pyclass(name = "Pca2", unsendable)]
+#[pyclass(name = "Pca2")]
 pub struct PyPca2 {
     inner: Pca2<PyDescriptorRow>,
 }
@@ -963,7 +939,7 @@ impl PyPca2 {
 // ---------------------------------------------------------------------------
 
 /// k-means cluster labels.
-#[pyclass(name = "KMeansResult", unsendable)]
+#[pyclass(name = "KMeansResult")]
 pub struct PyKMeansResult {
     inner: KMeansResult,
 }
@@ -985,7 +961,7 @@ impl PyKMeansResult {
 }
 
 /// k-means clustering over a PCA projection (2-D).
-#[pyclass(name = "KMeans", unsendable)]
+#[pyclass(name = "KMeans")]
 pub struct PyKMeans {
     inner: KMeans,
 }

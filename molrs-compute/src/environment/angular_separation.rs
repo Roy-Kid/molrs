@@ -25,8 +25,8 @@
 //! - [`AngularSeparationNeighbor`]: sparse, one angular distance per
 //!   neighbor pair, driven by a `NeighborList`.
 
-use molrs::frame_access::FrameAccess;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::Array2;
 

@@ -39,9 +39,9 @@
 
 use wasm_bindgen::prelude::*;
 
-use molrs::topology::{Topology as RsTopology, TopologyRingInfo as RsTopologyRingInfo};
+use molrs::system::topology::{Topology as RsTopology, TopologyRingInfo as RsTopologyRingInfo};
 
-use molrs::neighbors::{
+use molrs::spatial::neighbors::{
     LinkCell as RsLinkCell, NbListAlgo, NeighborList as RsNeighborList,
     NeighborQuery as RsNeighborQuery, QueryMode,
 };
@@ -68,16 +68,16 @@ use js_sys::{Float64Array, Int32Array, Uint32Array};
 // ---------------------------------------------------------------------------
 
 /// Extract an Nx3 position matrix from the `"atoms"` block of a core
-/// [`Frame`](molrs::frame::Frame).
+/// [`Frame`](molrs::store::frame::Frame).
 ///
 /// Reads the `x`, `y`, `z` columns (F, angstrom) and assembles
 /// them into a contiguous row-major matrix.
-fn positions_from_frame(frame: &molrs::frame::Frame) -> Result<ndarray::Array2<F>, JsValue> {
+fn positions_from_frame(frame: &molrs::store::frame::Frame) -> Result<ndarray::Array2<F>, JsValue> {
     let atoms = frame
         .get("atoms")
         .ok_or_else(|| JsValue::from_str("Frame has no 'atoms' block"))?;
     let get = |col: &str| -> Result<&[F], JsValue> {
-        use molrs::block::BlockDtype;
+        use molrs::store::block::BlockDtype;
         let c = atoms
             .get(col)
             .ok_or_else(|| JsValue::from_str(&format!("atoms block missing '{col}' column")))?;
@@ -179,7 +179,7 @@ impl LinkedCell {
             let bx_ref = match rs_frame.simbox.as_ref() {
                 Some(sb) => sb,
                 None => {
-                    simbox = molrs::region::simbox::SimBox::free(pos.view(), self.cutoff)
+                    simbox = molrs::spatial::region::simbox::SimBox::free(pos.view(), self.cutoff)
                         .map_err(|e| JsValue::from_str(&format!("free-boundary box: {e:?}")))?;
                     &simbox
                 }
@@ -449,13 +449,13 @@ impl RDF {
             ));
         }
         let box_len = volume.cbrt();
-        let simbox = molrs::region::simbox::SimBox::cube(
+        let simbox = molrs::spatial::region::simbox::SimBox::cube(
             box_len,
             ndarray::array![0.0 as F, 0.0 as F, 0.0 as F],
             [false, false, false],
         )
         .map_err(|e| JsValue::from_str(&format!("RDF computeWithVolume: {e:?}")))?;
-        let mut synth = molrs::frame::Frame::new();
+        let mut synth = molrs::store::frame::Frame::new();
         synth.simbox = Some(simbox);
         let nlist_vec = vec![neighbors.inner.clone()];
         let result = self
@@ -567,7 +567,7 @@ impl RDFResult {
 /// - Einstein, A. (1905). *Annalen der Physik*, 322(8), 549-560.
 #[wasm_bindgen(js_name = MSD)]
 pub struct MSD {
-    frames: Vec<molrs::frame::Frame>,
+    frames: Vec<molrs::store::frame::Frame>,
 }
 
 #[allow(clippy::new_without_default)]
@@ -630,7 +630,7 @@ impl MSD {
         if self.frames.is_empty() {
             return Ok(Vec::new());
         }
-        let refs: Vec<&molrs::frame::Frame> = self.frames.iter().collect();
+        let refs: Vec<&molrs::store::frame::Frame> = self.frames.iter().collect();
         let series = RsMSD::new()
             .compute(&refs, ())
             .map_err(|e| JsValue::from_str(&format!("MSD results: {e}")))?;
@@ -836,8 +836,8 @@ mod tests {
 
     /// Helper: create a Frame with N particles at given positions + cubic simbox.
     fn make_frame(positions: &[[F; 3]], box_len: F) -> Frame {
-        use molrs::block::Block;
-        use molrs::region::simbox::SimBox;
+        use molrs::spatial::region::simbox::SimBox;
+        use molrs::store::block::Block;
         use ndarray::{Array1, array};
 
         let x = Array1::from_iter(positions.iter().map(|p| p[0]));
@@ -849,7 +849,7 @@ mod tests {
         block.insert("y", y.into_dyn()).unwrap();
         block.insert("z", z.into_dyn()).unwrap();
 
-        let mut rs_frame = molrs::frame::Frame::new();
+        let mut rs_frame = molrs::store::frame::Frame::new();
         rs_frame.insert("atoms", block);
         rs_frame.simbox =
             Some(SimBox::cube(box_len, array![0.0 as F, 0.0, 0.0], [false, false, false]).unwrap());
@@ -1307,7 +1307,7 @@ impl WasmTopology {
             let mut topo = RsTopology::with_atoms(n_atoms);
 
             if let Some(bonds) = rs_frame.get("bonds") {
-                use molrs::block::BlockDtype;
+                use molrs::store::block::BlockDtype;
                 let col_i = bonds
                     .get("i")
                     .and_then(|c| <u32 as BlockDtype>::from_column(c))
@@ -1596,7 +1596,7 @@ impl WasmPca2 {
         let rows: Vec<PcaRow> = (0..n_rows)
             .map(|i| PcaRow(matrix[i * n_cols..(i + 1) * n_cols].to_vec()))
             .collect();
-        let dummy = molrs::frame::Frame::new();
+        let dummy = molrs::store::frame::Frame::new();
         RsPca2::<PcaRow>::new()
             .compute(&[&dummy], &rows)
             .map(|inner| WasmPcaResult { inner })
@@ -1714,7 +1714,7 @@ impl WasmKMeans {
             coords: coords.to_vec(),
             variance: [0.0 as F, 0.0 as F],
         };
-        let dummy = molrs::frame::Frame::new();
+        let dummy = molrs::store::frame::Frame::new();
         let labels = self
             .inner
             .compute(&[&dummy], &pca)

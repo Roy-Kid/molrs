@@ -18,4 +18,4 @@ ndarray = "0.17"
 rustfft = "6"
 
 [dev-dependencies]
-rand = "0.9"
+rand = "0.10"

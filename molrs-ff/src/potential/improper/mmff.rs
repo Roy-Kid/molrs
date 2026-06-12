@@ -5,11 +5,10 @@ use std::collections::HashMap;
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::{cross3, dot3, mag3, sub3, validate_coords};
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
-/// md/A -> kcal/mol conversion.
-const MDYNE_A_TO_KCAL: f64 = 143.9325;
+use crate::constants::MDYNE_A_TO_KCAL;
 
 pub struct MMFFOutOfPlane {
     atom_i: Vec<usize>,
@@ -20,7 +19,7 @@ pub struct MMFFOutOfPlane {
 }
 
 impl Potential for MMFFOutOfPlane {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0 as F; coords.len()];

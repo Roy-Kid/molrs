@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::validate_coords;
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 /// Harmonic bond potential with pre-resolved flat arrays.
@@ -31,7 +31,7 @@ impl BondHarmonic {
 }
 
 impl Potential for BondHarmonic {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let n_atoms = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0; coords.len()];
@@ -104,8 +104,8 @@ pub fn bond_harmonic_ctor(
             .get(label.as_str())
             .ok_or_else(|| format!("BondHarmonic: unknown bond type '{}'", label))?;
         let k0 = params
-            .get("k0")
-            .ok_or_else(|| format!("BondHarmonic type '{}': missing 'k0'", label))?
+            .get("k")
+            .ok_or_else(|| format!("BondHarmonic type '{}': missing 'k'", label))?
             as F;
         let r0 = params
             .get("r0")
@@ -126,7 +126,7 @@ mod tests {
     use super::*;
     use crate::forcefield::ForceField;
     use crate::potential::extract_coords;
-    use molrs::block::Block;
+    use molrs::store::block::Block;
     use molrs::types::U;
     use ndarray::Array1;
 
@@ -158,7 +158,7 @@ mod tests {
         let pot = BondHarmonic::new(vec![0], vec![1], vec![300.0], vec![1.5]);
         let coords: Vec<F> = vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0];
 
-        let (e, forces) = pot.eval(&coords);
+        let (e, forces) = pot.calc_energy_forces(&coords);
         assert!((e - 37.5).abs() < 1e-3);
         assert!((forces[0] - 150.0).abs() < 1e-3);
         assert!((forces[3] + 150.0).abs() < 1e-3);
@@ -168,7 +168,7 @@ mod tests {
     fn test_forcefield_compile_integration() {
         let mut ff = ForceField::new("test");
         ff.def_bondstyle("harmonic")
-            .def_type("CT-CT", &[("k0", 300.0), ("r0", 1.5)]);
+            .def_type("CT-CT", &[("k", 300.0), ("r0", 1.5)]);
 
         let mut frame = Frame::new();
         frame.insert("atoms", make_atoms(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]));
@@ -188,9 +188,9 @@ mod tests {
             .unwrap();
         frame.insert("bonds", bonds);
 
-        let pots = ff.compile(&frame).unwrap();
+        let pots = ff.to_potentials(&frame).unwrap();
         let coords = extract_coords(&frame).unwrap();
-        let e = pots.energy(&coords);
+        let e = pots.calc_energy(&coords);
         assert!((e - 37.5).abs() < 1e-3);
     }
 }

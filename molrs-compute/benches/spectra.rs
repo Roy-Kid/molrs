@@ -7,7 +7,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 use molrs_compute::spectra::{ir_spectrum, power_spectrum, raman_spectrum};
 use ndarray::Array2;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::time::Duration;
 
 // ── Sweep constants ──────────────────────────────────────────────────────────

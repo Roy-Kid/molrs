@@ -27,7 +27,7 @@ use js_sys::{Array as JsArray, Int32Array, Uint32Array};
 use ndarray::Array1;
 use wasm_bindgen::prelude::*;
 
-use molrs::block::{Block as RsBlock, DType};
+use molrs::store::block::{Block as RsBlock, DType};
 use molrs::types::F;
 use molrs_ffi::BlockRef;
 
@@ -738,7 +738,7 @@ impl Block {
             .map_err(js_err)
     }
 
-    fn insert_col<T: molrs::block::BlockDtype>(
+    fn insert_col<T: molrs::store::block::BlockDtype>(
         &mut self,
         key: &str,
         array: ndarray::ArrayD<T>,

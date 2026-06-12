@@ -10,8 +10,8 @@
 //! Run:
 //!   cargo run -p molcrafts-molrs-ff --example typify_litfsi
 
-use molrs::atomistic::Atomistic;
-use molrs::molgraph::{Atom, AtomId, MolGraph, PropValue};
+use molrs::system::molgraph::{Atom, PropValue};
+use molrs::{AtomId, Atomistic};
 use molrs_ff::typifier::Typifier;
 use molrs_ff::typifier::mmff::MMFFTypifier;
 
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 1: Build molecular graph
     // =========================================================================
 
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
 
     let li = mol.add_atom(Atom::xyz("Li", -3.0, 0.0, 0.0));
     let n = mol.add_atom(Atom::xyz("N", -1.5, 0.0, 0.0));
@@ -121,11 +121,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // =========================================================================
     println!("\n--- Build & Evaluate ---\n");
 
-    let mol_aa = Atomistic::try_from_molgraph(mol.clone()).expect("mol is atomistic");
-    match typifier.build(&mol_aa) {
+    match typifier.build(&mol) {
         Ok(potentials) => {
             let coords = molrs_ff::potential::extract_coords(&frame)?;
-            let (energy, _) = potentials.eval(&coords);
+            let (energy, _) = potentials.calc_energy_forces(&coords);
             println!(
                 "Built {} kernel(s), energy = {:.4} kcal/mol",
                 potentials.len(),
@@ -141,13 +140,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn add_bond(mol: &mut MolGraph, a: AtomId, b: AtomId, order: f64) {
+fn add_bond(mol: &mut Atomistic, a: AtomId, b: AtomId, order: f64) {
     let bid = mol.add_bond(a, b).expect("add_bond");
     if (order - 1.0).abs() > 0.01 {
-        mol.get_bond_mut(bid)
-            .unwrap()
-            .props
-            .insert("order".to_string(), PropValue::F64(order));
+        mol.set_bond_prop(bid, "order", PropValue::F64(order))
+            .unwrap();
     }
 }
 

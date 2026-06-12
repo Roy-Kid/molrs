@@ -42,7 +42,7 @@ pub fn sub3(a: &[F], ai: usize, b: &[F], bi: usize) -> [F; 3] {
 #[inline]
 pub fn validate_coords(coords: &[F]) -> usize {
     assert!(
-        coords.len() % 3 == 0,
+        coords.len().is_multiple_of(3),
         "coords length must be multiple of 3, got {}",
         coords.len()
     );
@@ -102,9 +102,11 @@ pub fn compute_dihedral(coords: &[F], i: usize, j: usize, k: usize, l: usize) ->
     let b3 = sub3(coords, l, coords, k);
     let n1 = cross3(b1, b2);
     let n2 = cross3(b2, b3);
-    let m = cross3(n1, [b2[0], b2[1], b2[2]]);
+    // Standard signed dihedral: y = |b2|·(b1·n2), x = n1·n2. The earlier form
+    // used y = (n1×b2)·n2 = −|b2|²·(b1·n2), whose extra |b2| factor distorts
+    // the angle (and its gradient at the central atoms) whenever |b2| ≠ 1.
     let x = dot3(n1, n2);
-    let y = dot3(m, n2);
+    let y = mag3(b2) * dot3(b1, n2);
     y.atan2(x)
 }
 
@@ -131,23 +133,29 @@ pub fn accumulate_dihedral_forces(
         return;
     }
 
+    // Force on the end atoms for the standard signed-dihedral convention used
+    // by `compute_dihedral` (φ = atan2(|b2|·(b1·n2), n1·n2)):
+    //   F_i = +dE/dφ·|b2|/|n1|²·n1,  F_l = −dE/dφ·|b2|/|n2|²·n2.
     let fi = [
-        -de_dphi * b2_mag / n1_sq * n1[0],
-        -de_dphi * b2_mag / n1_sq * n1[1],
-        -de_dphi * b2_mag / n1_sq * n1[2],
+        de_dphi * b2_mag / n1_sq * n1[0],
+        de_dphi * b2_mag / n1_sq * n1[1],
+        de_dphi * b2_mag / n1_sq * n1[2],
     ];
     let fl = [
-        de_dphi * b2_mag / n2_sq * n2[0],
-        de_dphi * b2_mag / n2_sq * n2[1],
-        de_dphi * b2_mag / n2_sq * n2[2],
+        -de_dphi * b2_mag / n2_sq * n2[0],
+        -de_dphi * b2_mag / n2_sq * n2[1],
+        -de_dphi * b2_mag / n2_sq * n2[2],
     ];
 
     let p_ij = dot3(b1, b2) / (b2_mag * b2_mag);
     let p_kl = dot3(b3, b2) / (b2_mag * b2_mag);
 
     for dim in 0..3 {
-        let fj = -fi[dim] + p_ij * fi[dim] + p_kl * fl[dim];
-        let fk = -fl[dim] - p_ij * fi[dim] - p_kl * fl[dim];
+        // Blondel-Karplus / GROMACS `do_dih_fup` middle-atom redistribution.
+        // With b1 = r_j−r_i, b2 = r_k−r_j, b3 = r_l−r_k:
+        //   F_j = −F_i − p_ij·F_i + p_kl·F_l,  F_k = −F_l + p_ij·F_i − p_kl·F_l.
+        let fj = -fi[dim] - p_ij * fi[dim] + p_kl * fl[dim];
+        let fk = -fl[dim] + p_ij * fi[dim] - p_kl * fl[dim];
         forces[i * 3 + dim] += fi[dim];
         forces[j * 3 + dim] += fj;
         forces[k * 3 + dim] += fk;

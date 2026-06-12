@@ -7,8 +7,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use molrs::block::Column;
-use molrs::molrec::{
+use molrs::store::block::Column;
+use molrs::store::molrec::{
     MolRec as CoreMolRec, ObservableData, ObservableKind, ObservableRecord, SchemaValue,
     Trajectory as CoreTrajectory,
 };
@@ -24,7 +24,7 @@ use crate::forcefield::PyForceField;
 use crate::frame::PyFrame;
 use crate::helpers::{NpF, molrs_error_to_pyerr};
 
-#[pyclass(name = "Trajectory", unsendable, from_py_object)]
+#[pyclass(name = "Trajectory", from_py_object, subclass)]
 #[derive(Clone)]
 pub struct PyTrajectory {
     pub(crate) inner: CoreTrajectory,
@@ -42,13 +42,13 @@ pub struct PyObservables {
     inner: Rc<RefCell<CoreMolRec>>,
 }
 
-#[pyclass(name = "ScalarObservable", unsendable, from_py_object)]
+#[pyclass(name = "ScalarObservable", from_py_object)]
 #[derive(Clone)]
 pub struct PyScalarObservable {
     pub(crate) inner: ObservableRecord,
 }
 
-#[pyclass(name = "VectorObservable", unsendable, from_py_object)]
+#[pyclass(name = "VectorObservable", from_py_object)]
 #[derive(Clone)]
 pub struct PyVectorObservable {
     pub(crate) inner: ObservableRecord,
@@ -168,14 +168,15 @@ impl PyMolRec {
 
     #[staticmethod]
     fn read_zarr(path: &str) -> PyResult<Self> {
-        let inner = molrs_io::zarr::read_molrec_file(path).map_err(molrs_error_to_pyerr)?;
+        let inner = molrs_io::store::zarr::read_molrec_file(path).map_err(molrs_error_to_pyerr)?;
         Ok(Self {
             inner: Rc::new(RefCell::new(inner)),
         })
     }
 
     fn write_zarr(&self, path: &str) -> PyResult<()> {
-        molrs_io::zarr::write_molrec_file(path, &self.inner.borrow()).map_err(molrs_error_to_pyerr)
+        molrs_io::store::zarr::write_molrec_file(path, &self.inner.borrow())
+            .map_err(molrs_error_to_pyerr)
     }
 
     fn count_frames(&self) -> usize {

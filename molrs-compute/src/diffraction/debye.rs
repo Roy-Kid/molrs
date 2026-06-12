@@ -26,7 +26,7 @@
 //!   PBC should usually be turned off for a meaningful Debye calculation
 //!   (the formula assumes an open system).
 
-use molrs::frame_access::FrameAccess;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::Array1;
 
@@ -183,8 +183,8 @@ impl Compute for StaticStructureFactorDebye {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use ndarray::{Array1 as A1, array};
 
     fn frame_with(positions: &[[F; 3]]) -> Frame {
@@ -221,7 +221,7 @@ mod tests {
     fn s_large_k_approaches_one() {
         // For random-ish positions and large k, the oscillating sin(k r)/(k r)
         // off-diagonal terms average to ≈ 0 → S(k) → 1.
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         use rand::rngs::StdRng;
         let mut rng = StdRng::seed_from_u64(7);

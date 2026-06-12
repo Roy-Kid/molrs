@@ -12,8 +12,8 @@
 //! outside the timed section.
 
 use criterion::{Criterion, criterion_group};
-use molrs::frame::Frame;
-use molrs::neighbors::NeighborList;
+use molrs::store::frame::Frame;
+use molrs::spatial::neighbors::NeighborList;
 use molrs_compute::center_of_mass::CenterOfMass;
 use molrs_compute::cluster::Cluster;
 use molrs_compute::cluster_centers::ClusterCenters;

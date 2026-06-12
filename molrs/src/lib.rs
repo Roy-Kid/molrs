@@ -23,7 +23,7 @@
 //! - `compute`  — trajectory analysis (RDF, MSD, clustering, tensors)
 //! - `smiles`   — SMILES parser
 //! - `ff`       — force fields (MMFF94, PME, typifier)
-//! - `embed`    — 3D coordinate generation
+//! - `conformer` — 3D conformer generation
 //! - `signal`   — signal processing (FFT-based ACF, windowing, frequency grids)
 //! - `full`     — everything above
 //!
@@ -38,7 +38,7 @@
 #![warn(rustdoc::missing_crate_level_docs)]
 
 // Core types at the top level (Frame, Block, MolGraph, SimBox, Element, …).
-pub use molrs::*;
+pub use molrs_core::*;
 
 #[cfg(feature = "io")]
 pub use molrs_io as io;
@@ -52,8 +52,8 @@ pub use molrs_io::smiles;
 #[cfg(feature = "ff")]
 pub use molrs_ff as ff;
 
-#[cfg(feature = "embed")]
-pub use molrs_embed as embed;
+#[cfg(feature = "conformer")]
+pub use molrs_conformer as conformer;
 
 #[cfg(feature = "signal")]
 pub use molrs_signal as signal;

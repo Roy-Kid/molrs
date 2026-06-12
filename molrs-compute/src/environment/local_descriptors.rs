@@ -16,10 +16,10 @@
 //! `ParticleLocal` (rotate by per-particle quaternion before evaluating
 //! `Y_ℓm`) is a follow-up.
 
-use molrs::frame_access::FrameAccess;
 use molrs::math::complex::Complex;
 use molrs::math::spherical_harmonics::ylm_all;
-use molrs::neighbors::NeighborList;
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
 
 use crate::error::ComputeError;
 use crate::result::ComputeResult;
@@ -130,10 +130,10 @@ impl Compute for LocalDescriptors {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
     use molrs::math::spherical_harmonics::ylm_complex;
-    use molrs::neighbors::{LinkCell, NbListAlgo};
-    use molrs::region::simbox::SimBox;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
     use molrs::types::F;
     use ndarray::{Array1 as A1, array};
 
@@ -157,7 +157,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("x")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -166,7 +166,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("y")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()
@@ -175,7 +175,7 @@ mod tests {
             .get("atoms")
             .unwrap()
             .get("z")
-            .and_then(<F as molrs::block::BlockDtype>::from_column)
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
             .unwrap()
             .as_slice()
             .unwrap()

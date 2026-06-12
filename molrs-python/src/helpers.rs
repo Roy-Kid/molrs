@@ -4,7 +4,7 @@
 //! to appropriate Python exceptions, and the [`NpF`] type alias that matches
 //! the crate's float precision setting.
 
-use molrs::region::simbox::BoxError;
+use molrs::spatial::region::simbox::BoxError;
 use molrs::types::F;
 use ndarray::{Array1, array};
 use numpy::PyReadonlyArray1;
@@ -68,4 +68,39 @@ pub fn molrs_error_to_pyerr(e: molrs::MolRsError) -> PyErr {
 /// Convert a [`molrs_io::smiles::SmilesError`] to a Python `ValueError`.
 pub fn smiles_error_to_pyerr(e: molrs_io::smiles::SmilesError) -> PyErr {
     PyValueError::new_err(e.to_string())
+}
+
+/// Convert any `Display` error (typically a `molrs-compute` / `molrs-signal`
+/// analysis error) to a Python `ValueError`. Shared by the analysis bindings.
+pub fn py_value_err<E: std::fmt::Display>(e: E) -> PyErr {
+    PyValueError::new_err(e.to_string())
+}
+
+/// Collect owned core [`Frame`]s from a single `Frame` or a list of them.
+/// Used by every batch-`compute` binding to accept both shapes.
+///
+/// [`Frame`]: molrs::store::frame::Frame
+pub(crate) fn collect_frames(
+    frames: &Bound<'_, PyAny>,
+) -> PyResult<Vec<molrs::store::frame::Frame>> {
+    use crate::frame::PyFrame;
+    if let Ok(single) = frames.extract::<PyRef<'_, PyFrame>>() {
+        return Ok(vec![single.clone_core_frame()?]);
+    }
+    let list: Vec<PyRef<'_, PyFrame>> = frames.extract()?;
+    list.iter().map(|f| f.clone_core_frame()).collect()
+}
+
+/// Collect owned [`NeighborList`]s from a single wrapper or a list of them.
+///
+/// [`NeighborList`]: molrs::spatial::neighbors::NeighborList
+pub(crate) fn collect_nlists(
+    arg: &Bound<'_, PyAny>,
+) -> PyResult<Vec<molrs::spatial::neighbors::NeighborList>> {
+    use crate::linkedcell::PyNeighborList;
+    if let Ok(single) = arg.extract::<PyRef<'_, PyNeighborList>>() {
+        return Ok(vec![single.inner.clone()]);
+    }
+    let list: Vec<PyRef<'_, PyNeighborList>> = arg.extract()?;
+    Ok(list.iter().map(|n| n.inner.clone()).collect())
 }

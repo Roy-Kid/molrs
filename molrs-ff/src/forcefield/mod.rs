@@ -6,18 +6,27 @@
 //! into computational [`Potential`](super::potential::Potential) objects via
 //! [`ForceField::compile`].
 
+pub mod readers;
 pub mod xml;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+use molrs::store::frame::Frame;
 
 // ---------------------------------------------------------------------------
 // Params
 // ---------------------------------------------------------------------------
 
 /// Key-value parameter bag for type definitions.
+///
+/// Holds numeric params (`k`, `r0`, the numeric type `id`, …) and, separately,
+/// string params (`element`, or any string metadata carried by convention as a
+/// keyword param). Energy kernels read only the numeric side; the string side
+/// preserves I/O metadata across the boundary.
 #[derive(Debug, Clone, Default)]
 pub struct Params {
     inner: HashMap<String, f64>,
+    strings: HashMap<String, String>,
 }
 
 impl Params {
@@ -30,7 +39,10 @@ impl Params {
         for &(k, v) in pairs {
             inner.insert(k.to_owned(), v);
         }
-        Self { inner }
+        Self {
+            inner,
+            strings: HashMap::new(),
+        }
     }
 
     pub fn get(&self, key: &str) -> Option<f64> {
@@ -47,6 +59,20 @@ impl Params {
 
     pub fn inner(&self) -> &HashMap<String, f64> {
         &self.inner
+    }
+
+    // -- string params (element, and other string metadata by convention) --
+
+    pub fn get_str(&self, key: &str) -> Option<&str> {
+        self.strings.get(key).map(|s| s.as_str())
+    }
+
+    pub fn set_str(&mut self, key: &str, value: &str) {
+        self.strings.insert(key.to_owned(), value.to_owned());
+    }
+
+    pub fn iter_strings(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
+        self.strings.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 }
 
@@ -362,43 +388,54 @@ impl Style {
     /// - **Pair**: `"A"` -> self-pair (itom=A, jtom=A); `"A-B"` -> cross-pair
     /// - **Dihedral/Improper**: `"A-B-C-D"` -> itom=A, jtom=B, ktom=C, ltom=D
     pub fn def_type(&mut self, name: &str, params: &[(&str, f64)]) -> &mut Self {
+        // Infallible chaining form: a malformed name is a programmer error here
+        // (literal call sites). The Python binding uses the fallible
+        // [`Style::try_def_type`] so user input raises instead of aborting.
+        if let Err(e) = self.try_def_type(name, params) {
+            panic!("{e}");
+        }
+        self
+    }
+
+    /// Add a type to this style from its dash-form `name`, validating the part
+    /// count against the style's category. This is the single source of truth
+    /// for the type-name grammar; [`Self::def_type`] and
+    /// [`ForceField::def_type`] both go through it.
+    pub fn try_def_type(&mut self, name: &str, params: &[(&str, f64)]) -> Result<(), DefTypeError> {
         let parts: Vec<&str> = name.split('-').collect();
-        // Extract category before mutable borrow (category() returns &'static str, no borrow)
         let category = self.category();
+        let arity = |expected: &'static str| DefTypeError::Arity {
+            category,
+            expected,
+            name: name.to_string(),
+            got: parts.len(),
+        };
         match category {
             "atom" => {
                 self.def_atomtype(name, params);
             }
             "bond" => {
-                assert!(
-                    parts.len() == 2,
-                    "bond type name must be \"A-B\", got \"{}\"",
-                    name
-                );
+                if parts.len() != 2 {
+                    return Err(arity("A-B"));
+                }
                 self.def_bondtype(parts[0], parts[1], params);
             }
             "angle" => {
-                assert!(
-                    parts.len() == 3,
-                    "angle type name must be \"A-B-C\", got \"{}\"",
-                    name
-                );
+                if parts.len() != 3 {
+                    return Err(arity("A-B-C"));
+                }
                 self.def_angletype(parts[0], parts[1], parts[2], params);
             }
             "dihedral" => {
-                assert!(
-                    parts.len() == 4,
-                    "dihedral type name must be \"A-B-C-D\", got \"{}\"",
-                    name
-                );
+                if parts.len() != 4 {
+                    return Err(arity("A-B-C-D"));
+                }
                 self.def_dihedraltype(parts[0], parts[1], parts[2], parts[3], params);
             }
             "improper" => {
-                assert!(
-                    parts.len() == 4,
-                    "improper type name must be \"A-B-C-D\", got \"{}\"",
-                    name
-                );
+                if parts.len() != 4 {
+                    return Err(arity("A-B-C-D"));
+                }
                 self.def_impropertype(parts[0], parts[1], parts[2], parts[3], params);
             }
             "pair" => match parts.len() {
@@ -408,15 +445,184 @@ impl Style {
                 2 => {
                     self.def_pairtype(parts[0], Some(parts[1]), params);
                 }
-                _ => panic!("pair type name must be \"A\" or \"A-B\", got \"{}\"", name),
+                _ => return Err(arity("A\" or \"A-B")),
             },
-            "kspace" => {
-                // KSpace styles have no per-type definitions.
-                panic!("kspace styles do not support per-type definitions");
-            }
-            _ => unreachable!(),
+            "kspace" => return Err(DefTypeError::Unsupported(category)),
+            other => return Err(DefTypeError::UnknownCategory(other.to_string())),
         }
-        self
+        Ok(())
+    }
+}
+
+/// Error from the dash-form type-name grammar used by [`Style::try_def_type`]
+/// and [`ForceField::def_type`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefTypeError {
+    /// `name` has the wrong number of dash-separated parts for `category`.
+    Arity {
+        category: &'static str,
+        expected: &'static str,
+        name: String,
+        got: usize,
+    },
+    /// The category accepts no per-type definitions (e.g. `kspace`).
+    Unsupported(&'static str),
+    /// Unknown style category string.
+    UnknownCategory(String),
+}
+
+impl std::fmt::Display for DefTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DefTypeError::Arity {
+                category,
+                expected,
+                name,
+                got,
+            } => write!(
+                f,
+                "{category} type name must be \"{expected}\", got \"{name}\" ({got} parts)"
+            ),
+            DefTypeError::Unsupported(category) => {
+                write!(f, "{category} styles do not support per-type definitions")
+            }
+            DefTypeError::UnknownCategory(category) => {
+                write!(f, "unknown style category '{category}'")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DefTypeError {}
+
+/// In-place mutators backing the Python handle-view layer (Style/Type views read
+/// through [`collect_type_params`](StyleDefs::collect_type_params) and write
+/// through these). Each operates on the type identified by its dash-form name.
+impl Style {
+    /// Endpoint atom-type names of the type named `name` (e.g. `["CT","CT"]`),
+    /// or `None` if no such type. Atom/kspace styles return an empty vec.
+    pub fn type_endpoints(&self, name: &str) -> Option<Vec<String>> {
+        match &self.defs {
+            StyleDefs::Atom(v) => v.iter().find(|t| t.name == name).map(|_| Vec::new()),
+            StyleDefs::Bond(v) => v
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| vec![t.itom.clone(), t.jtom.clone()]),
+            StyleDefs::Angle(v) => v
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| vec![t.itom.clone(), t.jtom.clone(), t.ktom.clone()]),
+            StyleDefs::Dihedral(v) => v.iter().find(|t| t.name == name).map(|t| {
+                vec![
+                    t.itom.clone(),
+                    t.jtom.clone(),
+                    t.ktom.clone(),
+                    t.ltom.clone(),
+                ]
+            }),
+            StyleDefs::Improper(v) => v.iter().find(|t| t.name == name).map(|t| {
+                vec![
+                    t.itom.clone(),
+                    t.jtom.clone(),
+                    t.ktom.clone(),
+                    t.ltom.clone(),
+                ]
+            }),
+            StyleDefs::Pair(v) => v
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| vec![t.itom.clone(), t.jtom.clone()]),
+            StyleDefs::KSpace => None,
+        }
+    }
+
+    /// Set (or add) a single param on the type named `name`. Returns `false` if
+    /// no such type exists.
+    pub fn set_type_param(&mut self, name: &str, key: &str, value: f64) -> bool {
+        macro_rules! set_on {
+            ($v:expr) => {{
+                if let Some(t) = $v.iter_mut().find(|t| t.name == name) {
+                    t.params.set(key, value);
+                    return true;
+                }
+            }};
+        }
+        match &mut self.defs {
+            StyleDefs::Atom(v) => set_on!(v),
+            StyleDefs::Bond(v) => set_on!(v),
+            StyleDefs::Angle(v) => set_on!(v),
+            StyleDefs::Dihedral(v) => set_on!(v),
+            StyleDefs::Improper(v) => set_on!(v),
+            StyleDefs::Pair(v) => set_on!(v),
+            StyleDefs::KSpace => {}
+        }
+        false
+    }
+
+    /// Set (or add) a single string param on the type named `name`. Returns
+    /// `false` if no such type exists.
+    pub fn set_type_str_param(&mut self, name: &str, key: &str, value: &str) -> bool {
+        macro_rules! set_on {
+            ($v:expr) => {{
+                if let Some(t) = $v.iter_mut().find(|t| t.name == name) {
+                    t.params.set_str(key, value);
+                    return true;
+                }
+            }};
+        }
+        match &mut self.defs {
+            StyleDefs::Atom(v) => set_on!(v),
+            StyleDefs::Bond(v) => set_on!(v),
+            StyleDefs::Angle(v) => set_on!(v),
+            StyleDefs::Dihedral(v) => set_on!(v),
+            StyleDefs::Improper(v) => set_on!(v),
+            StyleDefs::Pair(v) => set_on!(v),
+            StyleDefs::KSpace => {}
+        }
+        false
+    }
+
+    /// Rename every type named `old` to `new`. Returns the count renamed.
+    pub fn rename_type(&mut self, old: &str, new: &str) -> usize {
+        macro_rules! rename_in {
+            ($v:expr) => {{
+                let mut n = 0;
+                for t in $v.iter_mut().filter(|t| t.name == old) {
+                    t.name = new.to_owned();
+                    n += 1;
+                }
+                n
+            }};
+        }
+        match &mut self.defs {
+            StyleDefs::Atom(v) => rename_in!(v),
+            StyleDefs::Bond(v) => rename_in!(v),
+            StyleDefs::Angle(v) => rename_in!(v),
+            StyleDefs::Dihedral(v) => rename_in!(v),
+            StyleDefs::Improper(v) => rename_in!(v),
+            StyleDefs::Pair(v) => rename_in!(v),
+            StyleDefs::KSpace => 0,
+        }
+    }
+
+    /// Remove every type named `name`. Returns the count removed.
+    pub fn remove_type(&mut self, name: &str) -> usize {
+        macro_rules! remove_in {
+            ($v:expr) => {{
+                let before = $v.len();
+                $v.retain(|t| t.name != name);
+                before - $v.len()
+            }};
+        }
+        match &mut self.defs {
+            StyleDefs::Atom(v) => remove_in!(v),
+            StyleDefs::Bond(v) => remove_in!(v),
+            StyleDefs::Angle(v) => remove_in!(v),
+            StyleDefs::Dihedral(v) => remove_in!(v),
+            StyleDefs::Improper(v) => remove_in!(v),
+            StyleDefs::Pair(v) => remove_in!(v),
+            StyleDefs::KSpace => 0,
+        }
     }
 }
 
@@ -438,7 +644,7 @@ impl Style {
 ///     .def_type("A", &[("epsilon", 0.5), ("sigma", 1.0)]);
 ///
 /// // Compile into Potentials with a Frame containing topology
-/// // let potentials = ff.compile(&frame).unwrap();
+/// // let potentials = ff.to_potentials(&frame).unwrap();
 /// ```
 #[derive(Debug, Clone)]
 pub struct ForceField {
@@ -501,6 +707,32 @@ impl ForceField {
         self.def_style(StyleDefs::KSpace, name, Params::from_pairs(params))
     }
 
+    /// Define a type in one call: ensure the `category` style named `style`
+    /// exists, then add the type whose dash-form `name` is validated against
+    /// the category's arity. Owns the type-name grammar so bindings forward the
+    /// raw `name` instead of re-parsing it.
+    ///
+    /// `category` is one of `atom`/`bond`/`angle`/`dihedral`/`improper`/`pair`.
+    pub fn def_type(
+        &mut self,
+        category: &str,
+        style: &str,
+        name: &str,
+        params: &[(&str, f64)],
+    ) -> Result<(), DefTypeError> {
+        let target = match category {
+            "atom" => self.def_atomstyle(style),
+            "bond" => self.def_bondstyle(style),
+            "angle" => self.def_anglestyle(style),
+            "dihedral" => self.def_dihedralstyle(style),
+            "improper" => self.def_improperstyle(style),
+            "pair" => self.def_pairstyle(style, &[]),
+            "kspace" => return Err(DefTypeError::Unsupported("kspace")),
+            other => return Err(DefTypeError::UnknownCategory(other.to_string())),
+        };
+        target.try_def_type(name, params)
+    }
+
     // -- with_* builder pattern (consumes and returns self) --
 
     pub fn with_atomstyle(mut self, name: &str) -> Self {
@@ -533,6 +765,22 @@ impl ForceField {
         self.styles
             .iter()
             .find(|s| s.category() == category && s.name == name)
+    }
+
+    /// Mutable style lookup, backing the Python handle-view writes.
+    pub fn get_style_mut(&mut self, category: &str, name: &str) -> Option<&mut Style> {
+        self.styles
+            .iter_mut()
+            .find(|s| s.category() == category && s.name == name)
+    }
+
+    /// Remove the style identified by `(category, name)`. Returns whether one was
+    /// removed.
+    pub fn remove_style(&mut self, category: &str, name: &str) -> bool {
+        let before = self.styles.len();
+        self.styles
+            .retain(|s| !(s.category() == category && s.name == name));
+        before != self.styles.len()
     }
 
     pub fn get_styles(&self, category: &str) -> Vec<&Style> {
@@ -585,6 +833,129 @@ impl ForceField {
             .flatten()
             .collect()
     }
+
+    pub fn get_dihedraltypes(&self) -> Vec<&DihedralType> {
+        self.styles
+            .iter()
+            .filter_map(|s| match &s.defs {
+                StyleDefs::Dihedral(types) => Some(types.iter()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    pub fn get_impropertypes(&self) -> Vec<&ImproperType> {
+        self.styles
+            .iter()
+            .filter_map(|s| match &s.defs {
+                StyleDefs::Improper(types) => Some(types.iter()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// Project this force field onto the types a typed [`Frame`] actually uses.
+    ///
+    /// Reading a full force field (e.g. OPLS with ~900 atom types) yields a
+    /// large `ForceField`, but a concrete typed structure references only a
+    /// small fraction of those types. `subset` returns a fresh `ForceField`
+    /// restricted to exactly the types named in `frame`'s per-block `type`
+    /// columns, leaving `self` unmodified.
+    ///
+    /// The projection is a pure set operation. For each topology category, the
+    /// used type-name set is read from the matching block's `type` column
+    /// (`atoms`/`bonds`/`angles`/`dihedrals`/`impropers`); a category whose
+    /// block or `type` column is absent contributes an empty set. Each `Style`
+    /// keeps only the `*Type` entries whose `name` is in that set.
+    ///
+    /// Pair types are not keyed by a topology block: a [`PairType`] is kept iff
+    /// **both** of its endpoint atom-type names (`itom` and `jtom`) are in the
+    /// used atom-type set. This one predicate covers self-interaction pairs
+    /// (`itom == jtom`) and explicit cross pairs uniformly.
+    ///
+    /// Styles left with no surviving types are dropped (a `KSpace` style, which
+    /// legitimately carries no per-type defs, is preserved verbatim). Type
+    /// names are copied unchanged — no renumbering.
+    pub fn subset(&self, frame: &Frame) -> ForceField {
+        let used = |block: &str| -> HashSet<String> {
+            frame
+                .get(block)
+                .and_then(|b| b.get_string("type"))
+                .map(|arr| arr.iter().cloned().collect())
+                .unwrap_or_default()
+        };
+        let used_atoms = used("atoms");
+        let used_bonds = used("bonds");
+        let used_angles = used("angles");
+        let used_dihedrals = used("dihedrals");
+        let used_impropers = used("impropers");
+
+        let mut out = ForceField::new(&self.name);
+        for style in &self.styles {
+            let defs = match &style.defs {
+                StyleDefs::Atom(types) => StyleDefs::Atom(
+                    types
+                        .iter()
+                        .filter(|t| used_atoms.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Bond(types) => StyleDefs::Bond(
+                    types
+                        .iter()
+                        .filter(|t| used_bonds.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Angle(types) => StyleDefs::Angle(
+                    types
+                        .iter()
+                        .filter(|t| used_angles.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Dihedral(types) => StyleDefs::Dihedral(
+                    types
+                        .iter()
+                        .filter(|t| used_dihedrals.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Improper(types) => StyleDefs::Improper(
+                    types
+                        .iter()
+                        .filter(|t| used_impropers.contains(&t.name))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::Pair(types) => StyleDefs::Pair(
+                    types
+                        .iter()
+                        .filter(|t| used_atoms.contains(&t.itom) && used_atoms.contains(&t.jtom))
+                        .cloned()
+                        .collect(),
+                ),
+                StyleDefs::KSpace => StyleDefs::KSpace,
+            };
+
+            let keep = match &defs {
+                StyleDefs::Atom(t) => !t.is_empty(),
+                StyleDefs::Bond(t) => !t.is_empty(),
+                StyleDefs::Angle(t) => !t.is_empty(),
+                StyleDefs::Dihedral(t) => !t.is_empty(),
+                StyleDefs::Improper(t) => !t.is_empty(),
+                StyleDefs::Pair(t) => !t.is_empty(),
+                StyleDefs::KSpace => true,
+            };
+            if keep {
+                out.styles
+                    .push(Style::new(defs, &style.name, style.params.clone()));
+            }
+        }
+        out
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -594,6 +965,7 @@ impl ForceField {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use molrs::store::block::Block;
 
     #[test]
     fn test_params() {
@@ -812,5 +1184,158 @@ mod tests {
         assert_eq!(ff.get_atomtypes().len(), 2);
         assert_eq!(ff.get_bondtypes().len(), 1);
         assert_eq!(ff.get_pairtypes().len(), 0);
+    }
+
+    // -- subset projection ---------------------------------------------------
+
+    /// A force field spanning more types than any single fixture frame uses:
+    /// atom {CT, HC, OH}, bond {CT-HC, CT-OH}, angle {HC-CT-HC, HC-CT-OH},
+    /// dihedral {HC-CT-CT-HC}, improper {CT-CT-CT-OH}, pair {CT self, HC self,
+    /// OH self, CT-OH cross}.
+    fn full_ff() -> ForceField {
+        let mut ff = ForceField::new("fixture");
+        let a = ff.def_atomstyle("full");
+        a.def_atomtype("CT", &[("mass", 12.011)]);
+        a.def_atomtype("HC", &[("mass", 1.008)]);
+        a.def_atomtype("OH", &[("mass", 15.999)]);
+        let b = ff.def_bondstyle("harmonic");
+        b.def_bondtype("CT", "HC", &[("k0", 340.0), ("r0", 1.09)]);
+        b.def_bondtype("CT", "OH", &[("k0", 320.0), ("r0", 1.41)]);
+        let ang = ff.def_anglestyle("harmonic");
+        ang.def_angletype("HC", "CT", "HC", &[("k0", 33.0), ("theta0", 107.8)]);
+        ang.def_angletype("HC", "CT", "OH", &[("k0", 35.0), ("theta0", 109.5)]);
+        let dih = ff.def_dihedralstyle("opls");
+        dih.def_dihedraltype("HC", "CT", "CT", "HC", &[("k1", 0.0)]);
+        let imp = ff.def_improperstyle("cvff");
+        imp.def_impropertype("CT", "CT", "CT", "OH", &[("k", 1.0)]);
+        let p = ff.def_pairstyle("lj/cut", &[("cutoff", 10.0)]);
+        p.def_pairtype("CT", None, &[("epsilon", 0.066), ("sigma", 3.5)]);
+        p.def_pairtype("HC", None, &[("epsilon", 0.03), ("sigma", 2.5)]);
+        p.def_pairtype("OH", None, &[("epsilon", 0.17), ("sigma", 3.12)]);
+        p.def_pairtype("CT", Some("OH"), &[("epsilon", 0.1), ("sigma", 3.3)]);
+        ff
+    }
+
+    fn type_block(names: &[&str]) -> Block {
+        use ndarray::Array1;
+        let mut block = Block::new();
+        let col: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+        block
+            .insert("type", Array1::from_vec(col).into_dyn())
+            .unwrap();
+        block
+    }
+
+    /// Typed frame using only: atoms {CT, HC}, bonds {CT-HC}, angles {HC-CT-HC},
+    /// no dihedrals/impropers blocks. OH is never referenced.
+    fn partial_frame() -> Frame {
+        let mut frame = Frame::new();
+        frame.insert("atoms", type_block(&["CT", "HC", "CT", "HC"]));
+        frame.insert("bonds", type_block(&["CT-HC"]));
+        frame.insert("angles", type_block(&["HC-CT-HC"]));
+        frame
+    }
+
+    #[test]
+    fn test_subset_does_not_mutate_self() {
+        let ff = full_ff();
+        let n_atoms = ff.get_atomtypes().len();
+        let n_bonds = ff.get_bondtypes().len();
+        let _ = ff.subset(&partial_frame());
+        assert_eq!(ff.get_atomtypes().len(), n_atoms);
+        assert_eq!(ff.get_bondtypes().len(), n_bonds);
+    }
+
+    #[test]
+    fn test_subset_per_category_exact_match() {
+        let mini = full_ff().subset(&partial_frame());
+
+        let atoms: HashSet<&str> = mini
+            .get_atomtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(atoms, HashSet::from(["CT", "HC"]));
+
+        let bonds: HashSet<&str> = mini
+            .get_bondtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(bonds, HashSet::from(["CT-HC"]));
+
+        let angles: HashSet<&str> = mini
+            .get_angletypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(angles, HashSet::from(["HC-CT-HC"]));
+
+        // dihedrals/impropers blocks absent -> empty
+        assert!(mini.get_dihedraltypes().is_empty());
+        assert!(mini.get_impropertypes().is_empty());
+    }
+
+    #[test]
+    fn test_subset_pairtype_both_endpoints_predicate() {
+        let mini = full_ff().subset(&partial_frame());
+        let pairs: HashSet<&str> = mini
+            .get_pairtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        // CT, HC self-pairs survive (both endpoints used); OH self-pair dropped
+        // (OH unused); CT-OH cross dropped (one endpoint unused).
+        assert_eq!(pairs, HashSet::from(["CT", "HC"]));
+    }
+
+    #[test]
+    fn test_subset_drops_empty_styles() {
+        let mini = full_ff().subset(&partial_frame());
+        // dihedral/improper styles end up empty and are dropped entirely.
+        assert!(mini.get_style("dihedral", "opls").is_none());
+        assert!(mini.get_style("improper", "cvff").is_none());
+        // a referenced style survives.
+        assert!(mini.get_style("bond", "harmonic").is_some());
+    }
+
+    #[test]
+    fn test_subset_preserves_names_verbatim() {
+        let mini = full_ff().subset(&partial_frame());
+        assert!(mini.get_atomtypes().iter().any(|t| t.name == "CT"));
+        assert!(mini.get_bondtypes().iter().any(|t| t.name == "CT-HC"));
+    }
+
+    #[test]
+    fn test_subset_zero_overlap_yields_empty() {
+        let mut frame = Frame::new();
+        frame.insert("atoms", type_block(&["XX", "ZZ"]));
+        let mini = full_ff().subset(&frame);
+        assert!(mini.get_atomtypes().is_empty());
+        assert!(mini.get_pairtypes().is_empty());
+        // every style had zero surviving types -> no styles remain.
+        assert!(mini.styles().is_empty());
+    }
+
+    #[test]
+    fn test_subset_missing_block_treated_as_empty() {
+        // frame with atoms only -> bond/angle/etc categories empty, no panic.
+        let mut frame = Frame::new();
+        frame.insert("atoms", type_block(&["CT", "OH"]));
+        let mini = full_ff().subset(&frame);
+        let atoms: HashSet<&str> = mini
+            .get_atomtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(atoms, HashSet::from(["CT", "OH"]));
+        assert!(mini.get_bondtypes().is_empty());
+        // CT, OH self-pairs and CT-OH cross all survive (all endpoints used).
+        let pairs: HashSet<&str> = mini
+            .get_pairtypes()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(pairs, HashSet::from(["CT", "OH", "CT-OH"]));
     }
 }

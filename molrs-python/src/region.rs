@@ -13,7 +13,9 @@
 //! angstroms).
 
 use crate::helpers::NpF;
-use molrs::region::region::{AndRegion, HollowSphere, NotRegion, OrRegion, Region, Sphere};
+use molrs::spatial::region::region::{
+    AndRegion, Cuboid, HollowSphere, NotRegion, OrRegion, Region, Sphere,
+};
 use ndarray::Array1;
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
@@ -161,6 +163,104 @@ impl PySphere {
         format!(
             "Sphere(center=[{:.2}, {:.2}, {:.2}], radius={:.2})",
             self.inner.center[0], self.inner.center[1], self.inner.center[2], self.inner.radius
+        )
+    }
+}
+
+/// Axis-aligned cuboid (box) region, exposed to Python as `molrs.Cuboid`.
+///
+/// A point is inside when `origin[d] <= p[d] <= origin[d] + lengths[d]` on
+/// every axis. Supports `&` / `|` / `~` composition like the other regions.
+#[pyclass(name = "Cuboid", from_py_object)]
+#[derive(Clone)]
+pub struct PyCuboid {
+    inner: Arc<Cuboid>,
+}
+
+#[pymethods]
+impl PyCuboid {
+    /// Create an axis-aligned cuboid region.
+    ///
+    /// Parameters
+    /// ----------
+    /// origin : numpy.ndarray, shape (3,), dtype float
+    ///     Minimum corner (lower bound on each axis).
+    /// lengths : numpy.ndarray, shape (3,), dtype float
+    ///     Edge lengths along x, y, z.
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If ``origin`` or ``lengths`` does not have length 3.
+    #[new]
+    fn new(
+        origin: PyReadonlyArray1<'_, NpF>,
+        lengths: PyReadonlyArray1<'_, NpF>,
+    ) -> PyResult<Self> {
+        let o = origin.as_slice()?;
+        let l = lengths.as_slice()?;
+        if o.len() != 3 || l.len() != 3 {
+            return Err(PyValueError::new_err(
+                "origin and lengths must have length 3",
+            ));
+        }
+        Ok(PyCuboid {
+            inner: Arc::new(Cuboid::new(
+                Array1::from_vec(vec![o[0], o[1], o[2]]),
+                Array1::from_vec(vec![l[0], l[1], l[2]]),
+            )),
+        })
+    }
+
+    /// Test which points are inside this cuboid (shape (N,3) -> (N,) bool).
+    fn contains<'py>(
+        &self,
+        py: Python<'py>,
+        points: PyReadonlyArray2<'_, NpF>,
+    ) -> PyResult<Bound<'py, PyArray1<bool>>> {
+        contains_impl(self.inner.as_ref(), py, points)
+    }
+
+    /// Axis-aligned bounding box, shape (3, 2): ``[[min, max], ...]`` per axis.
+    fn bounds<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<NpF>> {
+        bounds_impl(self.inner.as_ref(), py)
+    }
+
+    /// Intersection: ``self & other``.
+    fn __and__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyRegion> {
+        let other_region = extract_region(other)?;
+        let self_region: DynRegion = self.inner.clone();
+        Ok(PyRegion {
+            inner: Arc::new(AndRegion::new(self_region, other_region)),
+        })
+    }
+
+    /// Union: ``self | other``.
+    fn __or__(&self, other: &Bound<'_, pyo3::types::PyAny>) -> PyResult<PyRegion> {
+        let other_region = extract_region(other)?;
+        let self_region: DynRegion = self.inner.clone();
+        Ok(PyRegion {
+            inner: Arc::new(OrRegion::new(self_region, other_region)),
+        })
+    }
+
+    /// Complement: ``~self``.
+    fn __invert__(&self) -> PyRegion {
+        let self_region: DynRegion = self.inner.clone();
+        PyRegion {
+            inner: Arc::new(NotRegion::new(self_region)),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Cuboid(origin=[{:.2}, {:.2}, {:.2}], lengths=[{:.2}, {:.2}, {:.2}])",
+            self.inner.origin[0],
+            self.inner.origin[1],
+            self.inner.origin[2],
+            self.inner.lengths[0],
+            self.inner.lengths[1],
+            self.inner.lengths[2],
         )
     }
 }
@@ -381,10 +481,13 @@ fn extract_region(obj: &Bound<'_, pyo3::types::PyAny>) -> PyResult<DynRegion> {
     if let Ok(hs) = obj.extract::<PyHollowSphere>() {
         return Ok(hs.inner.clone() as DynRegion);
     }
+    if let Ok(c) = obj.extract::<PyCuboid>() {
+        return Ok(c.inner.clone() as DynRegion);
+    }
     if let Ok(r) = obj.extract::<PyRegion>() {
         return Ok(r.inner.clone());
     }
     Err(pyo3::exceptions::PyTypeError::new_err(
-        "expected a Sphere, HollowSphere, or Region",
+        "expected a Sphere, HollowSphere, Cuboid, or Region",
     ))
 }

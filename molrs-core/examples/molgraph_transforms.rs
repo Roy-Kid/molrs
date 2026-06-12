@@ -5,7 +5,8 @@
 //!
 //! Run with: `cargo run -p molrs-core --example molgraph_transforms`
 
-use molrs_core::{Atom, MolGraph};
+use molrs_core::spatial::geometry;
+use molrs_core::{Atom, Atomistic};
 
 fn main() {
     let mol = build_methane();
@@ -16,8 +17,8 @@ fn main() {
 }
 
 /// Build a methane molecule (CH4) with tetrahedral geometry.
-fn build_methane() -> MolGraph {
-    let mut mol = MolGraph::new();
+fn build_methane() -> Atomistic {
+    let mut mol = Atomistic::new();
 
     // Central carbon
     let c = mol.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
@@ -44,7 +45,7 @@ fn build_methane() -> MolGraph {
 }
 
 /// Print all atom coordinates.
-fn print_coords(mol: &MolGraph, label: &str) {
+fn print_coords(mol: &Atomistic, label: &str) {
     println!("  {}:", label);
     for (_id, atom) in mol.atoms() {
         println!(
@@ -59,16 +60,16 @@ fn print_coords(mol: &MolGraph, label: &str) {
 
 // ─── Translation ────────────────────────────────────────────────────────────
 
-fn translation(original: &MolGraph) {
+fn translation(original: &Atomistic) {
     println!("=== Translation ===\n");
 
     let mut mol = original.clone();
     print_coords(&mol, "Before translate");
 
-    mol.translate([5.0, 0.0, 0.0]);
+    geometry::translate(&mut mol, [5.0, 0.0, 0.0]);
     print_coords(&mol, "After translate([5, 0, 0])");
 
-    mol.translate([0.0, 3.0, -1.0]);
+    geometry::translate(&mut mol, [0.0, 3.0, -1.0]);
     print_coords(&mol, "After translate([0, 3, -1])");
 
     println!();
@@ -76,7 +77,7 @@ fn translation(original: &MolGraph) {
 
 // ─── Rotation ───────────────────────────────────────────────────────────────
 
-fn rotation(original: &MolGraph) {
+fn rotation(original: &Atomistic) {
     println!("=== Rotation ===\n");
 
     // --- Rotate 90 degrees around z-axis (about origin) ---
@@ -85,7 +86,7 @@ fn rotation(original: &MolGraph) {
 
     print_coords(&mol, "Before rotation");
 
-    mol.rotate([0.0, 0.0, 1.0], half_pi, None);
+    geometry::rotate(&mut mol, [0.0, 0.0, 1.0], half_pi, None);
     print_coords(&mol, "After 90deg rotation around z-axis (origin)");
 
     // --- Rotate around a custom center ---
@@ -94,14 +95,14 @@ fn rotation(original: &MolGraph) {
 
     print_coords(&mol2, "\n  Before rotation about center (5,5,0)");
 
-    mol2.rotate([0.0, 0.0, 1.0], half_pi, Some(center));
+    geometry::rotate(&mut mol2, [0.0, 0.0, 1.0], half_pi, Some(center));
     print_coords(&mol2, "After 90deg rotation around z-axis about (5,5,0)");
 
     // --- 180 degree rotation (flip) ---
     let mut mol3 = original.clone();
     let pi = std::f64::consts::PI;
 
-    mol3.rotate([1.0, 0.0, 0.0], pi, None);
+    geometry::rotate(&mut mol3, [1.0, 0.0, 0.0], pi, None);
     print_coords(&mol3, "\n  After 180deg rotation around x-axis");
 
     println!();
@@ -109,14 +110,14 @@ fn rotation(original: &MolGraph) {
 
 // ─── Clone independence ────────────────────────────────────────────────────
 
-fn clone_independence(original: &MolGraph) {
+fn clone_independence(original: &Atomistic) {
     println!("=== Clone Independence ===\n");
 
     let mut a = original.clone();
     let b = a.clone();
 
     // Mutate 'a'
-    a.translate([100.0, 0.0, 0.0]);
+    geometry::translate(&mut a, [100.0, 0.0, 0.0]);
 
     // 'b' should be unaffected
     let a_first_x = a.atoms().next().unwrap().1.get_f64("x").unwrap();
@@ -140,13 +141,13 @@ fn clone_independence(original: &MolGraph) {
 
 // ─── Merge ──────────────────────────────────────────────────────────────────
 
-fn merge_molecules(original: &MolGraph) {
+fn merge_molecules(original: &Atomistic) {
     println!("=== Merge ===\n");
 
     // Create two copies, translate one
     let mut mol1 = original.clone();
     let mut mol2 = original.clone();
-    mol2.translate([5.0, 0.0, 0.0]);
+    geometry::translate(&mut mol2, [5.0, 0.0, 0.0]);
 
     println!("  mol1: {} atoms, {} bonds", mol1.n_atoms(), mol1.n_bonds());
     println!(
@@ -156,7 +157,7 @@ fn merge_molecules(original: &MolGraph) {
     );
 
     // Merge mol2 into mol1 (consumes mol2, IDs are remapped)
-    mol1.merge(mol2);
+    mol1.merge(mol2.into_inner());
 
     println!("\n  After merge:");
     println!(

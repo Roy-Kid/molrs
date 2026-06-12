@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::{accumulate_dihedral_forces, compute_dihedral, validate_coords};
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 pub struct MMFFTorsion {
@@ -19,7 +19,7 @@ pub struct MMFFTorsion {
 }
 
 impl Potential for MMFFTorsion {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0 as F; coords.len()];
@@ -117,7 +117,7 @@ mod tests {
             v3: vec![0.3],
         };
         let coords: Vec<F> = vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, -1.0, 0.0];
-        let (e, forces) = pot.eval(&coords);
+        let (e, forces) = pot.calc_energy_forces(&coords);
         assert!(e.is_finite());
         let fx: F = forces.iter().step_by(3).sum();
         let fy: F = forces.iter().skip(1).step_by(3).sum();

@@ -12,13 +12,18 @@ readme = "../README.md"
 keywords = ["molecular-modeling", "chemistry", "simulation", "molecular-dynamics"]
 categories = ["science"]
 
+# docs.rs builds the public API with every sub-system enabled (`full`), but NOT
+# the `blas` feature — that needs a system BLAS/LAPACK the docs.rs sandbox lacks.
+[package.metadata.docs.rs]
+features = ["full"]
+
 [lib]
 name = "molrs"
 
 [features]
 default = []
 # Full bundle (every sub-crate).
-full = ["io", "compute", "smiles", "ff", "embed", "signal"]
+full = ["io", "compute", "smiles", "ff", "conformer", "signal"]
 # Sub-crate features.
 io       = ["dep:molrs_io"]
 compute  = ["dep:molrs_compute"]
@@ -26,18 +31,23 @@ compute  = ["dep:molrs_compute"]
 # matching feature flag.
 smiles   = ["dep:molrs_io", "molrs_io/smiles"]
 ff       = ["dep:molrs_ff"]
-embed    = ["dep:molrs_embed"]
+conformer    = ["dep:molrs_conformer"]
 signal   = ["dep:molrs_signal"]
 # Re-export of molrs-core feature flags.
-rayon       = ["molrs/rayon"]
-zarr        = ["molrs/zarr", "molrs_io?/zarr"]
+rayon       = ["molrs_core/rayon"]
+zarr        = ["molrs_core/zarr", "molrs_io?/zarr"]
 filesystem  = ["molrs_io?/filesystem"]
-blas        = ["molrs/blas"]
+blas        = ["molrs_core/blas"]
 
 [dependencies]
-molrs         = { workspace = true }
+# molrs-core is consumed under the local name `molrs_core` (not the workspace
+# `molrs` alias): this crate's own lib name is also `molrs`, and a dependency
+# named `molrs` makes external integration tests unlinkable (E0464 — two
+# `--extern molrs` candidates). It is re-exported at the top-level `molrs::`
+# namespace in lib.rs, so the public surface is unchanged for downstream users.
+molrs_core    = { path = "../molrs-core", version = "0.1.0", package = "molcrafts-molrs-core", default-features = false }
 molrs_io      = { workspace = true, optional = true }
 molrs_compute = { workspace = true, optional = true }
 molrs_ff      = { workspace = true, optional = true }
-molrs_embed   = { workspace = true, optional = true }
+molrs_conformer   = { workspace = true, optional = true }
 molrs_signal  = { workspace = true, optional = true }

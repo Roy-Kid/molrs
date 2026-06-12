@@ -83,7 +83,14 @@ pub fn det3(m: &F3x3) -> F {
 
 #[cfg(feature = "blas")]
 pub fn inv3(m: &F3x3) -> Option<F3x3> {
-    use ndarray_linalg::Inverse;
+    use ndarray_linalg::{Determinant, Inverse};
+    // LAPACK getri does not reliably report singularity, so guard explicitly on
+    // the determinant to match the non-blas contract (`None` when singular).
+    let det = m.det().ok()?;
+    let eps: F = 1e-8;
+    if det.abs() <= eps {
+        return None;
+    }
     m.inv().ok()
 }
 

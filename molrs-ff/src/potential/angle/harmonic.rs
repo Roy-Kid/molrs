@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::forcefield::Params;
 use crate::potential::Potential;
 use crate::potential::geometry::{compute_angle, validate_coords};
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 /// Harmonic angle potential with pre-resolved flat arrays.
@@ -42,7 +42,7 @@ impl AngleHarmonic {
 }
 
 impl Potential for AngleHarmonic {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let _n_atoms = validate_coords(coords);
         let mut energy: F = 0.0;
         let mut forces = vec![0.0; coords.len()];
@@ -58,59 +58,11 @@ impl Potential for AngleHarmonic {
             let dtheta = theta - theta0;
             energy += 0.5 * k_spring * dtheta * dtheta;
 
-            angle_forces(coords, i, j, k, k_spring, theta0, &mut forces);
+            // dE/dtheta = k0 (theta - theta0)
+            super::accumulate_angle_forces(coords, i, j, k, k_spring * dtheta, &mut forces);
         }
 
         (energy, forces)
-    }
-}
-
-/// Accumulate angle forces for angle i-j-k with harmonic potential.
-fn angle_forces(
-    coords: &[F],
-    i: usize,
-    j: usize,
-    k: usize,
-    k_spring: F,
-    theta0: F,
-    forces: &mut [F],
-) {
-    let rji = [
-        coords[i * 3] - coords[j * 3],
-        coords[i * 3 + 1] - coords[j * 3 + 1],
-        coords[i * 3 + 2] - coords[j * 3 + 2],
-    ];
-    let rjk = [
-        coords[k * 3] - coords[j * 3],
-        coords[k * 3 + 1] - coords[j * 3 + 1],
-        coords[k * 3 + 2] - coords[j * 3 + 2],
-    ];
-
-    let d_ji_sq = rji[0] * rji[0] + rji[1] * rji[1] + rji[2] * rji[2];
-    let d_jk_sq = rjk[0] * rjk[0] + rjk[1] * rjk[1] + rjk[2] * rjk[2];
-    let d_ji = d_ji_sq.sqrt();
-    let d_jk = d_jk_sq.sqrt();
-
-    if d_ji < 1e-12 || d_jk < 1e-12 {
-        return;
-    }
-
-    let dot = rji[0] * rjk[0] + rji[1] * rjk[1] + rji[2] * rjk[2];
-    let cos_theta = (dot / (d_ji * d_jk)).clamp(-1.0, 1.0);
-    let theta = cos_theta.acos();
-    let sin_theta = (1.0 - cos_theta * cos_theta).sqrt().max(1e-12);
-
-    let de_dtheta = k_spring * (theta - theta0);
-    let prefactor = de_dtheta / sin_theta;
-
-    for dim in 0..3 {
-        let dcos_dri = rjk[dim] / (d_ji * d_jk) - cos_theta * rji[dim] / d_ji_sq;
-        let dcos_drk = rji[dim] / (d_ji * d_jk) - cos_theta * rjk[dim] / d_jk_sq;
-        let dcos_drj = -dcos_dri - dcos_drk;
-
-        forces[i * 3 + dim] += prefactor * dcos_dri;
-        forces[k * 3 + dim] += prefactor * dcos_drk;
-        forces[j * 3 + dim] += prefactor * dcos_drj;
     }
 }
 
@@ -150,8 +102,8 @@ pub fn angle_harmonic_ctor(
             .get(label.as_str())
             .ok_or_else(|| format!("AngleHarmonic: unknown angle type '{}'", label))?;
         let k0 = params
-            .get("k0")
-            .ok_or_else(|| format!("AngleHarmonic type '{}': missing 'k0'", label))?
+            .get("k")
+            .ok_or_else(|| format!("AngleHarmonic type '{}': missing 'k'", label))?
             as F;
         let theta0_rad = params
             .get("theta0")
@@ -180,7 +132,7 @@ mod tests {
         let pot = AngleHarmonic::new(vec![0], vec![1], vec![2], vec![50.0], vec![theta0]);
         let coords: Vec<F> = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
 
-        let (e, _) = pot.eval(&coords);
+        let (e, _) = pot.calc_energy_forces(&coords);
         assert!(e.abs() < 1e-4);
     }
 }

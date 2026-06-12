@@ -11,27 +11,44 @@ apply the reverse translation before delegating to the native backend.
 
 For access to raw format-native output, use the top-level ``molrs.read_*``
 functions directly.
+
+Trajectories follow molpy's reader-object convention: ``read_lammps_trajectory``,
+``read_xyz_trajectory``, and ``read_dcd_trajectory`` each return a lazy
+:class:`TrajectoryReader` (not a ``list[Frame]`` — that is the top-level
+``molrs.read_*`` behaviour). Each accepts a single path or a list of paths
+(the frames of multiple files are concatenated) and yields canonical field
+names. This is the molpy-compatible drop-in surface; note in particular that
+``molrs.io.read_xyz_trajectory`` returns a reader whereas the top-level
+``molrs.read_xyz_trajectory`` returns a ``list[Frame]``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from os import PathLike
-from typing import Any
+from typing import Any, Union, overload
 
 from .fields import (
+    FieldFormatter,
     GroFieldFormatter,
     LammpsFieldFormatter,
     PdbFieldFormatter,
     XyzFieldFormatter,
 )
+from .frame import Frame  # canonical rich Frame (spec frame-block-sink-01)
 from .molrs import (
+    DCDTrajReader as _DCDTrajReader,
+    LAMMPSTrajReader as _LAMMPSTrajReader,
+    XYZTrajReader as _XYZTrajReader,
     read_gro as _read_gro,
     read_lammps as _read_lammps,
     read_pdb as _read_pdb,
+    read_pdb_trajectory as _read_pdb_trajectory,
     read_xyz as _read_xyz,
     write_gro as _write_gro,
     write_lammps as _write_lammps,
     write_pdb as _write_pdb,
+    write_pdb_trajectory as _write_pdb_trajectory,
     write_xyz as _write_xyz,
 )
 
@@ -39,6 +56,20 @@ _gro_fmt = GroFieldFormatter()
 _pdb_fmt = PdbFieldFormatter()
 _lammps_fmt = LammpsFieldFormatter()
 _xyz_fmt = XyzFieldFormatter()
+# DCD frames carry only coordinates / box — no format-specific column names to
+# canonicalize, so a no-op formatter is correct.
+_noop_fmt = FieldFormatter()
+
+PathInput = Union[str, "PathLike[str]"]
+
+
+def _wrap(frame: Any) -> Frame:
+    """Upgrade a freshly-read, canonicalized bare frame to the rich :class:`Frame`.
+
+    Zero-copy: the rich Frame views the same Rust-backed Block buffers (no
+    column data is copied). Already-rich frames pass through unchanged.
+    """
+    return Frame.from_dict(frame)
 
 
 def read_lammps_data(
@@ -66,7 +97,7 @@ def read_lammps_data(
         )
     result = _read_lammps(str(file))
     _lammps_fmt.canonicalize_frame(result)
-    return result
+    return _wrap(result)
 
 
 def read_pdb(file: str | PathLike[str], frame: Any = None) -> Any:
@@ -81,7 +112,19 @@ def read_pdb(file: str | PathLike[str], frame: Any = None) -> Any:
         )
     result = _read_pdb(str(file))
     _pdb_fmt.canonicalize_frame(result)
-    return result
+    return _wrap(result)
+
+
+def read_pdb_trajectory(file: str | PathLike[str]) -> list[Any]:
+    """Read every MODEL of a PDB file as a trajectory (one Frame per MODEL).
+
+    A single-model (or MODEL-less) PDB returns a one-element list. Each frame
+    is canonicalized like :func:`read_pdb`.
+    """
+    frames = _read_pdb_trajectory(str(file))
+    for frame in frames:
+        _pdb_fmt.canonicalize_frame(frame)
+    return [_wrap(frame) for frame in frames]
 
 
 def read_xyz(file: str | PathLike[str], frame: Any = None) -> Any:
@@ -96,7 +139,7 @@ def read_xyz(file: str | PathLike[str], frame: Any = None) -> Any:
         )
     result = _read_xyz(str(file))
     _xyz_fmt.canonicalize_frame(result)
-    return result
+    return _wrap(result)
 
 
 def read_gro(file: str | PathLike[str]) -> list[Any]:
@@ -115,7 +158,7 @@ def read_gro(file: str | PathLike[str]) -> list[Any]:
     frames = _read_gro(str(file))
     for f in frames:
         _gro_fmt.canonicalize_frame(f)
-    return frames
+    return [_wrap(f) for f in frames]
 
 
 def write_lammps_data(
@@ -141,6 +184,18 @@ def write_pdb(file: str | PathLike[str], frame: Any) -> None:
     _write_pdb(str(file), frame)
 
 
+def write_pdb_trajectory(file: str | PathLike[str], frames: Any) -> None:
+    """Write a list of Frames as a multi-MODEL PDB trajectory.
+
+    Each frame becomes one ``MODEL``/``ENDMDL`` block. Localises each frame
+    in-place before writing (same convention as :func:`write_pdb`).
+    """
+    frames = list(frames)
+    for frame in frames:
+        _pdb_fmt.localize_frame(frame)
+    _write_pdb_trajectory(str(file), frames)
+
+
 def write_xyz(file: str | PathLike[str], frame: Any) -> None:
     """Write an XYZ file.  Localises *frame* in-place before writing."""
     _xyz_fmt.localize_frame(frame)
@@ -157,13 +212,191 @@ def write_gro(file: str | PathLike[str], frame: Any) -> None:
     _write_gro(str(file), frame)
 
 
+# ===================================================================
+#                     Trajectory readers
+# ===================================================================
+
+
+def _as_paths(file: PathInput | Sequence[PathInput]) -> list[str]:
+    """Normalise a single path or a sequence of paths to ``list[str]``."""
+    if isinstance(file, (str, PathLike)):
+        return [str(file)]
+    return [str(p) for p in file]
+
+
+class TrajectoryReader:
+    """molpy-compatible lazy, indexed trajectory reader.
+
+    Wraps one or more native molrs readers (``DCDTrajReader``,
+    ``LAMMPSTrajReader``, ``XYZTrajReader``). When constructed from several
+    files their frames are concatenated into one logical trajectory. Every
+    returned :class:`Frame` is canonicalized to project-wide field names.
+
+    Mirrors molpy's ``BaseTrajectoryReader``: ``read_frame`` (negative
+    indexing), ``read_frames``, ``read_range``, ``read_all``, ``n_frames``,
+    integer and slice indexing, lazy iteration, ``close()``, and use as a
+    context manager.
+    """
+
+    def __init__(self, readers: Sequence[Any], formatter: FieldFormatter) -> None:
+        self._readers = list(readers)
+        self._formatter = formatter
+        self._counts: list[int] | None = None
+        self._cursor = 0
+
+    # ── internal ──────────────────────────────────────────────────
+
+    def _ensure_counts(self) -> list[int]:
+        if self._counts is None:
+            self._counts = [r.n_frames for r in self._readers]
+        return self._counts
+
+    def _locate(self, index: int) -> tuple[Any, int]:
+        counts = self._ensure_counts()
+        total = sum(counts)
+        if index < 0:
+            index += total
+        if index < 0 or index >= total:
+            raise IndexError("trajectory index out of range")
+        for reader, count in zip(self._readers, counts):
+            if index < count:
+                return reader, index
+            index -= count
+        raise IndexError("trajectory index out of range")  # pragma: no cover
+
+    # ── molpy BaseTrajectoryReader surface ────────────────────────
+
+    @property
+    def n_frames(self) -> int:
+        return sum(self._ensure_counts())
+
+    def read_frame(self, index: int) -> Frame:
+        """Read a single frame (supports negative indexing).
+
+        The single chokepoint for every trajectory access (``read_frames`` /
+        ``read_range`` / ``read_all`` / indexing / iteration all funnel here),
+        so wrapping to the rich :class:`Frame` once here covers them all.
+        """
+        reader, local = self._locate(index)
+        frame = reader.read_frame(local)
+        self._formatter.canonicalize_frame(frame)
+        return _wrap(frame)
+
+    def read_frames(self, indices: Sequence[int]) -> list[Frame]:
+        """Read an explicit list of frame indices."""
+        return [self.read_frame(i) for i in indices]
+
+    def read_range(
+        self, start: int = 0, stop: int | None = None, step: int = 1
+    ) -> list[Frame]:
+        """Read a contiguous range of frames, Python-slice style."""
+        if step == 0:
+            raise ValueError("read_range step must not be zero")
+        n = self.n_frames
+        return [self.read_frame(i) for i in range(*slice(start, stop, step).indices(n))]
+
+    def read_all(self) -> list[Frame]:
+        """Eagerly read every frame into a list."""
+        return [self.read_frame(i) for i in range(self.n_frames)]
+
+    def close(self) -> None:
+        """Release every underlying file handle."""
+        for reader in self._readers:
+            reader.close()
+
+    def __len__(self) -> int:
+        return self.n_frames
+
+    @overload
+    def __getitem__(self, key: int) -> Frame: ...
+    @overload
+    def __getitem__(self, key: slice) -> list[Frame]: ...
+
+    def __getitem__(self, key: int | slice) -> Frame | list[Frame]:
+        if isinstance(key, slice):
+            n = self.n_frames
+            return [self.read_frame(i) for i in range(*key.indices(n))]
+        return self.read_frame(key)
+
+    def __iter__(self) -> Iterator[Frame]:
+        self._cursor = 0
+        return self
+
+    def __next__(self) -> Frame:
+        if self._cursor >= self.n_frames:
+            raise StopIteration
+        frame = self.read_frame(self._cursor)
+        self._cursor += 1
+        return frame
+
+    def __enter__(self) -> "TrajectoryReader":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> bool:
+        self.close()
+        return False
+
+    def __repr__(self) -> str:
+        return (
+            f"TrajectoryReader(n_frames={self.n_frames}, "
+            f"files={len(self._readers)})"
+        )
+
+
+def read_lammps_trajectory(
+    traj: PathInput | Sequence[PathInput], frame: Any = None
+) -> TrajectoryReader:
+    """Open a LAMMPS dump trajectory. molpy-compatible signature.
+
+    Args:
+        traj: Path or list of paths to LAMMPS dump files.
+        frame: Reserved for molpy API parity; not supported.
+
+    Returns:
+        A lazy :class:`TrajectoryReader` with canonical field names.
+    """
+    if frame is not None:
+        raise NotImplementedError(
+            "molrs.io.read_lammps_trajectory does not accept a reference frame."
+        )
+    readers = [_LAMMPSTrajReader(p) for p in _as_paths(traj)]
+    return TrajectoryReader(readers, _lammps_fmt)
+
+
+def read_xyz_trajectory(file: PathInput | Sequence[PathInput]) -> TrajectoryReader:
+    """Open an XYZ trajectory. molpy-compatible signature.
+
+    Unlike the top-level ``molrs.read_xyz_trajectory`` (which returns
+    ``list[Frame]``), this returns a lazy :class:`TrajectoryReader`, matching
+    molpy's ``read_xyz_trajectory``.
+    """
+    readers = [_XYZTrajReader(p) for p in _as_paths(file)]
+    return TrajectoryReader(readers, _xyz_fmt)
+
+
+def read_dcd_trajectory(file: PathInput | Sequence[PathInput]) -> TrajectoryReader:
+    """Open a DCD trajectory as a lazy :class:`TrajectoryReader`.
+
+    molrs extension (molpy has no DCD reader). Accepts a single path or a
+    list of paths whose frames are concatenated.
+    """
+    readers = [_DCDTrajReader(p) for p in _as_paths(file)]
+    return TrajectoryReader(readers, _noop_fmt)
+
+
 __all__ = [
     "read_lammps_data",
     "read_pdb",
+    "read_pdb_trajectory",
     "read_xyz",
     "read_gro",
     "write_lammps_data",
     "write_pdb",
+    "write_pdb_trajectory",
     "write_xyz",
     "write_gro",
+    "TrajectoryReader",
+    "read_lammps_trajectory",
+    "read_xyz_trajectory",
+    "read_dcd_trajectory",
 ]

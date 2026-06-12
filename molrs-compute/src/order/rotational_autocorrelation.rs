@@ -24,7 +24,7 @@
 //! ensemble decorrelates. The system-wide order parameter is the mean of
 //! `Ψ_ℓ(i)` across particles.
 
-use molrs::frame_access::FrameAccess;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 
 use crate::error::ComputeError;

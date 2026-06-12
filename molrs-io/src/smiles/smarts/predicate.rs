@@ -26,9 +26,9 @@
 //! - Daylight SMARTS theory manual — Atomic Primitives & Bond Primitives tables:
 //!   <https://daylight.com/dayhtml/doc/theory/theory.smarts.html>
 
-use molrs::element::Element;
-use molrs::molgraph::{AtomId, MolGraph};
-use molrs::rings::RingInfo;
+use molrs::chem::rings::RingInfo;
+use molrs::system::atomistic::{AtomId, Atomistic};
+use molrs::system::element::Element;
 
 use crate::smiles::chem::ast::{AtomPrimitive, AtomQuery, BondKind, BondQuery};
 
@@ -38,13 +38,13 @@ use crate::smiles::chem::ast::{AtomPrimitive, AtomQuery, BondKind, BondQuery};
 /// Building this once per `find_all` call is O(atoms + bonds + ring-detection);
 /// predicate evaluation is O(1) per primitive afterwards.
 pub(crate) struct TargetCtx<'m> {
-    pub(crate) mol: &'m MolGraph,
+    pub(crate) mol: &'m Atomistic,
     pub(crate) rings: RingInfo,
 }
 
 impl<'m> TargetCtx<'m> {
-    pub(crate) fn new(mol: &'m MolGraph) -> Self {
-        let rings = molrs::rings::find_rings(mol);
+    pub(crate) fn new(mol: &'m Atomistic) -> Self {
+        let rings = molrs::chem::rings::find_rings(mol);
         Self { mol, rings }
     }
 
@@ -138,11 +138,11 @@ impl<'m> TargetCtx<'m> {
             .unwrap_or(false)
     }
 
-    fn element(&self, atom_id: AtomId) -> Option<&str> {
+    fn element(&self, atom_id: AtomId) -> Option<String> {
         self.mol
             .get_atom(atom_id)
             .ok()
-            .and_then(|a| a.get_str("element"))
+            .and_then(|a| a.get_str("element").map(str::to_owned))
     }
 
     fn formal_charge(&self, atom_id: AtomId) -> i32 {
@@ -306,15 +306,15 @@ mod tests {
     use super::*;
     use crate::smiles::{parse_smiles, to_atomistic};
 
-    fn mol(smiles: &str) -> molrs::atomistic::Atomistic {
+    fn mol(smiles: &str) -> molrs::system::atomistic::Atomistic {
         to_atomistic(&parse_smiles(smiles).unwrap()).unwrap()
     }
 
     #[test]
     fn element_primitive_matches_by_symbol_and_aromaticity() {
         let m = mol("Cc1ccccc1");
-        let ctx = TargetCtx::new(m.as_molgraph());
-        let ids: Vec<_> = m.as_molgraph().atoms().map(|(id, _)| id).collect();
+        let ctx = TargetCtx::new(&m);
+        let ids: Vec<_> = m.atoms().map(|(id, _)| id).collect();
 
         let c_upper = AtomPrimitive::Element {
             symbol: "C".to_owned(),
@@ -333,8 +333,8 @@ mod tests {
     #[test]
     fn ring_primitive_flags_ring_atoms_only() {
         let m = mol("c1ccccc1C"); // toluene
-        let ctx = TargetCtx::new(m.as_molgraph());
-        let ids: Vec<_> = m.as_molgraph().atoms().map(|(id, _)| id).collect();
+        let ctx = TargetCtx::new(&m);
+        let ids: Vec<_> = m.atoms().map(|(id, _)| id).collect();
 
         let r_any = AtomPrimitive::RingMembership(None);
         // First 6 atoms are ring; 7th is methyl.
@@ -358,8 +358,8 @@ mod tests {
     #[test]
     fn logical_operators_compose_correctly() {
         let m = mol("C=CC"); // propene
-        let ctx = TargetCtx::new(m.as_molgraph());
-        let ids: Vec<_> = m.as_molgraph().atoms().map(|(id, _)| id).collect();
+        let ctx = TargetCtx::new(&m);
+        let ids: Vec<_> = m.atoms().map(|(id, _)| id).collect();
 
         // [C;X4] — non-aromatic carbon with 4 total connections
         // C2 has 1 explicit bond + 3 implicit H; X counts only explicit+explicit-H.

@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group};
-use molrs_core::region::simbox::SimBox;
+use molrs_core::spatial::region::simbox::SimBox;
 use molrs_core::types::F;
 use ndarray::array;
 
@@ -86,7 +86,7 @@ criterion_group!(
 /// path; this bench is the regression guard for that decision.
 fn bench_mic_variants_loop(c: &mut Criterion) {
     use ndarray::Array2;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 

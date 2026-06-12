@@ -1,0 +1,120 @@
+name: Nightly (Python)
+
+# Publishes a dev-versioned pre-release wheel set to the SEPARATE PyPI project
+# `molcrafts-molrs-nightly`. Python ONLY — crates.io and npm are never touched
+# by this workflow (those still ship exclusively from a `v*` tag via publish.yml).
+#
+# Trigger: every push to the `nightly` branch, plus manual dispatch.
+# Version: <molrs-python source version>.dev<UTC timestamp>  (PEP 440 dev release).
+#   Install with:  pip install --pre molcrafts-molrs-nightly
+#
+# The import package stays `molrs` — only the PyPI distribution NAME changes, so
+# `molcrafts-molrs` and `molcrafts-molrs-nightly` cannot coexist. Intentional.
+#
+# Prereq (one-time, PyPI account holder only): configure a Trusted Publisher
+# (pending publisher) for project `molcrafts-molrs-nightly`:
+#   Repository:  MolCrafts/molrs
+#   Workflow:    nightly.yml
+#   Environment: pypi-nightly        (GitHub Environment must have NO required
+#                                      reviewers, else every nightly blocks).
+
+on:
+  push:
+    branches: [nightly]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Compute the dev version ONCE so every matrix runner stamps the identical
+  # string. If each runner generated its own timestamp the wheels would carry
+  # different versions and publish-python would fail to merge them.
+  prepare:
+    if: github.repository == 'MolCrafts/molrs'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute nightly version
+        id: v
+        run: |
+          set -euo pipefail
+          BASE=$(sed -n 's/^version = "\(.*\)"/\1/p' molrs-python/pyproject.toml | head -n1)
+          DEV="${BASE}.dev$(date -u +%Y%m%d%H%M)"
+          echo "Nightly version: $DEV"
+          echo "version=$DEV" >> "$GITHUB_OUTPUT"
+
+  build-python:
+    needs: prepare
+    if: github.repository == 'MolCrafts/molrs'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            args: --release --out dist
+          - os: macos-latest
+            args: --release --out dist --target universal2-apple-darwin
+          - os: windows-latest
+            args: --release --out dist
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Stamp dev version and rename distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEV="${{ needs.prepare.outputs.version }}"
+          # Only stamp the pyproject [project] version — maturin uses that for
+          # the wheel. The Cargo.toml crate version is left as valid SemVer
+          # (Cargo rejects PEP 440 `.devN` pre-releases, which use a `.` not `-`).
+          python - "$DEV" <<'PY'
+          import re, sys, pathlib
+          dev = sys.argv[1]
+          p = pathlib.Path("molrs-python/pyproject.toml")
+          t = p.read_text()
+          t = re.sub(r'^name\s*=\s*"molcrafts-molrs"',
+                     'name = "molcrafts-molrs-nightly"', t, count=1, flags=re.M)
+          t = re.sub(r'^version\s*=\s*".*?"',
+                     f'version = "{dev}"', t, count=1, flags=re.M)
+          p.write_text(t)
+          PY
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: molrs-python
+          manylinux: auto
+          command: build
+          args: ${{ matrix.args }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: molrs-python/dist
+
+  publish-python:
+    needs: build-python
+    if: github.repository == 'MolCrafts/molrs'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-nightly
+      url: https://pypi.org/p/molcrafts-molrs-nightly
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true

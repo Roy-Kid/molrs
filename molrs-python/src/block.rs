@@ -16,12 +16,14 @@
 
 use std::sync::Arc;
 
-use molrs::block::{Block as CoreBlock, BlockDtype, Column, ColumnHolder};
+use molrs::store::block::{
+    Block as CoreBlock, BlockDtype, Column, ColumnHolder, block_from_csv, block_to_csv,
+};
 use molrs::types::{F, I, U};
 use molrs_ffi::BlockRef;
 use ndarray::{Array1, ArrayD, IxDyn};
 use numpy::{PyArrayDyn, PyArrayMethods, PyReadonlyArrayDyn, PyUntypedArrayMethods};
-use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 
 use crate::store::ffi_error_to_pyerr;
@@ -107,6 +109,25 @@ impl PyBlock {
         Self::from_core_block(CoreBlock::new())
     }
 
+    /// Build a Block from CSV ``text`` (hand-written parser, no dependency).
+    ///
+    /// Each column's dtype is inferred int → float → str. When ``header`` is
+    /// given the text is treated as headerless and those names are used;
+    /// otherwise the first non-empty line provides the column names.
+    #[staticmethod]
+    #[pyo3(signature = (text, delimiter = ',', header = None))]
+    fn from_csv(text: &str, delimiter: char, header: Option<Vec<String>>) -> PyResult<Self> {
+        let block =
+            block_from_csv(text, delimiter, header.as_deref()).map_err(PyValueError::new_err)?;
+        Self::from_core_block(block)
+    }
+
+    /// Serialize the block to CSV text (inverse of :meth:`from_csv`).
+    #[pyo3(signature = (delimiter = ',', header = true))]
+    fn to_csv(&self, delimiter: char, header: bool) -> PyResult<String> {
+        self.with_block(|b| block_to_csv(b, delimiter, header))
+    }
+
     /// Insert a numpy array (or list of strings) as a named column.
     ///
     /// If a column with the same key already exists it is replaced. The array
@@ -135,6 +156,19 @@ impl PyBlock {
     /// >>> b.insert("x", np.zeros(10, dtype=np.float32))
     /// >>> b.insert("y", np.ones(10, dtype=np.float32))
     fn insert(&mut self, key: &str, array: &Bound<'_, pyo3::types::PyAny>) -> PyResult<()> {
+        // numpy-only Store contract: reject object-kind arrays (object dtype,
+        // None-bearing, ragged/mixed — numpy renders all of these as kind 'O')
+        // up front, before the typed-cast / Vec<String> extraction below, so
+        // even an empty object array fails fast instead of slipping through as
+        // an empty string column. Python lists (the list[str] path) carry no
+        // `.dtype` and are untouched here.
+        if let Ok(dtype) = array.getattr("dtype")
+            && let Ok(kind) = dtype.getattr("kind").and_then(|k| k.extract::<String>())
+            && kind == "O"
+        {
+            return Err(crate::error::dtype_reject(key, array));
+        }
+
         // Matched-dtype, C-contiguous numpy arrays get forged into a
         // foreign-backed Column (zero memcpy). When the layout forbids
         // forging, the same numpy array is copied into a Rust-owned column.
@@ -183,9 +217,7 @@ impl PyBlock {
         if let Ok(strings) = array.extract::<Vec<String>>() {
             return self.insert_array::<String>(key, Array1::from(strings).into_dyn());
         }
-        Err(PyTypeError::new_err(
-            "unsupported dtype: expected float32, float64, int32, int64, bool, uint32, uint64, u8, or list[str]",
-        ))
+        Err(crate::error::dtype_reject(key, array))
     }
 
     /// Return a zero-copy numpy view of the column data.
@@ -233,8 +265,14 @@ impl PyBlock {
                         Ok(arr.into_any().unbind())
                     }
                     Column::String(a) => {
+                        // Return an ndarray (not a list) so string columns match
+                        // numeric columns and molpy's convention — callers can
+                        // rely on ``.dtype`` uniformly across every column.
                         let list: Vec<String> = a.iter().cloned().collect();
-                        Ok(pyo3::types::PyList::new(py, &list)?.into_any().unbind())
+                        let arr = py
+                            .import("numpy")?
+                            .call_method1("asarray", (pyo3::types::PyList::new(py, &list)?,))?;
+                        Ok(arr.unbind())
                     }
                 }
             })
@@ -320,6 +358,73 @@ impl PyBlock {
         }
     }
 
+    /// Rename a column in place, preserving its data and position.
+    ///
+    /// Parameters
+    /// ----------
+    /// old_key : str
+    ///     Existing column name.
+    /// new_key : str
+    ///     New column name.
+    ///
+    /// Raises
+    /// ------
+    /// KeyError
+    ///     If ``old_key`` does not exist.
+    fn rename(&mut self, old_key: &str, new_key: &str) -> PyResult<()> {
+        let renamed = self
+            .inner
+            .with_mut(|b| b.rename_column(old_key, new_key))
+            .map_err(ffi_error_to_pyerr)?;
+        if renamed {
+            Ok(())
+        } else {
+            Err(PyKeyError::new_err(old_key.to_string()))
+        }
+    }
+
+    /// Return a new Block with rows gathered at ``indices`` (Rust-native row
+    /// select/gather; preserves the column set and dtypes).
+    ///
+    /// Parameters
+    /// ----------
+    /// indices : Sequence[int]
+    ///     Row indices to gather, in order.
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If any index is out of range.
+    fn select_rows(&self, indices: Vec<usize>) -> PyResult<PyBlock> {
+        let core = self.clone_core_block()?;
+        let out = core
+            .select_rows(&indices)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        PyBlock::from_core_block(out)
+    }
+
+    /// Return a new Block sorted by the ``key`` column (original unchanged).
+    ///
+    /// Parameters
+    /// ----------
+    /// key : str
+    ///     Column to sort by.
+    /// reverse : bool, optional
+    ///     Descending order (the ascending order reversed). Default ``False``.
+    ///
+    /// Raises
+    /// ------
+    /// ValueError
+    ///     If ``key`` is not a column.
+    #[pyo3(signature = (key, reverse = false))]
+    fn sort(&self, key: &str, reverse: bool) -> PyResult<PyBlock> {
+        let core = self.clone_core_block()?;
+        let out = core
+            .sort_by(key, reverse)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        PyBlock::from_core_block(out)
+    }
+
     /// Return the dtype string for the given column.
     ///
     /// Parameters
@@ -376,6 +481,15 @@ impl PyBlock {
     /// Clone the underlying `CoreBlock` out of the store (deep copy).
     pub(crate) fn clone_core_block(&self) -> PyResult<CoreBlock> {
         self.inner.clone_block().map_err(ffi_error_to_pyerr)
+    }
+
+    /// Insert a Python-facing column from another module in this crate.
+    pub(crate) fn insert_py_column(
+        &mut self,
+        key: &str,
+        array: &Bound<'_, pyo3::types::PyAny>,
+    ) -> PyResult<()> {
+        self.insert(key, array)
     }
 
     /// Run a read-only closure on the underlying `CoreBlock`.

@@ -15,7 +15,7 @@ use rustfft::{Fft, FftPlanner};
 
 use crate::forcefield::Params;
 use crate::potential::Potential;
-use molrs::frame::Frame;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 // ---------------------------------------------------------------------------
@@ -721,7 +721,7 @@ impl PmePotential {
 // ---------------------------------------------------------------------------
 
 impl Potential for PmePotential {
-    fn eval(&self, coords: &[F]) -> (F, Vec<F>) {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
         let e = PmePotential::energy(self, coords);
         let f = PmePotential::forces(self, coords);
         (e, f)
@@ -1066,7 +1066,7 @@ mod tests {
             box_l / 2.0,
             box_l / 2.0,
         ];
-        let e = pme.energy(&coords);
+        let e = pme.calc_energy(&coords);
 
         // Coulomb energy in vacuum: -1/r (with coulomb=1, q=+1,-1)
         let e_vacuum: F = -coulomb / r;
@@ -1098,7 +1098,7 @@ mod tests {
 
         let coords: Vec<F> = vec![2.0, 3.0, 4.0, 5.0, 3.5, 4.5, 7.0, 6.0, 5.0];
 
-        let forces = pme.forces(&coords);
+        let forces = pme.calc_forces(&coords);
 
         let eps: F = 1e-3;
         for idx in 0..9 {
@@ -1106,7 +1106,7 @@ mod tests {
             let mut cm = coords.clone();
             cp[idx] += eps;
             cm[idx] -= eps;
-            let numerical_force = -(pme.energy(&cp) - pme.energy(&cm)) / (2.0 * eps);
+            let numerical_force = -(pme.calc_energy(&cp) - pme.calc_energy(&cm)) / (2.0 * eps);
             assert!(
                 (forces[idx] - numerical_force).abs() < 1.0,
                 "idx={}: analytical={:.6}, numerical={:.6}, diff={:.2e}",
@@ -1135,7 +1135,7 @@ mod tests {
         let pme = PmePotential::new(params, charges, cubic_box(box_l), exclusions);
 
         let coords: Vec<F> = vec![1.0, 2.0, 3.0, 4.0, 2.5, 3.5, 6.0, 7.0, 2.0, 8.0, 7.5, 2.5];
-        let forces = pme.forces(&coords);
+        let forces = pme.calc_forces(&coords);
 
         for dim in 0..3 {
             let sum: F = (0..4).map(|a| forces[a * 3 + dim]).sum();
@@ -1176,11 +1176,11 @@ mod tests {
             box_l / 2.0,
         ];
 
-        let e = pots.energy(&coords);
+        let e = pots.calc_energy(&coords);
         assert!(e.is_finite(), "energy should be finite, got {}", e);
         assert!(e.abs() > 1e-10, "energy should be non-zero");
 
-        let forces = pots.forces(&coords);
+        let forces = pots.calc_forces(&coords);
         for (i, &f) in forces.iter().enumerate() {
             assert!(F::is_finite(f), "forces[{}] should be finite", i);
         }

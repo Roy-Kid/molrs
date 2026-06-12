@@ -23,7 +23,7 @@
 //! VF2 loop's predicate closures pure and avoids nested recursion through
 //! petgraph.
 
-use molrs::molgraph::{AtomId, MolGraph};
+use molrs::system::atomistic::{AtomId, Atomistic};
 use petgraph::graph::UnGraph;
 
 use crate::smiles::chem::ast::{AtomPrimitive, AtomQuery, BondQuery, SmilesIR};
@@ -37,7 +37,7 @@ use super::predicate::{BondEdge, TargetCtx, eval_atom_query, eval_bond_query};
 /// component).
 ///
 /// Indices are 0-based positions into the iteration order of
-/// [`MolGraph::atoms`](molrs::molgraph::MolGraph::atoms).
+/// [`MolGraph::atoms`](molrs::system::molgraph::MolGraph::atoms).
 ///
 /// Reference: Daylight SMARTS theory manual — substructure matching:
 /// <https://daylight.com/dayhtml/doc/theory/theory.smarts.html>
@@ -82,23 +82,23 @@ pub trait SubstructureMatcher: Send + Sync {
     ///
     /// let pat = SmartsPattern::compile("[C;X4]").unwrap();
     /// let mol = to_atomistic(&parse_smiles("CCO").unwrap()).unwrap();
-    /// let hits = pat.find_all(mol.as_molgraph()).unwrap();
+    /// let hits = pat.find_all(&mol).unwrap();
     /// assert_eq!(hits.len(), 2); // both sp3 carbons
     /// ```
-    fn find_all(&self, target: &MolGraph) -> Result<Vec<Match>, SmartsError>;
+    fn find_all(&self, target: &Atomistic) -> Result<Vec<Match>, SmartsError>;
 
     /// Return the first match, or `None` if the pattern does not occur.
     ///
     /// # Errors
     ///
     /// Same conditions as [`find_all`](Self::find_all).
-    fn find_first(&self, target: &MolGraph) -> Result<Option<Match>, SmartsError> {
+    fn find_first(&self, target: &Atomistic) -> Result<Option<Match>, SmartsError> {
         Ok(self.find_all(target)?.into_iter().next())
     }
 }
 
 impl SubstructureMatcher for SmartsPattern {
-    fn find_all(&self, target: &MolGraph) -> Result<Vec<Match>, SmartsError> {
+    fn find_all(&self, target: &Atomistic) -> Result<Vec<Match>, SmartsError> {
         if self.components.is_empty() {
             return Ok(Vec::new());
         }
@@ -202,7 +202,7 @@ impl TargetGraph {
     }
 }
 
-fn build_target_graph(mol: &MolGraph, rings: &molrs::rings::RingInfo) -> TargetGraph {
+fn build_target_graph(mol: &Atomistic, rings: &molrs::chem::rings::RingInfo) -> TargetGraph {
     let mut graph = UnGraph::<AtomNodeRef, BondEdge>::with_capacity(mol.n_atoms(), mol.n_bonds());
     let mut id_to_node = std::collections::HashMap::new();
     let mut id_to_index: std::collections::HashMap<AtomId, usize> =
@@ -215,12 +215,12 @@ fn build_target_graph(mol: &MolGraph, rings: &molrs::rings::RingInfo) -> TargetG
     }
 
     for (bond_id, bond) in mol.bonds() {
-        let [a, b] = bond.atoms;
+        let [a, b] = [bond.nodes[0], bond.nodes[1]];
         let stored_order = bond
             .props
             .get("order")
             .and_then(|v| match v {
-                molrs::molgraph::PropValue::F64(f) => Some(*f),
+                molrs::system::molgraph::PropValue::F64(f) => Some(*f),
                 _ => None,
             })
             .unwrap_or(1.0);

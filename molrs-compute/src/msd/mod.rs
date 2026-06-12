@@ -17,7 +17,7 @@ mod result;
 
 pub use result::{MSDResult, MSDTimeSeries};
 
-use molrs::frame_access::FrameAccess;
+use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::Array1;
 use rustfft::FftPlanner;
@@ -282,7 +282,7 @@ impl MSD {
 mod tests {
     use super::*;
     use molrs::Frame;
-    use molrs::block::Block;
+    use molrs::store::block::Block;
     use ndarray::Array1 as A1;
 
     fn make_frame(x: &[F], y: &[F], z: &[F]) -> Frame {

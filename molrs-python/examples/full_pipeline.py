@@ -7,9 +7,8 @@ structures, and evaluating MMFF94 energies.
 import numpy as np
 from molrs import (
     Atomistic,
-    EmbedOptions,
+    Conformer,
     MMFFTypifier,
-    generate_3d,
     extract_coords,
 )
 
@@ -37,8 +36,8 @@ def build_benzene() -> Atomistic:
     mol = Atomistic()
     carbons = [mol.add_atom("C") for _ in range(6)]
     for i in range(6):
-        mol.add_bond(carbons[i], carbons[(i + 1) % 6])
-        mol.set_bond_order(carbons[i], carbons[(i + 1) % 6], 1.5)
+        rh = mol.add_bond(carbons[i], carbons[(i + 1) % 6])
+        mol.set_relation_prop("bonds", rh, "order", 1.5)
     return mol
 
 
@@ -50,8 +49,8 @@ def build_acetic_acid() -> Atomistic:
     o_dbl = mol.add_atom("O")
     o_oh = mol.add_atom("O")
     mol.add_bond(c_me, c_co)
-    mol.add_bond(c_co, o_dbl)
-    mol.set_bond_order(c_co, o_dbl, 2.0)
+    rh = mol.add_bond(c_co, o_dbl)
+    mol.set_relation_prop("bonds", rh, "order", 2.0)
     mol.add_bond(c_co, o_oh)
     return mol
 
@@ -64,17 +63,14 @@ molecules = {
 }
 
 typifier = MMFFTypifier()
-opts = EmbedOptions(speed="medium", seed=123)
 
 for name, mol in molecules.items():
     print(f"=== {name} ===")
-    print(f"  input: atoms={mol.n_atoms}, bonds={mol.n_bonds}")
+    print(f"  input: atoms={mol.n_atoms}, bonds={mol.n_relations('bonds')}")
 
     # Generate 3D
-    result = generate_3d(mol, opts)
-    mol3d = result.mol
-    report = result.report
-    print(f"  embed: atoms={mol3d.n_atoms}, energy={report.final_energy:.2f}")
+    mol3d, report = Conformer(speed="medium", seed=123).generate(mol)
+    print(f"  conformer: atoms={mol3d.n_atoms}, energy={report.final_energy:.2f}")
 
     # Evaluate MMFF94
     try:

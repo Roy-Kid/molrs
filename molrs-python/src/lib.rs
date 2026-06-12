@@ -26,6 +26,7 @@
 
 use pyo3::prelude::*;
 
+mod error;
 mod helpers;
 mod store;
 
@@ -47,16 +48,20 @@ mod molrec;
 use molrec::{PyMolRec, PyObservables, PyScalarObservable, PyTrajectory, PyVectorObservable};
 
 mod region;
-use region::{PyHollowSphere, PyRegion, PySphere};
+use region::{PyCuboid, PyHollowSphere, PyRegion, PySphere};
 
 pub(crate) mod molgraph;
-use molgraph::PyAtomistic;
+use molgraph::{PyAtomistic, PyCoarseGrain, PyGraph};
+use molgraph::{
+    add_hydrogens, compute_gasteiger_charges, find_rings, perceive_aromaticity, rotate, scale,
+    translate,
+};
 
-mod embed;
-use embed::{PyEmbedOptions, PyEmbedReport, PyEmbedResult, PyStageReport};
+mod conformer;
+use conformer::{PyConformer, PyConformerReport, PyConformerStageReport};
 
 mod forcefield;
-use forcefield::{PyForceField, PyMMFFTypifier, PyPotentials};
+use forcefield::{PyForceField, PyLBFGS, PyMMFFTypifier, PyOptReport, PyPotentials};
 
 mod compute;
 use compute::{
@@ -69,7 +74,44 @@ use compute::{
 mod compute_extra;
 mod dielectric;
 mod signal;
+mod transport;
 mod validate;
+
+/// Register the `keys` submodule mirroring `molrs_core::store::keys` so Python code
+/// references the field-name convention by name (`molrs.keys.X`) instead of
+/// scattering string literals.
+fn register_keys(parent: &Bound<'_, PyModule>) -> PyResult<()> {
+    use ::molrs::store::keys;
+    let m = PyModule::new(parent.py(), "keys")?;
+    m.add("X", keys::X)?;
+    m.add("Y", keys::Y)?;
+    m.add("Z", keys::Z)?;
+    m.add("COORDS", keys::COORDS.to_vec())?;
+    m.add("ELEMENT", keys::ELEMENT)?;
+    m.add("BEAD_TYPE", keys::BEAD_TYPE)?;
+    m.add("CHARGE", keys::CHARGE)?;
+    m.add("ORDER", keys::ORDER)?;
+    m.add("MASS", keys::MASS)?;
+    m.add("TYPE", keys::TYPE)?;
+    m.add("ID", keys::ID)?;
+    m.add("MOL_ID", keys::MOL_ID)?;
+    m.add("SYMBOL", keys::SYMBOL)?;
+    m.add("NAME", keys::NAME)?;
+    m.add("VX", keys::VX)?;
+    m.add("VY", keys::VY)?;
+    m.add("VZ", keys::VZ)?;
+    m.add("VELOCITIES", keys::VELOCITIES.to_vec())?;
+    m.add("XYZ", keys::XYZ)?;
+    m.add("RES_ID", keys::RES_ID)?;
+    m.add("RES_NAME", keys::RES_NAME)?;
+    m.add("ATOMI", keys::ATOMI)?;
+    m.add("ATOMJ", keys::ATOMJ)?;
+    m.add("ATOMK", keys::ATOMK)?;
+    m.add("ATOML", keys::ATOML)?;
+    m.add("ENDPOINTS", keys::ENDPOINTS.to_vec())?;
+    parent.add_submodule(&m)?;
+    Ok(())
+}
 
 /// Root Python module for the molrs library.
 ///
@@ -83,6 +125,12 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyNeighborQuery>()?;
     m.add_class::<PyNeighborList>()?;
 
+    // Public exceptions
+    m.add(
+        "BlockDtypeError",
+        m.py().get_type::<error::BlockDtypeError>(),
+    )?;
+
     // Block + Frame
     m.add_class::<PyBlock>()?;
     m.add_class::<PyFrame>()?;
@@ -90,11 +138,15 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // I/O + SMILES
     // Readers
     m.add_function(wrap_pyfunction!(io::read_pdb, m)?)?;
+    m.add_function(wrap_pyfunction!(io::read_pdb_trajectory, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_xyz, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_xyz_trajectory, m)?)?;
+    m.add_class::<io::PyXYZTrajReader>()?;
     m.add_function(wrap_pyfunction!(io::read_lammps, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_lammps_traj, m)?)?;
     m.add_class::<io::PyLAMMPSTrajReader>()?;
+    m.add_function(wrap_pyfunction!(io::read_dcd, m)?)?;
+    m.add_class::<io::PyDcdTrajReader>()?;
     m.add_function(wrap_pyfunction!(io::read_gro, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_chgcar_file, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_cube_file, m)?)?;
@@ -102,9 +154,11 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Writers
     m.add_function(wrap_pyfunction!(io::write_gro, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_pdb, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_pdb_trajectory, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_xyz, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_lammps, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_lammps_traj, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_dcd, m)?)?;
     // SMILES
     m.add_function(wrap_pyfunction!(io::parse_smiles, m)?)?;
     m.add_class::<io::PySmilesIR>()?;
@@ -119,24 +173,43 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Regions
     m.add_class::<PySphere>()?;
     m.add_class::<PyHollowSphere>()?;
+    m.add_class::<PyCuboid>()?;
     m.add_class::<PyRegion>()?;
 
-    // Molecular graph
+    // Molecular graph hierarchy (base before subclasses)
+    m.add_class::<PyGraph>()?;
     m.add_class::<PyAtomistic>()?;
+    m.add_class::<PyCoarseGrain>()?;
 
-    // Embed
-    m.add_class::<PyEmbedOptions>()?;
-    m.add_class::<PyEmbedReport>()?;
-    m.add_class::<PyEmbedResult>()?;
-    m.add_class::<PyStageReport>()?;
-    m.add_function(wrap_pyfunction!(embed::generate_3d_py, m)?)?;
+    // Systems = module-level free functions (no algorithm methods on the classes)
+    m.add_function(wrap_pyfunction!(translate, m)?)?;
+    m.add_function(wrap_pyfunction!(rotate, m)?)?;
+    m.add_function(wrap_pyfunction!(scale, m)?)?;
+    m.add_function(wrap_pyfunction!(perceive_aromaticity, m)?)?;
+    m.add_function(wrap_pyfunction!(add_hydrogens, m)?)?;
+    m.add_function(wrap_pyfunction!(find_rings, m)?)?;
+    m.add_function(wrap_pyfunction!(compute_gasteiger_charges, m)?)?;
+
+    // Field-name convention (`molrs.keys.X`, `molrs.keys.ELEMENT`, …)
+    register_keys(m)?;
+
+    // Conformer generation
+    m.add_class::<PyConformer>()?;
+    m.add_class::<PyConformerReport>()?;
+    m.add_class::<PyConformerStageReport>()?;
 
     // Force field
     m.add_class::<PyForceField>()?;
     m.add_class::<PyMMFFTypifier>()?;
     m.add_class::<PyPotentials>()?;
+    m.add_class::<PyOptReport>()?;
+    m.add_class::<PyLBFGS>()?;
     m.add_function(wrap_pyfunction!(forcefield::read_forcefield_xml_py, m)?)?;
+    m.add_function(wrap_pyfunction!(forcefield::read_forcefield_xml_str_py, m)?)?;
+    m.add_function(wrap_pyfunction!(forcefield::read_opls_xml_py, m)?)?;
+    m.add_function(wrap_pyfunction!(forcefield::read_opls_xml_str_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::extract_coords_py, m)?)?;
+    m.add_function(wrap_pyfunction!(forcefield::build_mmff_potentials_py, m)?)?;
 
     // Compute analyses
     m.add_class::<PyRDF>()?;
@@ -169,6 +242,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Dielectric
     dielectric::register_dielectric(m)?;
+    transport::register_transport(m)?;
 
     // Validation
     validate::register_validate(m)?;

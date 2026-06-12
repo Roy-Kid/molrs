@@ -4,13 +4,14 @@ use std::collections::{HashMap, HashSet};
 
 use ndarray::Array1;
 
-use molrs::block::Block;
-use molrs::frame::Frame;
-use molrs::gasteiger::compute_gasteiger_charges;
-use molrs::molgraph::{AtomId, MolGraph, PropValue};
-use molrs::rings::find_rings;
-use molrs::topology::Topology;
+use molrs::chem::gasteiger::compute_gasteiger_charges;
+use molrs::chem::rings::find_rings;
+use molrs::store::block::Block;
+use molrs::store::frame::Frame;
+use molrs::system::molgraph::PropValue;
+use molrs::system::topology::Topology;
 use molrs::types::{F, U};
+use molrs::{AtomId, Atomistic};
 
 use super::atom_typing::assign_atom_types;
 use super::classify::{classify_angle_type, classify_bond_type, classify_torsion_type};
@@ -25,7 +26,7 @@ use super::params::MMFFParams;
 /// - `dihedrals`: atomi, atomj, atomk, atoml, type (e.g. "0_5_1_1_5")
 /// - `impropers`: atomi, atomj, atomk, atoml, type (e.g. "1_2_3_4")
 /// - `pairs`: atomi, atomj, is_14
-pub(crate) fn build_mmff_frame(mol: &MolGraph, params: &MMFFParams) -> Result<Frame, String> {
+pub(crate) fn build_mmff_frame(mol: &Atomistic, params: &MMFFParams) -> Result<Frame, String> {
     // Step 1: Ring detection
     let ring_info = find_rings(mol);
 
@@ -44,15 +45,15 @@ pub(crate) fn build_mmff_frame(mol: &MolGraph, params: &MMFFParams) -> Result<Fr
     // Step 4: Build topology from edges
     let edges: Vec<[usize; 2]> = mol
         .bonds()
-        .map(|(_, bond)| [atom_to_idx[&bond.atoms[0]], atom_to_idx[&bond.atoms[1]]])
+        .map(|(_, bond)| [atom_to_idx[&bond.nodes[0]], atom_to_idx[&bond.nodes[1]]])
         .collect();
     let topo = Topology::from_edges(n_atoms, &edges);
 
     // Build bond order lookup: (min_idx, max_idx) → bond_order
     let mut bond_order_map: HashMap<(usize, usize), f64> = HashMap::new();
     for (_, bond) in mol.bonds() {
-        let i = atom_to_idx[&bond.atoms[0]];
-        let j = atom_to_idx[&bond.atoms[1]];
+        let i = atom_to_idx[&bond.nodes[0]];
+        let j = atom_to_idx[&bond.nodes[1]];
         let order = match bond.props.get("order") {
             Some(PropValue::F64(v)) => *v,
             _ => 1.0,

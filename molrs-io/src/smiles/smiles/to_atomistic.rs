@@ -14,8 +14,8 @@ use std::collections::HashMap;
 
 use crate::smiles::chem::ast::*;
 use crate::smiles::error::{SmilesError, SmilesErrorKind};
-use molrs::atomistic::Atomistic;
-use molrs::molgraph::{AtomId, PropValue};
+use molrs::system::atomistic::{AtomId, Atomistic};
+use molrs::system::molgraph::PropValue;
 
 /// Convert a parsed SMILES IR into an [`Atomistic`] molecular graph.
 ///
@@ -231,19 +231,19 @@ impl<'a> Builder<'a> {
 
         if let Some(kind) = bond {
             let order = bond_kind_to_order(kind);
-            if let Ok(b) = self.mol.get_bond_mut(bid) {
-                b.props.insert("order".to_owned(), PropValue::F64(order));
-                match kind {
-                    BondKind::Up => {
-                        b.props
-                            .insert("stereo".to_owned(), PropValue::Str("up".to_owned()));
-                    }
-                    BondKind::Down => {
-                        b.props
-                            .insert("stereo".to_owned(), PropValue::Str("down".to_owned()));
-                    }
-                    _ => {}
+            let _ = self.mol.set_bond_prop(bid, "order", PropValue::F64(order));
+            match kind {
+                BondKind::Up => {
+                    let _ = self
+                        .mol
+                        .set_bond_prop(bid, "stereo", PropValue::Str("up".to_owned()));
                 }
+                BondKind::Down => {
+                    let _ =
+                        self.mol
+                            .set_bond_prop(bid, "stereo", PropValue::Str("down".to_owned()));
+                }
+                _ => {}
             }
         }
 
@@ -300,15 +300,11 @@ impl<'a> Builder<'a> {
     }
 
     fn set_prop(&mut self, id: AtomId, key: &str, val: f64) {
-        if let Ok(atom) = self.mol.get_atom_mut(id) {
-            atom.set(key, val);
-        }
+        let _ = self.mol.set_atom(id, key, val);
     }
 
     fn set_prop_str(&mut self, id: AtomId, key: &str, val: &str) {
-        if let Ok(atom) = self.mol.get_atom_mut(id) {
-            atom.set(key, val);
-        }
+        let _ = self.mol.set_atom(id, key, val);
     }
 }
 
@@ -460,7 +456,7 @@ mod tests {
         let mol = smiles_to_mol("[C@@H](F)(Cl)Br");
         assert_eq!(mol.n_atoms(), 4); // C, F, Cl, Br (H is in h_count)
         let atoms: Vec<_> = mol.atoms().collect();
-        let c_atom = atoms
+        let c_atom = &atoms
             .iter()
             .find(|(_, a)| a.get_str("element") == Some("C"))
             .unwrap()

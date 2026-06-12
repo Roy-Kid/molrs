@@ -16,7 +16,7 @@
 
 use ndarray::{Array1, Array2, ArrayView2, array};
 
-use molrs::region::simbox::SimBox;
+use molrs::spatial::region::simbox::SimBox;
 
 use crate::F;
 use crate::error::{self, MolrsStatus};

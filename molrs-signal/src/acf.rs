@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_acf_white_noise_peak_at_zero() {
-        use rand::Rng;
+        use rand::RngExt;
         let mut rng = rand::rng();
         let data: Vec<f64> = (0..1000).map(|_| rng.random()).collect();
         let arr = Array1::from_vec(data);

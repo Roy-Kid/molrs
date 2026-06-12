@@ -35,7 +35,7 @@
 //!     │
 //!     └─ typifier.build(&mol)          → Potentials (pre-resolved SoA arrays)
 //!           │                                │
-//!           ├─ typify() [internal]     potentials.eval(coords)
+//!           ├─ typify() [internal]     potentials.calc_energy_forces(coords)
 //!           │   ├─ find_rings()                │
 //!           │   ├─ assign_atom_types()   (energy, forces)
 //!           │   ├─ Topology::from_edges()
@@ -63,9 +63,9 @@
 //!
 //! MMFF94 parameters are embedded in the binary — no external data files needed.
 
-use molrs::atomistic::Atomistic;
-use molrs::molgraph::{Atom, MolGraph, PropValue};
-use molrs::rings::find_rings;
+use molrs::Atomistic;
+use molrs::chem::rings::find_rings;
+use molrs::system::molgraph::{Atom, PropValue};
 use molrs::types::F;
 use molrs_ff::potential::extract_coords;
 use molrs_ff::typifier::Typifier;
@@ -257,13 +257,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== Part 7: Build & Evaluate ===\n");
 
-    let ethane_aa = Atomistic::try_from_molgraph(ethane.clone()).expect("ethane is atomistic");
-    match typifier.build(&ethane_aa) {
+    match typifier.build(&ethane) {
         Ok(potentials) => {
             println!("Built {} potential kernel(s)", potentials.len());
 
             let coords = extract_coords(&frame)?;
-            let (energy, forces) = potentials.eval(&coords);
+            let (energy, forces) = potentials.calc_energy_forces(&coords);
 
             println!("Total energy: {:.4} kcal/mol", energy);
 
@@ -321,8 +320,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // Molecule builders
 // =============================================================================
 
-fn build_ethane() -> MolGraph {
-    let mut mol = MolGraph::new();
+fn build_ethane() -> Atomistic {
+    let mut mol = Atomistic::new();
     let c1 = mol.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
     let c2 = mol.add_atom(Atom::xyz("C", 1.54, 0.0, 0.0));
     mol.add_bond(c1, c2).unwrap();
@@ -342,10 +341,10 @@ fn build_ethane() -> MolGraph {
     mol
 }
 
-fn build_benzene() -> MolGraph {
+fn build_benzene() -> Atomistic {
     use std::f64::consts::PI;
 
-    let mut mol = MolGraph::new();
+    let mut mol = Atomistic::new();
     let r = 1.40;
 
     let mut carbons = Vec::new();
@@ -358,10 +357,8 @@ fn build_benzene() -> MolGraph {
 
     for i in 0..6 {
         let bid = mol.add_bond(carbons[i], carbons[(i + 1) % 6]).unwrap();
-        mol.get_bond_mut(bid)
-            .unwrap()
-            .props
-            .insert("order".into(), PropValue::F64(1.5));
+        mol.set_bond_prop(bid, "order", PropValue::F64(1.5))
+            .unwrap();
     }
 
     let rh = 2.48;
@@ -377,8 +374,8 @@ fn build_benzene() -> MolGraph {
     mol
 }
 
-fn build_acetic_acid() -> MolGraph {
-    let mut mol = MolGraph::new();
+fn build_acetic_acid() -> Atomistic {
+    let mut mol = Atomistic::new();
 
     let c_me = mol.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
     let h1 = mol.add_atom(Atom::xyz("H", -0.5, 0.9, 0.0));
@@ -393,10 +390,8 @@ fn build_acetic_acid() -> MolGraph {
 
     let o_dbl = mol.add_atom(Atom::xyz("O", 2.1, 1.1, 0.0));
     let bid_co = mol.add_bond(c_co, o_dbl).unwrap();
-    mol.get_bond_mut(bid_co)
-        .unwrap()
-        .props
-        .insert("order".into(), PropValue::F64(2.0));
+    mol.set_bond_prop(bid_co, "order", PropValue::F64(2.0))
+        .unwrap();
 
     let o_oh = mol.add_atom(Atom::xyz("O", 2.1, -1.1, 0.0));
     mol.add_bond(c_co, o_oh).unwrap();
@@ -411,7 +406,7 @@ fn build_acetic_acid() -> MolGraph {
 // Utilities
 // =============================================================================
 
-fn count(mol: &MolGraph) -> (usize, usize) {
+fn count(mol: &Atomistic) -> (usize, usize) {
     (mol.atoms().count(), mol.bonds().count())
 }
 

@@ -1,15 +1,14 @@
 """Generate 3D coordinates for ethane, then evaluate MMFF94 energy and forces.
 
 Demonstrates the full pipeline:
-  Atomistic (no coords) → generate_3d → MMFFTypifier.build → Potentials.eval
+  Atomistic (no coords) → Conformer.generate → MMFFTypifier.build → Potentials.eval
 """
 
 import numpy as np
 from molrs import (
     Atomistic,
-    EmbedOptions,
+    Conformer,
     MMFFTypifier,
-    generate_3d,
     extract_coords,
 )
 
@@ -22,10 +21,7 @@ mol.add_bond(c1, c2)
 print(f"Input: {mol}")
 
 # --- 2. Generate 3D coordinates (adds hydrogens automatically) ---
-opts = EmbedOptions(speed="medium", seed=42)
-result = generate_3d(mol, opts)
-mol3d = result.mol
-report = result.report
+mol3d, report = Conformer(speed="medium", seed=42).generate(mol)
 
 print(f"\nAfter embed: {mol3d}")
 print(f"  final_energy (internal UFF) = {report.final_energy:.4f}")

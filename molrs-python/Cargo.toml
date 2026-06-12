@@ -1,8 +1,8 @@
 [package]
 name = "molrs-python"
-version = "0.0.17"
+version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.91"
 authors = ["MolCrafts"]
 license = "BSD-3-Clause"
 description = "Python bindings for molrs molecular simulation library"
@@ -14,17 +14,21 @@ name = "molrs_python"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.28", features = ["extension-module", "abi3-py312"] }
+pyo3 = { version = "0.28", features = [
+    "extension-module",
+    "abi3-py312",
+    "multiple-pymethods",
+] }
 numpy = "0.28"
 ndarray = "0.17"
 serde_json = "1"
-molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.0.17" }
-molrs = { path = "../molrs-core", package = "molcrafts-molrs-core", version = "0.0.17", default-features = false, features = ["zarr"] }
-molrs-io = { path = "../molrs-io", package = "molcrafts-molrs-io", version = "0.0.17", default-features = false, features = ["filesystem", "smiles"] }
-molrs-ff = { path = "../molrs-ff", package = "molcrafts-molrs-ff", version = "0.0.17" }
-molrs-compute = { path = "../molrs-compute", package = "molcrafts-molrs-compute", version = "0.0.17", default-features = false }
-molrs-embed = { path = "../molrs-embed", package = "molcrafts-molrs-embed", version = "0.0.17" }
-molrs-signal = { path = "../molrs-signal", package = "molcrafts-molrs-signal", version = "0.0.17" }
+molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.1.0" }
+molrs = { path = "../molrs-core", package = "molcrafts-molrs-core", version = "0.1.0", default-features = false, features = ["zarr"] }
+molrs-io = { path = "../molrs-io", package = "molcrafts-molrs-io", version = "0.1.0", default-features = false, features = ["filesystem", "smiles"] }
+molrs-ff = { path = "../molrs-ff", package = "molcrafts-molrs-ff", version = "0.1.0" }
+molrs-compute = { path = "../molrs-compute", package = "molcrafts-molrs-compute", version = "0.1.0", default-features = false }
+molrs-conformer = { path = "../molrs-conformer", package = "molcrafts-molrs-conformer", version = "0.1.0" }
+molrs-signal = { path = "../molrs-signal", package = "molcrafts-molrs-signal", version = "0.1.0" }
 
 [workspace]
 

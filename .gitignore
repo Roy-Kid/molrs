@@ -39,8 +39,8 @@ AGENTS.md
 # Claude Code scheduler lock
 .claude/scheduled_tasks.lock
 
-# test data
-tests/tests-data
+# test data (cloned by scripts/fetch-test-data.sh, binding-neutral root location)
+/tests-data/
 
 # Example output files
 *.xyz
@@ -62,3 +62,5 @@ molrs-python/python/molrs/*.dll
 molrs-python/python/molrs/*.so
 molrs-python/python/molrs/*.dylib.dSYM/
 molrs-cxxapi/src/bridge.rs
+
+.claude/worktrees/

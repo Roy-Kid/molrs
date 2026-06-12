@@ -20,7 +20,7 @@ zarr = ["molrs_io/filesystem"]
 [dependencies]
 molrs = { workspace = true }
 molrs_io = { workspace = true }
-molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.0.17" }
+molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.1.0" }
 cxx = "1"
 ndarray = "0.17"
 
