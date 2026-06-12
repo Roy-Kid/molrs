@@ -15,7 +15,7 @@ mol.add_bond(o, h1)
 mol.add_bond(o, h2)
 
 print(f"Input: {mol}")
-print(f"  atoms={mol.n_atoms}, bonds={mol.n_bonds}")
+print(f"  atoms={mol.n_atoms}, bonds={mol.n_relations('bonds')}")
 
 # Generate 3D coordinates
 out, report = Conformer(speed="medium", seed=42).generate(mol)

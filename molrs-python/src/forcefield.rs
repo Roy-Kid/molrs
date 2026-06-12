@@ -185,26 +185,20 @@ impl PyPotentials {
         }
     }
 
-    /// Evaluate energy and forces.
-    ///
-    /// Parameters
-    /// ----------
-    /// arg : Frame or numpy.ndarray
-    ///     A typed :class:`Frame` (topology + coordinates are taken from it), or
-    ///     a flat coordinate array ``[x0, y0, z0, ...]`` for already-compiled
-    ///     potentials.
-    ///
-    /// Returns
-    /// -------
-    /// tuple[float, numpy.ndarray]
-    ///     ``(energy, forces)`` in kcal/mol and kcal/(mol*angstrom).
+    /// Returns ``(energy, forces)``, forces shape ``(N, 3)``.
     fn calc_energy_forces<'py>(
         &self,
         py: Python<'py>,
         arg: &Bound<'_, PyAny>,
-    ) -> PyResult<(f64, Bound<'py, PyArray1<NpF>>)> {
+    ) -> PyResult<(f64, Bound<'py, PyArray2<NpF>>)> {
         let (energy, forces) = self.eval_any(arg)?;
-        Ok((energy, forces.to_pyarray(py)))
+        let n = forces.len() / 3;
+        Ok((
+            energy,
+            Array2::from_shape_vec((n, 3), forces)
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+                .to_pyarray(py),
+        ))
     }
 
     /// Evaluate total energy (kcal/mol) against a :class:`Frame` or coordinates.
@@ -212,13 +206,17 @@ impl PyPotentials {
         Ok(self.eval_any(arg)?.0)
     }
 
-    /// Compute forces (= -gradient) against a :class:`Frame` or coordinates.
+    /// Compute forces (= -gradient) in kcal/(mol·Å), shape ``(N, 3)``.
     fn calc_forces<'py>(
         &self,
         py: Python<'py>,
         arg: &Bound<'_, PyAny>,
-    ) -> PyResult<Bound<'py, PyArray1<NpF>>> {
-        Ok(self.eval_any(arg)?.1.to_pyarray(py))
+    ) -> PyResult<Bound<'py, PyArray2<NpF>>> {
+        let forces = self.eval_any(arg)?.1;
+        let n = forces.len() / 3;
+        Ok(Array2::from_shape_vec((n, 3), forces)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+            .to_pyarray(py))
     }
 
     fn __repr__(&self) -> String {
