@@ -17,9 +17,29 @@ tools and the docs build.
 
 ::: molrs.Atomistic
 
+::: molrs.CoarseGrain
+
+::: molrs.Graph
+
 ::: molrs.SmilesIR
 
 ::: molrs.parse_smiles
+
+## Chemistry Perception
+
+::: molrs.perceive_aromaticity
+
+::: molrs.find_rings
+
+::: molrs.add_hydrogens
+
+::: molrs.compute_gasteiger_charges
+
+## Transforms
+
+::: molrs.rotate
+
+::: molrs.translate
 
 ## I/O
 
@@ -34,6 +54,14 @@ tools and the docs build.
 ::: molrs.read_lammps_traj
 
 ::: molrs.LAMMPSTrajReader
+
+::: molrs.read_dcd
+
+::: molrs.DCDTrajReader
+
+::: molrs.XYZTrajReader
+
+::: molrs.read_gro
 
 ::: molrs.read_chgcar_file
 
@@ -73,13 +101,26 @@ tools and the docs build.
 
 ## Force Fields
 
+The native force-field model exposes a `Style`/`Type` hierarchy
+(`BondStyle`/`BondType`, `PairStyle`/`PairType`, …) and `Parameters`. Those
+classes are pending in the `molrs.pyi` stub and will appear here once the stub
+is completed; the runtime surface is already importable from `molrs`.
+
 ::: molrs.ForceField
 
 ::: molrs.MMFFTypifier
 
 ::: molrs.Potentials
 
+::: molrs.build_mmff_potentials
+
+::: molrs.LBFGS
+
+::: molrs.OptReport
+
 ::: molrs.read_forcefield_xml
+
+::: molrs.read_opls_xml
 
 ::: molrs.extract_coords
 

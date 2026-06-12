@@ -12,6 +12,11 @@ readme = "../README.md"
 keywords = ["molecular-modeling", "chemistry", "simulation", "molecular-dynamics"]
 categories = ["science"]
 
+# docs.rs builds the public API with every sub-system enabled (`full`), but NOT
+# the `blas` feature — that needs a system BLAS/LAPACK the docs.rs sandbox lacks.
+[package.metadata.docs.rs]
+features = ["full"]
+
 [lib]
 name = "molrs"
 
