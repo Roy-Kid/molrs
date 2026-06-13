@@ -78,7 +78,7 @@ Frames without a simulation box are supported — a non-periodic bounding box is
 | `bonds` | `i`, `j` | `u32` | Atom indices |
 | `bonds` | `order` | `F` | Bond order (1.0, 1.5, 2.0, 3.0) |
 
-`F` is the workspace float type from `molrs-core` — always `f64`.
+`F` is the molrs core float type — always `f64`.
 
 ## Build from source
 
