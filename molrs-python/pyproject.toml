@@ -11,6 +11,15 @@ readme = "README.md"
 license = "BSD-3-Clause"
 dependencies = ["numpy>=2.0"]
 
+[project.optional-dependencies]
+# Everything `zensical build` needs for the docs site: zensical itself (pulls
+# its own deps) plus the mkdocstrings python handler used by zensical.toml's
+# `[project.plugins.mkdocstrings]`. Build the site with: pip install ".[doc]"
+doc = [
+    "zensical",
+    "mkdocstrings[python]",
+]
+
 [tool.maturin]
 python-source = "python"
 module-name = "molrs.molrs"
