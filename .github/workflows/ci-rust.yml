@@ -50,8 +50,8 @@ jobs:
       - name: Test (workspace)
         run: cargo test --workspace --lib --tests --examples --locked
 
-      - name: Test (façade with all sub-systems)
-        run: cargo test -p molcrafts-molrs --lib --tests --features "full filesystem" --locked
+      - name: Test (all sub-systems)
+        run: cargo test -p molcrafts-molrs --lib --tests --examples --features "full filesystem" --locked
 
-      - name: Benches build (core)
-        run: cargo bench -p molcrafts-molrs-core --no-run
+      - name: Benches build
+        run: cargo bench -p molcrafts-molrs --no-run --features full

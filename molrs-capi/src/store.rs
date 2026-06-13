@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
+use molrs::ff::ForceField;
 use molrs::spatial::region::simbox::SimBox;
-use molrs_ff::ForceField;
 use slotmap::SlotMap;
 
 use crate::handle::{FFKey, SimBoxKey};

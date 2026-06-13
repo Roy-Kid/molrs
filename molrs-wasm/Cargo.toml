@@ -1,6 +1,6 @@
 [package]
 name = "molrs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["MolCrafts"]
 description = "WASM bindings for molrs"
@@ -15,14 +15,13 @@ name = "molwasm"
 [workspace]
 
 [features]
-# Default build = full (all subsystems).
+# Default build = full (all subsystems). Each forwards to the merged crate's
+# matching module feature.
 default = ["smiles", "io", "compute", "conformer"]
-# `smiles` lives inside molrs-io; activating it pulls in molrs-io with the
-# matching feature flag.
-smiles  = ["dep:molrs-io", "molrs-io/smiles"]
-io      = ["dep:molrs-io"]
-compute = ["dep:molrs-compute"]
-conformer = ["dep:molrs-conformer"]
+smiles  = ["io", "molrs/smiles"]
+io      = ["molrs/io"]
+compute = ["molrs/compute"]
+conformer = ["molrs/conformer"]
 
 [dependencies]
 wasm-bindgen = "0.2.123"
@@ -31,16 +30,10 @@ serde-wasm-bindgen = "0.6"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["console"] }
 
-# Core + FFI handle layer are always compiled (all variants need them).
-molrs = { path = "../molrs-core", package = "molcrafts-molrs-core", version = "0.1.0", default-features = false, features = ["zarr"] }
-molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.1.0", default-features = false }
-
-# Optional sub-crates, gated by matching features above.
-# `smiles` is hosted inside molrs-io; the `smiles` feature here forwards to
-# molrs-io's own `smiles` feature flag.
-molrs-io      = { path = "../molrs-io",      package = "molcrafts-molrs-io",      version = "0.1.0", default-features = false, features = ["zarr"], optional = true }
-molrs-compute = { path = "../molrs-compute", package = "molcrafts-molrs-compute", version = "0.1.0", default-features = false, optional = true }
-molrs-conformer = { path = "../molrs-conformer", package = "molcrafts-molrs-conformer",   version = "0.1.0", default-features = false, optional = true }
+# The merged crate (core always on via `zarr`; sub-system modules pulled in by
+# the wasm features above) + the FFI handle layer.
+molrs = { path = "../molrs", package = "molcrafts-molrs", version = "0.1.1", default-features = false, features = ["zarr"] }
+molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.1.1", default-features = false }
 
 ndarray = "0.17"
 zarrs = { version = "0.23", default-features = false }

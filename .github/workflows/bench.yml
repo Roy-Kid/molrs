@@ -1,6 +1,6 @@
 name: Bench
 
-# Runs the molrs-core criterion benchmarks (Frame, graph/topology, region,
+# Runs the core criterion benchmarks (Frame, graph/topology, region,
 # neighbors) and tracks them over time. Criterion's `--output-format bencher`
 # emits the libtest `bench: N ns/iter` lines that github-action-benchmark's
 # `cargo` tool parses.
@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   bench:
-    name: molrs-core criterion
+    name: core criterion
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -29,14 +29,14 @@ jobs:
 
       - name: Run core benchmarks (bencher output)
         run: |
-          cargo bench -p molcrafts-molrs-core --bench benchmarks -- \
+          cargo bench -p molcrafts-molrs --bench core_benchmarks -- \
             --output-format bencher | tee output.txt
 
       - name: Upload raw bench output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: molrs-core-bench-${{ github.run_id }}
+          name: core-bench-${{ github.run_id }}
           path: output.txt
           if-no-files-found: error
 

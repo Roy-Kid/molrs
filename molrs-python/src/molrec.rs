@@ -163,19 +163,19 @@ impl PyMolRec {
 
     /// Set the forcefield; auto-populates method metadata.
     fn set_forcefield(&self, forcefield: &PyForceField) {
-        molrs_ff::set_forcefield_metadata(&mut self.inner.borrow_mut(), &forcefield.inner);
+        molrs::ff::set_forcefield_metadata(&mut self.inner.borrow_mut(), &forcefield.inner);
     }
 
     #[staticmethod]
     fn read_zarr(path: &str) -> PyResult<Self> {
-        let inner = molrs_io::store::zarr::read_molrec_file(path).map_err(molrs_error_to_pyerr)?;
+        let inner = molrs::io::store::zarr::read_molrec_file(path).map_err(molrs_error_to_pyerr)?;
         Ok(Self {
             inner: Rc::new(RefCell::new(inner)),
         })
     }
 
     fn write_zarr(&self, path: &str) -> PyResult<()> {
-        molrs_io::store::zarr::write_molrec_file(path, &self.inner.borrow())
+        molrs::io::store::zarr::write_molrec_file(path, &self.inner.borrow())
             .map_err(molrs_error_to_pyerr)
     }
 

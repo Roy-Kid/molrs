@@ -1,33 +1,32 @@
 //! # molrs
 //!
-//! Unified façade for the molrs molecular simulation toolkit.
-//!
-//! This crate re-exports the molrs workspace crates under a single namespace.
-//! Downstream users add one dependency and opt into sub-systems via features:
+//! Unified molecular simulation toolkit. A single crate whose sub-systems are
+//! feature-gated modules: `core` (always on) plus `io`, `compute`, `smiles`,
+//! `ff`, `conformer`, and `signal`.
 //!
 //! ```toml
-//! molcrafts-molrs = { version = "0.0.11", features = ["io", "smiles"] }
+//! molcrafts-molrs = { version = "0.1", features = ["io", "smiles"] }
 //! ```
 //!
 //! Then:
 //!
 //! ```ignore
-//! use molrs::Frame;              // from molrs-core
+//! use molrs::Frame;              // core (always available)
 //! use molrs::io::read_xyz;       // feature = "io"
 //! use molrs::smiles::parse;      // feature = "smiles"
 //! ```
 //!
 //! ## Features
 //!
-//! - `io`       — file I/O (PDB, XYZ, LAMMPS, CHGCAR, Cube, Zarr)
-//! - `compute`  — trajectory analysis (RDF, MSD, clustering, tensors)
-//! - `smiles`   — SMILES parser
-//! - `ff`       — force fields (MMFF94, PME, typifier)
+//! - `io`        — file I/O (PDB, XYZ, LAMMPS, CHGCAR, Cube, Zarr)
+//! - `compute`   — trajectory analysis (RDF, MSD, clustering, tensors)
+//! - `smiles`    — SMILES/SMARTS parser (lives in `io`)
+//! - `ff`        — force fields (MMFF94, PME, typifier)
 //! - `conformer` — 3D conformer generation
-//! - `signal`   — signal processing (FFT-based ACF, windowing, frequency grids)
-//! - `full`     — everything above
+//! - `signal`    — signal processing (FFT-based ACF, windowing, frequency grids)
+//! - `full`      — everything above
 //!
-//! Core flags forwarded to `molrs-core`: `rayon`, `zarr`, `filesystem`, `blas`.
+//! Core flags: `rayon` (default), `zarr`, `filesystem`, `blas`.
 //!
 //! ## Molecular packing
 //!
@@ -37,23 +36,33 @@
 
 #![warn(rustdoc::missing_crate_level_docs)]
 
-// Core types at the top level (Frame, Block, MolGraph, SimBox, Element, …).
-pub use molrs_core::*;
+// Let in-crate paths refer to this crate by its public name `molrs::` (e.g.
+// `molrs::Frame`, `molrs::io::read_xyz`), matching how downstream code and
+// doctests spell them. Sub-system modules below were absorbed from the former
+// `molrs-*` member crates and rely on this alias for their cross-module paths.
+extern crate self as molrs;
+
+// Core is always compiled and its public surface is re-exported at the crate
+// root, so `molrs::Frame`, `molrs::system::…`, `molrs::error::…` resolve exactly
+// as they did when core was a separate crate.
+pub mod core;
+pub use crate::core::*;
 
 #[cfg(feature = "io")]
-pub use molrs_io as io;
-
-#[cfg(feature = "compute")]
-pub use molrs_compute as compute;
-
-#[cfg(feature = "smiles")]
-pub use molrs_io::smiles;
-
-#[cfg(feature = "ff")]
-pub use molrs_ff as ff;
-
-#[cfg(feature = "conformer")]
-pub use molrs_conformer as conformer;
+pub mod io;
 
 #[cfg(feature = "signal")]
-pub use molrs_signal as signal;
+pub mod signal;
+
+#[cfg(feature = "compute")]
+pub mod compute;
+
+#[cfg(feature = "ff")]
+pub mod ff;
+
+#[cfg(feature = "conformer")]
+pub mod conformer;
+
+// `smiles` is a sub-module of `io`; expose it at the top level for ergonomics.
+#[cfg(feature = "smiles")]
+pub use crate::io::smiles;

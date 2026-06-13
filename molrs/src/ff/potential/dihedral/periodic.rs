@@ -1,0 +1,253 @@
+//! Periodic / Fourier proper dihedral (AMBER / GAFF):
+//!
+//! E(φ) = Σ_m K_m · [1 + cos(n_m·φ − d_m)]
+//!
+//! AMBER-family torsions are a sum of cosine terms per quadruple. The parameter
+//! encoding is **per-term indexed keys** `k{m}`, `n{m}`, `d{m}` (1-indexed, `d`
+//! in degrees), scanned upward from `m = 1` until a term is absent. A single
+//! unindexed `k`/`n`/`d` triple is accepted as the one-term case (the common
+//! GAFF default), keeping the form identical to one CHARMM term. This is the
+//! canonical encoding the molpy → molrs ForceField bridge emits.
+
+use std::collections::HashMap;
+
+use crate::ff::forcefield::Params;
+use crate::ff::potential::Potential;
+use crate::ff::potential::geometry::{
+    accumulate_dihedral_forces, compute_dihedral, validate_coords,
+};
+use molrs::store::frame::Frame;
+use molrs::types::F;
+
+/// One cosine term `K·[1 + cos(n·φ − d)]` with the phase `d` in radians.
+#[derive(Clone, Copy)]
+struct Term {
+    k: F,
+    n: F,
+    d: F,
+}
+
+/// Periodic / Fourier proper dihedral with pre-resolved flat arrays.
+pub struct DihedralPeriodic {
+    atom_i: Vec<usize>,
+    atom_j: Vec<usize>,
+    atom_k: Vec<usize>,
+    atom_l: Vec<usize>,
+    /// Cosine terms per dihedral instance.
+    terms: Vec<Vec<Term>>,
+}
+
+impl Potential for DihedralPeriodic {
+    fn calc_energy_forces(&self, coords: &[F]) -> (F, Vec<F>) {
+        let _n = validate_coords(coords);
+        let mut energy: F = 0.0;
+        let mut forces = vec![0.0 as F; coords.len()];
+
+        for idx in 0..self.atom_i.len() {
+            let (i, j, k, l) = (
+                self.atom_i[idx],
+                self.atom_j[idx],
+                self.atom_k[idx],
+                self.atom_l[idx],
+            );
+            let phi = compute_dihedral(coords, i, j, k, l);
+            let mut de_dphi: F = 0.0;
+            for t in &self.terms[idx] {
+                let arg = t.n * phi - t.d;
+                energy += t.k * (1.0 + arg.cos());
+                de_dphi += -t.k * t.n * arg.sin();
+            }
+            accumulate_dihedral_forces(coords, i, j, k, l, de_dphi, &mut forces);
+        }
+        (energy, forces)
+    }
+}
+
+/// Collect the cosine terms from a per-type [`Params`] using the indexed
+/// `k{m}`/`n{m}`/`d{m}` encoding, falling back to a single `k`/`n`/`d` triple.
+fn collect_terms(p: &Params, label: &str) -> Result<Vec<Term>, String> {
+    let mut terms = Vec::new();
+    let mut m = 1;
+    loop {
+        let kk = p.get(&format!("k{m}"));
+        if kk.is_none() {
+            break;
+        }
+        let n = p
+            .get(&format!("n{m}"))
+            .ok_or_else(|| format!("dihedral_periodic[{label}]: missing n{m}"))?;
+        let d = p.get(&format!("d{m}")).unwrap_or(0.0);
+        terms.push(Term {
+            k: kk.unwrap() as F,
+            n: n as F,
+            d: (d as F).to_radians(),
+        });
+        m += 1;
+    }
+    if terms.is_empty() {
+        // single-term fallback
+        if let Some(k) = p.get("k") {
+            let n = p
+                .get("n")
+                .ok_or_else(|| format!("dihedral_periodic[{label}]: missing n"))?;
+            let d = p.get("d").unwrap_or(0.0);
+            terms.push(Term {
+                k: k as F,
+                n: n as F,
+                d: (d as F).to_radians(),
+            });
+        } else {
+            return Err(format!(
+                "dihedral_periodic[{label}]: no terms (need k1/n1/d1… or k/n/d)"
+            ));
+        }
+    }
+    Ok(terms)
+}
+
+/// Construct a [`DihedralPeriodic`] from per-type params and a Frame's
+/// `"dihedrals"` block (`atomi/atomj/atomk/atoml/type`).
+pub fn dihedral_periodic_ctor(
+    _sp: &Params,
+    tp: &[(&str, &Params)],
+    frame: &Frame,
+) -> Result<Box<dyn Potential>, String> {
+    let type_map: HashMap<&str, &Params> = tp.iter().copied().collect();
+    let block = frame
+        .get("dihedrals")
+        .ok_or("dihedral_periodic: missing \"dihedrals\" block")?;
+    let ic = block.get_uint("atomi").ok_or("missing atomi")?;
+    let jc = block.get_uint("atomj").ok_or("missing atomj")?;
+    let kc = block.get_uint("atomk").ok_or("missing atomk")?;
+    let lc = block.get_uint("atoml").ok_or("missing atoml")?;
+    let tc = block.get_string("type").ok_or("missing type")?;
+
+    let n = ic.len();
+    let (mut ai, mut aj, mut ak, mut al, mut terms) = (
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+    );
+
+    for idx in 0..n {
+        let p = type_map
+            .get(tc[idx].as_str())
+            .ok_or_else(|| format!("dihedral_periodic: unknown type '{}'", tc[idx]))?;
+        ai.push(ic[idx] as usize);
+        aj.push(jc[idx] as usize);
+        ak.push(kc[idx] as usize);
+        al.push(lc[idx] as usize);
+        terms.push(collect_terms(p, tc[idx].as_str())?);
+    }
+    Ok(Box::new(DihedralPeriodic {
+        atom_i: ai,
+        atom_j: aj,
+        atom_k: ak,
+        atom_l: al,
+        terms,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quad(phi: F) -> Vec<F> {
+        let (s, c) = phi.sin_cos();
+        vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, c, s]
+    }
+
+    fn single(terms: Vec<Term>) -> DihedralPeriodic {
+        DihedralPeriodic {
+            atom_i: vec![0],
+            atom_j: vec![1],
+            atom_k: vec![2],
+            atom_l: vec![3],
+            terms: vec![terms],
+        }
+    }
+
+    fn term(k: F, n: F, d_deg: F) -> Term {
+        Term {
+            k,
+            n,
+            d: d_deg.to_radians(),
+        }
+    }
+
+    #[test]
+    fn single_term_energy() {
+        // K[1+cos(nφ−d)], n=1,d=0: E(0)=2K, E(π)=0.
+        let p = single(vec![term(1.5, 1.0, 0.0)]);
+        assert!((p.calc_energy_forces(&quad(0.0)).0 - 3.0).abs() < 1e-9);
+        assert!(p.calc_energy_forces(&quad(std::f64::consts::PI)).0.abs() < 1e-9);
+    }
+
+    #[test]
+    fn multi_term_energy_sums() {
+        // Two terms add: at φ=0, E = K1[1+cos(−d1)] + K2[1+cos(−d2)].
+        let t = vec![term(1.0, 1.0, 0.0), term(0.5, 2.0, 180.0)];
+        let e = single(t).calc_energy_forces(&quad(0.0)).0;
+        // K1[1+1] + K2[1+cos(180°)] = 2.0 + 0.5*0 = 2.0
+        assert!((e - 2.0).abs() < 1e-9, "got {e}");
+    }
+
+    #[test]
+    fn collect_terms_indexed_and_single() {
+        let mut p = Params::new();
+        p.set("k1", 1.0);
+        p.set("n1", 1.0);
+        p.set("d1", 0.0);
+        p.set("k2", 0.5);
+        p.set("n2", 2.0);
+        p.set("d2", 180.0);
+        let t = collect_terms(&p, "x").unwrap();
+        assert_eq!(t.len(), 2);
+
+        let mut q = Params::new();
+        q.set("k", 2.0);
+        q.set("n", 3.0);
+        let t2 = collect_terms(&q, "y").unwrap();
+        assert_eq!(t2.len(), 1);
+        assert_eq!(t2[0].n, 3.0);
+    }
+
+    #[test]
+    fn numerical_gradient_multiterm() {
+        let pot = single(vec![
+            term(1.3, 1.0, 0.0),
+            term(-0.7, 2.0, 180.0),
+            term(0.4, 3.0, 0.0),
+        ]);
+        let coords: Vec<F> = vec![0.1, 1.0, 0.2, 0.0, 0.0, 0.0, 1.0, 0.0, -0.1, 1.2, -0.8, 0.5];
+        let (_, forces) = pot.calc_energy_forces(&coords);
+        let h = 1e-6;
+        for d in 0..coords.len() {
+            let mut cp = coords.clone();
+            let mut cm = coords.clone();
+            cp[d] += h;
+            cm[d] -= h;
+            let ep = pot.calc_energy_forces(&cp).0;
+            let em = pot.calc_energy_forces(&cm).0;
+            let fd = -(ep - em) / (2.0 * h);
+            assert!(
+                (forces[d] - fd).abs() < 1e-5,
+                "comp {d}: analytic {} vs fd {fd}",
+                forces[d]
+            );
+        }
+    }
+
+    #[test]
+    fn newtons_third_law() {
+        let pot = single(vec![term(1.0, 1.0, 0.0), term(0.5, 2.0, 90.0)]);
+        let coords: Vec<F> = vec![0.1, 1.0, 0.2, 0.0, 0.0, 0.0, 1.0, 0.0, -0.1, 1.2, -0.8, 0.5];
+        let (_, f) = pot.calc_energy_forces(&coords);
+        for dim in 0..3 {
+            let s: F = (0..4).map(|a| f[a * 3 + dim]).sum();
+            assert!(s.abs() < 1e-9, "dim {dim} force sum {s}");
+        }
+    }
+}

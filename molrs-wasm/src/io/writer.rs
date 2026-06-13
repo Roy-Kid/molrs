@@ -13,11 +13,11 @@
 //! | `"lammps-dump"` / `"lammpstrj"` | LAMMPS dump | columns from atoms block |
 
 use crate::core::frame::Frame;
-use molrs_io::data::lammps_data::LAMMPSDataWriter;
-use molrs_io::data::pdb::PDBWriter;
-use molrs_io::data::xyz::XYZFrameWriter;
-use molrs_io::trajectory::lammps_dump::LAMMPSDumpWriter;
-use molrs_io::writer::{FrameWriter, Writer};
+use molrs::io::data::lammps_data::LAMMPSDataWriter;
+use molrs::io::data::pdb::PDBWriter;
+use molrs::io::data::xyz::XYZFrameWriter;
+use molrs::io::trajectory::lammps_dump::LAMMPSDumpWriter;
+use molrs::io::writer::{FrameWriter, Writer};
 use wasm_bindgen::prelude::*;
 
 /// Serialize a [`Frame`] to a string in the specified format.

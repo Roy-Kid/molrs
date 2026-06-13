@@ -1,6 +1,6 @@
 //! Python wrappers for `molrs-compute::dielectric`.
 
-use molrs_compute::dielectric as diel;
+use molrs::compute::dielectric as diel;
 use numpy::{
     IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3,
 };

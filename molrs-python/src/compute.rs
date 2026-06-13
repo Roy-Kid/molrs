@@ -22,14 +22,14 @@
 use crate::frame::PyFrame;
 use crate::helpers::NpF;
 
-use molrs::spatial::neighbors::NeighborList;
-use molrs::store::frame::Frame as CoreFrame;
-use molrs::types::F;
-use molrs_compute::{
+use molrs::compute::{
     COMResult, CenterOfMass, Cluster, ClusterCenters, ClusterCentersResult, ClusterResult, Compute,
     GyrationTensor, InertiaTensor, KMeans, KMeansResult, MSD, MSDResult, MSDTimeSeries, Pca2,
     PcaResult, RDF, RDFResult, RadiusOfGyration, RgResult,
 };
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame::Frame as CoreFrame;
+use molrs::types::F;
 
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayDyn, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
@@ -864,7 +864,7 @@ impl PyDescriptorRow {
     }
 }
 
-impl molrs_compute::DescriptorRow for PyDescriptorRow {
+impl molrs::compute::DescriptorRow for PyDescriptorRow {
     fn as_row(&self) -> &[F] {
         &self.row
     }

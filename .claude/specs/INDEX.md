@@ -2,6 +2,7 @@
 
 One row per spec produced by `/mol:spec`. Newest on top.
 
+| 2026-06-13 | [workspace-single-crate-merge](workspace-single-crate-merge.md) | code-complete | molrs (all crates) | 把 7 个成员 crate（core/io/signal/compute/ff/conformer + 门面）合并成单个 `molcrafts-molrs`，子系统改 feature-gated **模块**（源码物理吸收，~807 处引用→`crate::` 路径、166 文件）；binder（ffi/cxxapi/wasm/python）+ 外部 molpack **重指**到合并 crate + feature；公开 API 表面零变化；publish.yml 7 个 cargo-publish→1。**必须原子落地**（前向增量会构成依赖环）；子 crate 名不 yank（molpack 0.1.0 pin 仍解析），`molcrafts-molrs` 走 breaking 版本跳 |
 | 2026-06-12 | [core-drop-petgraph](core-drop-petgraph.md) | approved | molrs-core | 从 molrs-core 移除 petgraph：`Topology`/`topo_distances`/`find_rings` 改在 MolGraph 原生邻接快照上跑（angles/dihedrals/impropers 枚举、BFS 距离、flood-fill 连通分量、Horton SSSR 全是手写，仅 3 处 `petgraph::algo::connected_components` 计数需换原生），删 `petgraph = "0.8"`；行为逐字节等价，topo_distances 不退化（PoC 1.4–1.5×）；取代 topology-paths-molgraph-01；SMARTS VF2（molrs-io）留作独立 vendor spec |
 | 2026-06-12 | [gaff-typifier-01-parser](gaff-typifier-01-parser.md) | approved | molrs-ff | GAFF M1 chain 1/4：原生 gaff.dat(GAFF 1.x) reader → molrs ForceField/Params + 编译期内嵌（镜像 MMFF94_XML，留在 molrs-ff）；gaff.dat 从 openmmforcefields(MIT) vendored+版本钉死，参数对照其转换 ffxml 作 AmberTools-free ground truth；覆盖 MASS/BOND/ANGLE/DIHEDRAL/IMPROPER/NONBON；负周期多项二面角续行累加 + improper 无 IDIVF 为载重不变量 |
 | 2026-06-12 | [gaff-typifier-02-typing](gaff-typifier-02-typing.md) | approved | molrs-ff | GAFF M1 chain 2/4：非共轭原子分型引擎（H/C/N/O/S/P/卤素局部判定），镜像 typifier/mmff，复用 rings/aromaticity/hybrid；ATOMTYPE_GFF.DEF 为基准；ca 入 nb 出的刻意非对称；共轭/杂芳输入必须报错不静默误型 |
