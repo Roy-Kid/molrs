@@ -6,7 +6,7 @@
 //! persistence). Each returns a plain ``dict`` of NumPy arrays / scalars,
 //! matching the dielectric binding style.
 
-use molrs_compute::{jacf, onsager, persist};
+use molrs::compute::{jacf, onsager, persist};
 use numpy::{IntoPyArray, PyReadonlyArray2, PyReadonlyArray3};
 use pyo3::prelude::*;
 

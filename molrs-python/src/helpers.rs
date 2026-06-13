@@ -65,8 +65,8 @@ pub fn molrs_error_to_pyerr(e: molrs::MolRsError) -> PyErr {
     PyValueError::new_err(e.to_string())
 }
 
-/// Convert a [`molrs_io::smiles::SmilesError`] to a Python `ValueError`.
-pub fn smiles_error_to_pyerr(e: molrs_io::smiles::SmilesError) -> PyErr {
+/// Convert a [`molrs::io::smiles::SmilesError`] to a Python `ValueError`.
+pub fn smiles_error_to_pyerr(e: molrs::io::smiles::SmilesError) -> PyErr {
     PyValueError::new_err(e.to_string())
 }
 

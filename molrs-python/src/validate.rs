@@ -1,5 +1,5 @@
 //! Thin Python bindings for the dielectric/conductivity spectrum validation
-//! checks. All numerics live in `molrs_compute::validate`; this module only
+//! checks. All numerics live in `molrs::compute::validate`; this module only
 //! marshals numpy arrays in and builds the result dict out.
 
 use numpy::{IntoPyArray, PyReadonlyArray1};
@@ -7,7 +7,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyAnyMethods, PyDict, PyDictMethods};
 
-use molrs_compute::validate;
+use molrs::compute::validate;
 
 #[pyfunction]
 pub(crate) fn validate_kramers_kronig_check<'py>(

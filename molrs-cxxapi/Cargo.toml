@@ -15,11 +15,12 @@ crate-type = ["staticlib", "rlib"]
 
 [features]
 default = ["zarr"]
-zarr = ["molrs_io/filesystem"]
+zarr = ["molrs/filesystem"]
 
 [dependencies]
-molrs = { workspace = true }
-molrs_io = { workspace = true }
+# The merged crate, imported under the extern name `molrs`; `io` gives the file
+# I/O module this bridge relies on.
+molrs = { path = "../molrs", package = "molcrafts-molrs", version = "0.1.0", default-features = false, features = ["io"] }
 molrs-ffi = { path = "../molrs-ffi", package = "molcrafts-molrs-ffi", version = "0.1.0" }
 cxx = "1"
 ndarray = "0.17"

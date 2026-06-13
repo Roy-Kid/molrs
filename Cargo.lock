@@ -940,49 +940,17 @@ dependencies = [
 name = "molcrafts-molrs"
 version = "0.1.0"
 dependencies = [
- "molcrafts-molrs-compute",
- "molcrafts-molrs-conformer",
- "molcrafts-molrs-core",
- "molcrafts-molrs-ff",
- "molcrafts-molrs-io",
- "molcrafts-molrs-signal",
-]
-
-[[package]]
-name = "molcrafts-molrs-compute"
-version = "0.1.0"
-dependencies = [
  "criterion",
- "molcrafts-molrs-core",
- "molcrafts-molrs-signal",
- "ndarray",
- "rand 0.10.1",
- "rayon",
- "rustfft",
-]
-
-[[package]]
-name = "molcrafts-molrs-conformer"
-version = "0.1.0"
-dependencies = [
- "molcrafts-molrs-core",
- "molcrafts-molrs-ff",
- "molcrafts-molrs-io",
- "ndarray",
- "once_cell",
- "rand 0.10.1",
-]
-
-[[package]]
-name = "molcrafts-molrs-core"
-version = "0.1.0"
-dependencies = [
- "criterion",
+ "flate2",
  "libm",
  "ndarray",
  "ndarray-linalg",
+ "once_cell",
+ "petgraph",
  "rand 0.10.1",
  "rayon",
+ "roxmltree",
+ "rustfft",
  "serde",
  "serde_json",
  "slotmap",
@@ -997,54 +965,17 @@ version = "0.1.0"
 dependencies = [
  "cxx",
  "cxx-build",
- "molcrafts-molrs-core",
+ "molcrafts-molrs",
  "molcrafts-molrs-ffi",
- "molcrafts-molrs-io",
  "ndarray",
-]
-
-[[package]]
-name = "molcrafts-molrs-ff"
-version = "0.1.0"
-dependencies = [
- "libm",
- "molcrafts-molrs-core",
- "ndarray",
- "rayon",
- "roxmltree",
- "rustfft",
- "serde_json",
 ]
 
 [[package]]
 name = "molcrafts-molrs-ffi"
 version = "0.1.0"
 dependencies = [
- "molcrafts-molrs-core",
+ "molcrafts-molrs",
  "slotmap",
-]
-
-[[package]]
-name = "molcrafts-molrs-io"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "molcrafts-molrs-core",
- "ndarray",
- "once_cell",
- "petgraph",
- "serde_json",
- "tempfile",
- "zarrs",
-]
-
-[[package]]
-name = "molcrafts-molrs-signal"
-version = "0.1.0"
-dependencies = [
- "ndarray",
- "rand 0.10.1",
- "rustfft",
 ]
 
 [[package]]

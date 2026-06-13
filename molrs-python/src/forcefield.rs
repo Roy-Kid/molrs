@@ -18,12 +18,12 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use molrs_ff::ForceField;
-use molrs_ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
-use molrs_ff::potential::{Potentials, extract_coords};
-use molrs_ff::typifier::Typifier;
-use molrs_ff::typifier::mmff::MMFFTypifier;
-use molrs_ff::{LBFGS, LbfgsConfig, OptReport};
+use molrs::ff::ForceField;
+use molrs::ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
+use molrs::ff::potential::{Potentials, extract_coords};
+use molrs::ff::typifier::Typifier;
+use molrs::ff::typifier::mmff::MMFFTypifier;
+use molrs::ff::{LBFGS, LbfgsConfig, OptReport};
 
 use crate::frame::PyFrame;
 use crate::helpers::{NpF, py_value_err};
@@ -550,7 +550,7 @@ pub fn build_mmff_potentials_py(mol: &PyAtomistic, variant: &str) -> PyResult<Py
 #[pyfunction]
 #[pyo3(name = "read_forcefield_xml")]
 pub fn read_forcefield_xml_py(path: &str) -> PyResult<PyForceField> {
-    let forcefield = molrs_ff::read_forcefield_xml(path)
+    let forcefield = molrs::ff::read_forcefield_xml(path)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     Ok(PyForceField { inner: forcefield })
 }
@@ -992,7 +992,7 @@ impl PyForceField {
 #[pyfunction]
 #[pyo3(name = "read_forcefield_xml_str")]
 pub fn read_forcefield_xml_str_py(xml: &str) -> PyResult<PyForceField> {
-    let forcefield = molrs_ff::read_forcefield_xml_str(xml)
+    let forcefield = molrs::ff::read_forcefield_xml_str(xml)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     Ok(PyForceField { inner: forcefield })
 }
@@ -1023,8 +1023,8 @@ pub fn read_forcefield_xml_str_py(xml: &str) -> PyResult<PyForceField> {
 #[pyfunction]
 #[pyo3(name = "read_opls_xml")]
 pub fn read_opls_xml_py(path: &str) -> PyResult<PyForceField> {
-    use molrs_ff::ForceFieldReader;
-    let forcefield = molrs_ff::OplsXmlReader::new()
+    use molrs::ff::ForceFieldReader;
+    let forcefield = molrs::ff::OplsXmlReader::new()
         .read(path)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     Ok(PyForceField { inner: forcefield })
@@ -1035,8 +1035,8 @@ pub fn read_opls_xml_py(path: &str) -> PyResult<PyForceField> {
 #[pyfunction]
 #[pyo3(name = "read_opls_xml_str")]
 pub fn read_opls_xml_str_py(xml: &str) -> PyResult<PyForceField> {
-    use molrs_ff::ForceFieldReader;
-    let forcefield = molrs_ff::OplsXmlReader::new()
+    use molrs::ff::ForceFieldReader;
+    let forcefield = molrs::ff::OplsXmlReader::new()
         .read_str(xml)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     Ok(PyForceField { inner: forcefield })

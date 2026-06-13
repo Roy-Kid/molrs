@@ -20,7 +20,7 @@
 
 use pyo3::prelude::*;
 
-use molrs_conformer::{Conformer, ConformerOptions, ConformerSpeed, StageKind};
+use molrs::conformer::{Conformer, ConformerOptions, ConformerSpeed, StageKind};
 
 use crate::helpers::molrs_error_to_pyerr;
 use crate::molgraph::PyAtomistic;

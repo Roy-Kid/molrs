@@ -4,7 +4,7 @@
 //! same pattern as `io::read_pdb` etc.) and then re-exported via a Python
 //! `molrs/signal.py` facade.
 
-use molrs_signal::{self as sig, WindowType};
+use molrs::signal::{self as sig, WindowType};
 use numpy::{IntoPyArray, PyArray1, PyArrayDyn, PyReadonlyArray1, PyReadonlyArrayDyn};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;

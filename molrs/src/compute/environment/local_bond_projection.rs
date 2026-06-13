@@ -1,0 +1,295 @@
+//! Projection of neighbor bond vectors onto a set of reference directions.
+//!
+//! Mirrors `freud.environment.LocalBondProjection`
+//! ([source](https://github.com/glotzerlab/freud/blob/main/freud/environment/LocalBondProjection.cc)).
+//!
+//! For each neighbor pair `(i, j)` and each reference direction `ê_k`,
+//! compute `dot_k = r̂_ij · ê_k` where `r̂_ij = (r_j − r_i) / |r_j − r_i|`.
+//! The result is a `(n_pairs × n_proj_vectors)` table of cosines, returned
+//! alongside its complement `1 − dot` for callers that prefer the
+//! "deviation from the reference" reading.
+//!
+//! freud additionally supports per-particle orientations (rotating each
+//! reference direction by the particle's quaternion before projection);
+//! that flavour is exposed via the `with_query_orientations` builder.
+
+use molrs::spatial::neighbors::NeighborList;
+use molrs::store::frame_access::FrameAccess;
+use molrs::types::F;
+use ndarray::Array2;
+
+use crate::compute::error::ComputeError;
+use crate::compute::result::ComputeResult;
+use crate::compute::traits::Compute;
+
+/// Per-frame projection result.
+#[derive(Debug, Clone, Default)]
+pub struct LocalBondProjectionResult {
+    /// `(n_pairs, n_proj_vectors)` cosines.
+    pub projections: Array2<F>,
+}
+
+impl ComputeResult for LocalBondProjectionResult {}
+
+/// `LocalBondProjection` analyzer.
+#[derive(Debug, Clone, Default)]
+pub struct LocalBondProjection {
+    /// If true, rotate each reference direction by the query-point's
+    /// quaternion before taking the dot product.
+    use_orientations: bool,
+}
+
+impl LocalBondProjection {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_query_orientations(mut self, on: bool) -> Self {
+        self.use_orientations = on;
+        self
+    }
+}
+
+/// `Args` for [`LocalBondProjection`].
+pub struct LocalBondProjectionArgs<'a> {
+    pub nlists: &'a [NeighborList],
+    /// Reference directions (unit vectors recommended). Shared across all
+    /// frames and all query points.
+    pub proj_vectors: &'a [[F; 3]],
+    /// Optional per-frame, per-query-point quaternions `(w, x, y, z)`.
+    /// Required iff `use_orientations = true`.
+    pub query_orientations: Option<&'a [Vec<[F; 4]>]>,
+}
+
+#[inline]
+fn rotate_by_quat(q: [F; 4], v: [F; 3]) -> [F; 3] {
+    // Standard q · v · q* rotation. `q = (w, x, y, z)`.
+    let (w, x, y, z) = (q[0], q[1], q[2], q[3]);
+    // Hamilton product trick: r = v + 2 q_vec × (q_vec × v + w · v)
+    let tx = 2.0 * (y * v[2] - z * v[1]);
+    let ty = 2.0 * (z * v[0] - x * v[2]);
+    let tz = 2.0 * (x * v[1] - y * v[0]);
+    [
+        v[0] + w * tx + (y * tz - z * ty),
+        v[1] + w * ty + (z * tx - x * tz),
+        v[2] + w * tz + (x * ty - y * tx),
+    ]
+}
+
+impl Compute for LocalBondProjection {
+    type Args<'a> = LocalBondProjectionArgs<'a>;
+    type Output = Vec<LocalBondProjectionResult>;
+
+    fn compute<'a, FA: FrameAccess + Sync + 'a>(
+        &self,
+        frames: &[&'a FA],
+        args: LocalBondProjectionArgs<'a>,
+    ) -> Result<Vec<LocalBondProjectionResult>, ComputeError> {
+        if frames.is_empty() {
+            return Err(ComputeError::EmptyInput);
+        }
+        if args.nlists.len() != frames.len() {
+            return Err(ComputeError::DimensionMismatch {
+                expected: frames.len(),
+                got: args.nlists.len(),
+                what: "neighbor-list count",
+            });
+        }
+        if args.proj_vectors.is_empty() {
+            return Err(ComputeError::EmptyInput);
+        }
+        if self.use_orientations {
+            match args.query_orientations {
+                Some(q) if q.len() == frames.len() => {}
+                _ => {
+                    return Err(ComputeError::DimensionMismatch {
+                        expected: frames.len(),
+                        got: args.query_orientations.map(|q| q.len()).unwrap_or(0),
+                        what: "query_orientations frame count",
+                    });
+                }
+            }
+        }
+        let n_proj = args.proj_vectors.len();
+
+        // Pre-normalise reference vectors.
+        let refs: Vec<[F; 3]> = args
+            .proj_vectors
+            .iter()
+            .map(|v| {
+                let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                if n == 0.0 {
+                    [0.0, 0.0, 0.0]
+                } else {
+                    [v[0] / n, v[1] / n, v[2] / n]
+                }
+            })
+            .collect();
+
+        let mut out = Vec::with_capacity(frames.len());
+        for (k, nl) in args.nlists.iter().enumerate() {
+            let vectors = nl.vectors();
+            let i_idx = nl.query_point_indices();
+            let n_pairs = nl.n_pairs();
+            let mut p = Array2::<F>::zeros((n_pairs, n_proj));
+            for pk in 0..n_pairs {
+                let dx = vectors[[pk, 0]];
+                let dy = vectors[[pk, 1]];
+                let dz = vectors[[pk, 2]];
+                let r = (dx * dx + dy * dy + dz * dz).sqrt();
+                if r == 0.0 {
+                    continue;
+                }
+                let bond = [dx / r, dy / r, dz / r];
+                let qrot = if self.use_orientations {
+                    // Already validated; unwrap is safe.
+                    Some(args.query_orientations.unwrap()[k][i_idx[pk] as usize])
+                } else {
+                    None
+                };
+                for (j, ref_v) in refs.iter().enumerate() {
+                    let dir = match qrot {
+                        None => *ref_v,
+                        Some(q) => rotate_by_quat(q, *ref_v),
+                    };
+                    let dot = bond[0] * dir[0] + bond[1] * dir[1] + bond[2] * dir[2];
+                    p[[pk, j]] = dot;
+                }
+            }
+            out.push(LocalBondProjectionResult { projections: p });
+        }
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use molrs::Frame;
+    use molrs::spatial::neighbors::{LinkCell, NbListAlgo};
+    use molrs::spatial::region::simbox::SimBox;
+    use molrs::store::block::Block;
+    use ndarray::{Array1 as A1, array};
+
+    const TOL: F = 1e-12;
+
+    fn frame_with(positions: &[[F; 3]], box_len: F) -> Frame {
+        let x = A1::from_iter(positions.iter().map(|p| p[0]));
+        let y = A1::from_iter(positions.iter().map(|p| p[1]));
+        let z = A1::from_iter(positions.iter().map(|p| p[2]));
+        let mut block = Block::new();
+        block.insert("x", x.into_dyn()).unwrap();
+        block.insert("y", y.into_dyn()).unwrap();
+        block.insert("z", z.into_dyn()).unwrap();
+        let mut frame = Frame::new();
+        frame.insert("atoms", block);
+        frame.simbox =
+            Some(SimBox::cube(box_len, array![0.0 as F, 0.0 as F, 0.0 as F], [false; 3]).unwrap());
+        frame
+    }
+
+    fn build_nlist(frame: &Frame, cutoff: F) -> NeighborList {
+        let xp = frame
+            .get("atoms")
+            .unwrap()
+            .get("x")
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
+            .unwrap()
+            .as_slice()
+            .unwrap()
+            .to_vec();
+        let yp = frame
+            .get("atoms")
+            .unwrap()
+            .get("y")
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
+            .unwrap()
+            .as_slice()
+            .unwrap()
+            .to_vec();
+        let zp = frame
+            .get("atoms")
+            .unwrap()
+            .get("z")
+            .and_then(<F as molrs::store::block::BlockDtype>::from_column)
+            .unwrap()
+            .as_slice()
+            .unwrap()
+            .to_vec();
+        let n = xp.len();
+        let mut pos = ndarray::Array2::<F>::zeros((n, 3));
+        for i in 0..n {
+            pos[[i, 0]] = xp[i];
+            pos[[i, 1]] = yp[i];
+            pos[[i, 2]] = zp[i];
+        }
+        let simbox = frame.simbox.as_ref().unwrap();
+        let mut lc = LinkCell::new().cutoff(cutoff);
+        lc.build(pos.view(), simbox);
+        lc.query().clone()
+    }
+
+    #[test]
+    fn bond_along_x_projects_to_one_on_x_axis() {
+        let frame = frame_with(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], 10.0);
+        let nl = build_nlist(&frame, 1.5);
+        let r = &LocalBondProjection::new()
+            .compute(
+                &[&frame],
+                LocalBondProjectionArgs {
+                    nlists: std::slice::from_ref(&nl),
+                    proj_vectors: &[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    query_orientations: None,
+                },
+            )
+            .unwrap()[0];
+        assert_eq!(r.projections.dim(), (1, 2));
+        // Bond r̂ = (1, 0, 0). Project on +x → 1, on +y → 0.
+        assert!((r.projections[[0, 0]] - 1.0).abs() < TOL);
+        assert!((r.projections[[0, 1]]).abs() < TOL);
+    }
+
+    #[test]
+    fn rotation_changes_projection() {
+        let frame = frame_with(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], 10.0);
+        let nl = build_nlist(&frame, 1.5);
+        // 90° rotation about z: q = (cos(45°), 0, 0, sin(45°))
+        let q = [
+            std::f64::consts::FRAC_PI_4.cos(),
+            0.0,
+            0.0,
+            std::f64::consts::FRAC_PI_4.sin(),
+        ];
+        // Without rotation: bond=(1,0,0) projected on +x → 1.
+        // With rotation: +x ref becomes +y in lab frame → dot with (1,0,0) → 0.
+        let r = &LocalBondProjection::new()
+            .with_query_orientations(true)
+            .compute(
+                &[&frame],
+                LocalBondProjectionArgs {
+                    nlists: std::slice::from_ref(&nl),
+                    proj_vectors: &[[1.0, 0.0, 0.0]],
+                    query_orientations: Some(&[vec![q, q]]),
+                },
+            )
+            .unwrap()[0];
+        assert!(r.projections[[0, 0]].abs() < 1e-12);
+    }
+
+    #[test]
+    fn empty_proj_vectors_error() {
+        let frame = frame_with(&[[0.0, 0.0, 0.0]], 10.0);
+        let nl = build_nlist(&frame, 1.0);
+        let err = LocalBondProjection::new()
+            .compute(
+                &[&frame],
+                LocalBondProjectionArgs {
+                    nlists: std::slice::from_ref(&nl),
+                    proj_vectors: &[],
+                    query_orientations: None,
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, ComputeError::EmptyInput));
+    }
+}

@@ -33,20 +33,20 @@
 //! into a JS-owned typed array before invoking [`parseRangeInInput`](
 //! `WasmLammpsDumpStream::parse_range_in_input`) again.
 
+use molrs::io::streaming::{FrameIndexBuilder, FrameIndexEntry as RsFrameIndexEntry};
 use molrs::store::block::{Column, DType};
 use molrs::store::frame::Frame as RsFrame;
-use molrs_io::streaming::{FrameIndexBuilder, FrameIndexEntry as RsFrameIndexEntry};
 use wasm_bindgen::prelude::*;
 
 // Per-format builders + parsers. We re-import each format's
 // `parse_frame_bytes` under a local alias so the macro can dispatch.
-use molrs_io::data::lammps_data::{
+use molrs::io::data::lammps_data::{
     LammpsDataIndexBuilder, parse_frame_bytes as parse_lammps_data_frame_bytes,
 };
-use molrs_io::data::pdb::{PdbIndexBuilder, parse_frame_bytes as parse_pdb_frame_bytes};
-use molrs_io::data::sdf::{SdfIndexBuilder, parse_frame_bytes as parse_sdf_frame_bytes};
-use molrs_io::data::xyz::{XyzIndexBuilder, parse_frame_bytes as parse_xyz_frame_bytes};
-use molrs_io::trajectory::lammps_dump::{
+use molrs::io::data::pdb::{PdbIndexBuilder, parse_frame_bytes as parse_pdb_frame_bytes};
+use molrs::io::data::sdf::{SdfIndexBuilder, parse_frame_bytes as parse_sdf_frame_bytes};
+use molrs::io::data::xyz::{XyzIndexBuilder, parse_frame_bytes as parse_xyz_frame_bytes};
+use molrs::io::trajectory::lammps_dump::{
     LammpsDumpIndexBuilder, parse_frame_bytes as parse_lammps_dump_frame_bytes,
 };
 
