@@ -24,7 +24,7 @@
 
 </div>
 
-molrs is a Rust workspace for molecular modeling: a column-oriented data model, format readers and writers, trajectory analysis, force fields, and 3D structure generation. The same code runs natively, from Python (PyO3), and in the browser (WASM).
+molrs is a Rust library for molecular modeling: a column-oriented data model, format readers and writers, trajectory analysis, force fields, and 3D structure generation. The same code runs natively, from Python (PyO3), and in the browser (WASM).
 
 > **Under active development.** Public APIs may change between minor releases.
 
@@ -38,16 +38,20 @@ By becoming the dependable core the rest of the MolCrafts ecosystem builds on, m
 
 ## Capabilities
 
-| Crate | Capability |
-|-------|------------|
-| `molcrafts-molrs` | Unified façade — re-exports every sub-crate under one namespace, opt in via feature flags |
-| `molcrafts-molrs-core` | Frame / Block column store, MolGraph topology, elements, rings, stereochemistry, Gasteiger charges, hydrogen perception, simulation boxes, neighbor search (LinkCell / brute force) |
-| `molcrafts-molrs-io` | Readers / writers for PDB, XYZ, mol2, SDF, CIF, GRO, POSCAR, CHGCAR, Cube, LAMMPS data/dump, DCD, Zarr V3 trajectories — plus a SMILES/SMARTS parser |
-| `molcrafts-molrs-compute` | Trajectory analysis: RDF, MSD, clustering, gyration / inertia tensors, PCA, k-means, density, diffraction, PMFT, order parameters, dielectric, environment matching |
-| `molcrafts-molrs-ff` | Force fields and potentials — MMFF94 bond/angle/torsion/oop/vdW/electrostatics, LJ, PME — with an atom typifier |
-| `molcrafts-molrs-conformer` | 3D conformer generation: distance geometry, fragment assembly, optimization, rotor search, stereo guards |
-| `molcrafts-molrs-signal` | Signal processing — FFT-based autocorrelation, window functions, frequency grids |
-| `molcrafts-molrs-cxxapi` | CXX bridge for zero-copy integration with Atomiverse C++ |
+One crate, `molcrafts-molrs`, whose sub-systems are feature-gated modules
+(`core` is always on; `full` enables everything):
+
+| Module (feature) | Capability |
+|------------------|------------|
+| `core` *(always on)* | Frame / Block column store, MolGraph topology, elements, rings, stereochemistry, Gasteiger charges, hydrogen perception, simulation boxes, neighbor search (LinkCell / brute force) |
+| `io` | Readers / writers for PDB, XYZ, mol2, SDF, CIF, GRO, POSCAR, CHGCAR, Cube, LAMMPS data/dump, DCD, Zarr V3 trajectories (SMILES/SMARTS parser under the `smiles` feature) |
+| `compute` | Trajectory analysis: RDF, MSD, clustering, gyration / inertia tensors, PCA, k-means, density, diffraction, PMFT, order parameters, dielectric, environment matching |
+| `ff` | Force fields and potentials — MMFF94 bond/angle/torsion/oop/vdW/electrostatics, LJ, PME — with an atom typifier |
+| `conformer` | 3D conformer generation: distance geometry, fragment assembly, optimization, rotor search, stereo guards |
+| `signal` | Signal processing — FFT-based autocorrelation, window functions, frequency grids |
+
+A separate `molcrafts-molrs-cxxapi` crate (built from source, not published)
+provides a CXX bridge for zero-copy integration with Atomiverse C++.
 
 ## Install
 
@@ -58,7 +62,7 @@ cargo add molcrafts-molrs
 Opt into sub-systems via feature flags; `full` enables everything:
 
 ```toml
-molcrafts-molrs = { version = "0.0.16", features = ["io", "smiles", "conformer"] }
+molcrafts-molrs = { version = "0.1", features = ["io", "smiles", "conformer"] }
 ```
 
 Python: `pip install molcrafts-molrs` (import as `molrs`). Browser: `npm install @molcrafts/molrs`.
@@ -79,7 +83,7 @@ them automatically on the first build.
 ```bash
 git clone https://github.com/MolCrafts/molrs.git
 cd molrs
-cargo build --workspace            # compile every native crate
+cargo build --workspace            # compile the library + the C bridge crate
 bash scripts/fetch-test-data.sh    # fetch test fixtures (first run only)
 cargo test --all-features          # run the test suite
 ```
