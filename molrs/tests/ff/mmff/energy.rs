@@ -456,7 +456,9 @@ fn generic_path_total_energy_matches_rdkit() {
         let delta = (got - want).abs();
         println!("{name:12} generic={got:14.6}  rdkit={want:14.6}  d={delta:.3e}");
         if delta > ENERGY_TOL {
-            fails.push(format!("{name}: generic={got:.6} rdkit={want:.6} d={delta:.3e}"));
+            fails.push(format!(
+                "{name}: generic={got:.6} rdkit={want:.6} d={delta:.3e}"
+            ));
         }
     }
     assert!(

@@ -52,7 +52,8 @@ pub(crate) fn annotate_mmff(mol: &Atomistic, params: &MMFFParams) -> Result<Atom
     // RDKit-validated per-instance parameter resolution (reused from the energy
     // path) when baking numeric parameters onto each interaction below.
     let topo = {
-        let base = crate::ff::mmff::topo::Topo::build(mol).map_err(|s| format!("MMFF Topo: {s}"))?;
+        let base =
+            crate::ff::mmff::topo::Topo::build(mol).map_err(|s| format!("MMFF Topo: {s}"))?;
         crate::ff::mmff::aromaticity::set_mmff_aromaticity(&base)
     };
     let types_u8: Vec<u8> = (0..atom_ids.len()).map(|i| props.atom_type(i)).collect();
@@ -91,8 +92,10 @@ pub(crate) fn annotate_mmff(mol: &Atomistic, params: &MMFFParams) -> Result<Atom
         let (kb, r0) = crate::ff::mmff::energy::params::bond_params(&topo, &types_u8, ia, ib)
             .map(|bp| (bp.kb, bp.r0))
             .unwrap_or((0.0, 0.0));
-        out.set_bond_prop(*bid, "kb", kb).map_err(|e| e.to_string())?;
-        out.set_bond_prop(*bid, "r0", r0).map_err(|e| e.to_string())?;
+        out.set_bond_prop(*bid, "kb", kb)
+            .map_err(|e| e.to_string())?;
+        out.set_bond_prop(*bid, "r0", r0)
+            .map_err(|e| e.to_string())?;
         bt_map.insert((ia.min(ib), ia.max(ib)), bt);
     }
     let get_bt = |ia: usize, ib: usize| -> u32 {
@@ -156,7 +159,11 @@ pub(crate) fn annotate_mmff(mol: &Atomistic, params: &MMFFParams) -> Result<Atom
         if adjacency[center].len() != 3 {
             continue;
         }
-        let (a, b, c) = (adjacency[center][0], adjacency[center][1], adjacency[center][2]);
+        let (a, b, c) = (
+            adjacency[center][0],
+            adjacency[center][1],
+            adjacency[center][2],
+        );
         let center_id = atom_ids[center];
         let Some(label) = resolve_oop_label(
             type_of(center_id),
