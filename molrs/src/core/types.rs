@@ -11,18 +11,12 @@ use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 /// double precision.  Lower precision is only used in accelerator hot-paths
 /// (GPU kernels) or estimation algorithms, and those are handled locally, not
 /// through this project-wide alias.
-///
-/// The former `f64` Cargo feature is deprecated and ignored.
 pub type F = f64;
 
 /// Primary signed integer scalar type — always `i32`.
-///
-/// The former `i64` Cargo feature is deprecated and ignored.
 pub type I = i32;
 
 /// Primary unsigned integer scalar type — always `u32`.
-///
-/// The former `u64` Cargo feature is deprecated and ignored.
 pub type U = u32;
 
 // ---- Fixed-size 3D types ----

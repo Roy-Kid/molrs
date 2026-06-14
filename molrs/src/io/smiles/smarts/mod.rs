@@ -4,7 +4,7 @@
 //! the shared [`chem::ast`](crate::io::smiles::chem::ast) vocabulary with query primitives
 //! (`[C;X4]`, `[c;r6]`, `$(…)`, etc.) and logical operators. This module owns
 //! everything specific to compiling a SMARTS string into a matchable pattern
-//! and running it against a [`MolGraph`](molrs::system::molgraph) target.
+//! and running it against an [`Atomistic`](molrs::system::atomistic) target.
 //!
 //! The SMILES *serialization format* lives in the [`smiles`](crate::io::smiles::smiles)
 //! sibling module. Shared AST vocabulary lives in [`chem`](crate::io::smiles::chem).

@@ -73,14 +73,31 @@ impl Potential for PairLJCut {
     }
 }
 
-/// Construct a [`PairLJCut`] from style params, type params, and Frame topology.
+/// Construct a [`PairLJCut`] from per-atom-type params + a neighbour list.
+///
+/// Reads **per-atom** LJ params (`epsilon`/`sigma` keyed by the atoms block's
+/// `type` column), combines each interacting pair with the **Lorentz-Berthelot**
+/// rule (`ε = √(εᵢεⱼ)`, `σ = (σᵢ + σⱼ)/2`), and scales 1-4-flagged pairs by the
+/// force field's 1-4 LJ weight (projected into `style_params["lj14scale"]` by
+/// `Style::to_potential` from the ForceField's `special_bonds`; default `1.0`).
+///
+/// The `pairs` block is the consumer-built neighbour list
+/// (`atomi`/`atomj`/`is_14`) from `intramolecular_pairs` — 1-2/1-3 neighbours are
+/// already excluded, so only the 1-4 weight is applied here.
 pub fn pair_lj_cut_ctor(
-    _style_params: &Params,
+    style_params: &Params,
     type_params: &[(&str, &Params)],
     frame: &Frame,
 ) -> Result<Box<dyn Potential>, String> {
     let type_map: HashMap<&str, &Params> = type_params.iter().copied().collect();
+    let scale_14 = style_params.get("lj14scale").unwrap_or(1.0) as F;
 
+    let atoms = frame
+        .get("atoms")
+        .ok_or_else(|| "PairLJCut: frame missing \"atoms\" block".to_string())?;
+    let atom_types = atoms
+        .get_string("type")
+        .ok_or_else(|| "PairLJCut: atoms block missing \"type\" column".to_string())?;
     let block = frame
         .get("pairs")
         .ok_or_else(|| "PairLJCut: frame missing \"pairs\" block".to_string())?;
@@ -90,29 +107,39 @@ pub fn pair_lj_cut_ctor(
     let j_col = block
         .get_uint("atomj")
         .ok_or_else(|| "PairLJCut: pairs block missing \"atomj\" column".to_string())?;
-    let type_col = block
-        .get_string("type")
-        .ok_or_else(|| "PairLJCut: pairs block missing \"type\" column".to_string())?;
+    let is_14 = block.get_bool("is_14");
 
-    let mut atom_i = Vec::with_capacity(i_col.len());
-    let mut atom_j = Vec::with_capacity(i_col.len());
-    let mut eps_vec = Vec::with_capacity(i_col.len());
-    let mut sig_vec = Vec::with_capacity(i_col.len());
+    let n = i_col.len();
+    let mut atom_i = Vec::with_capacity(n);
+    let mut atom_j = Vec::with_capacity(n);
+    let mut eps_vec = Vec::with_capacity(n);
+    let mut sig_vec = Vec::with_capacity(n);
 
-    for idx in 0..i_col.len() {
-        let label = &type_col[idx];
-        let params = type_map
-            .get(label.as_str())
-            .ok_or_else(|| format!("PairLJCut: unknown pair type '{}'", label))?;
-        let eps = params
+    let per_atom = |t: &str| -> Result<(F, F), String> {
+        let p = type_map
+            .get(t)
+            .ok_or_else(|| format!("PairLJCut: unknown atom type '{}'", t))?;
+        let eps = p
             .get("epsilon")
-            .ok_or_else(|| format!("PairLJCut type '{}': missing 'epsilon'", label))?
+            .ok_or_else(|| format!("PairLJCut type '{}': missing 'epsilon'", t))?
             as F;
-        let sigma = params
+        let sigma = p
             .get("sigma")
-            .ok_or_else(|| format!("PairLJCut type '{}': missing 'sigma'", label))?
+            .ok_or_else(|| format!("PairLJCut type '{}': missing 'sigma'", t))?
             as F;
+        Ok((eps, sigma))
+    };
 
+    for idx in 0..n {
+        let (eps_i, sig_i) = per_atom(&atom_types[i_col[idx] as usize])?;
+        let (eps_j, sig_j) = per_atom(&atom_types[j_col[idx] as usize])?;
+        // Lorentz-Berthelot combining.
+        let mut eps = (eps_i * eps_j).sqrt();
+        let sigma = 0.5 * (sig_i + sig_j);
+        // Bake the 1-4 weight into epsilon (LJ energy scales linearly with eps).
+        if is_14.is_some_and(|b| b[idx]) {
+            eps *= scale_14;
+        }
         atom_i.push(i_col[idx] as usize);
         atom_j.push(j_col[idx] as usize);
         eps_vec.push(eps);

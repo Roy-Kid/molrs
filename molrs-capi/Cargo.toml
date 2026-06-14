@@ -16,9 +16,6 @@ crate-type = ["cdylib", "staticlib", "lib"]
 
 [features]
 default = []
-f64 = ["molrs/f64"]
-i64 = ["molrs/i64", "molrs-ffi/i64"]
-u64 = ["molrs/u64", "molrs-ffi/u64"]
 
 [dependencies]
 # The merged crate with the ff + io + smiles modules this C API exposes.

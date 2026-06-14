@@ -4,7 +4,7 @@
 //!   1. Programmatic ForceField construction (harmonic bond + angle)
 //!   2. compile(frame) → Potentials → eval(coords)
 //!
-//! Run: cargo run -p molrs-core --example forcefield
+//! Run: cargo run -p molcrafts-molrs --example forcefield --features ff
 
 use molrs::ff::forcefield::ForceField;
 use molrs::ff::potential::extract_coords;

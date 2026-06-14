@@ -1,347 +1,182 @@
-//! MMFF94 frame builder — assembles a typed [`Frame`] from a [`MolGraph`].
+//! MMFF94 atom typing — annotates an [`Atomistic`] with MMFF type labels and
+//! partial charges.
+//!
+//! This is the **typifier** half of MMFF: it takes a molecular graph and returns
+//! a *labeled* graph (atoms typed + charged; bonds/angles/dihedrals/impropers
+//! labeled). Materializing that graph into a [`Frame`](molrs::store::frame::Frame)
+//! for the generic `ForceField::to_potentials` path is the caller's job (via
+//! [`Atomistic::to_frame`]); building the neighbour list is the consumer's. Atom
+//! types + partial charges are reused from the RDKit-validated MMFF front-end
+//! ([`MmffMolProperties`]); the bond/angle/dihedral *labels* (classify) are
+//! MMFF-specific and live here.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use ndarray::Array1;
-
-use molrs::chem::gasteiger::compute_gasteiger_charges;
-use molrs::chem::rings::find_rings;
-use molrs::store::block::Block;
-use molrs::store::frame::Frame;
 use molrs::system::molgraph::PropValue;
-use molrs::system::topology::Topology;
-use molrs::types::{F, U};
 use molrs::{AtomId, Atomistic};
 
-use super::atom_typing::assign_atom_types;
-use super::classify::{classify_angle_type, classify_bond_type, classify_torsion_type};
+use crate::ff::mmff::{MmffMolProperties, MmffVariant};
+
+use super::classify::{
+    classify_angle_type, classify_bond_type, classify_torsion_type, resolve_angle_label,
+    resolve_oop_label,
+};
 use super::params::MMFFParams;
 
-/// Build a [`Frame`] with MMFF94 type labels from a molecular graph.
+/// Annotate `mol` with MMFF94 type labels + partial charges, returning the
+/// labeled [`Atomistic`]:
+/// - atoms: `type` (MMFF numeric type as string) + `charge` (MMFF partial charge)
+/// - bonds: `type` (e.g. `"0_1_5"`)
+/// - angles: `type` / `stbn_type` (e.g. `"0_1_2_1"`) — enumerated
+/// - dihedrals: `type` (e.g. `"0_5_1_1_5"`) — enumerated
+/// - impropers: `type` = canonical MMFF out-of-plane key (e.g. `"0_37_37_37"`);
+///   three Wilson rows per trigonal centre, centre in the `atomj` position
 ///
-/// The resulting frame contains:
-/// - `atoms`: x, y, z, type (MMFF type as string), charge
-/// - `bonds`: atomi, atomj, type (e.g. "0_1_5")
-/// - `angles`: atomi, atomj, atomk, type (e.g. "0_1_2_1"), stbn_type
-/// - `dihedrals`: atomi, atomj, atomk, atoml, type (e.g. "0_5_1_1_5")
-/// - `impropers`: atomi, atomj, atomk, atoml, type (e.g. "1_2_3_4")
-/// - `pairs`: atomi, atomj, is_14
-pub(crate) fn build_mmff_frame(mol: &Atomistic, params: &MMFFParams) -> Result<Frame, String> {
-    // Step 1: Ring detection
-    let ring_info = find_rings(mol);
+/// The caller converts the result with [`Atomistic::to_frame`], builds the
+/// neighbour list, and calls `to_potentials`.
+pub(crate) fn annotate_mmff(mol: &Atomistic, params: &MMFFParams) -> Result<Atomistic, String> {
+    // Reuse the RDKit-validated front-end for atom types + MMFF partial charges.
+    // Its per-atom index is the molecule's atom iteration order — the same order
+    // as `atom_ids` below.
+    let props = MmffMolProperties::compute(mol, MmffVariant::Mmff94).map_err(|e| e.to_string())?;
 
-    // Step 2: Atom type assignment
-    let atom_types = assign_atom_types(mol, &ring_info, params);
-
-    // Step 3: Build stable atom ordering (AtomId → index)
-    let atom_vec: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
-    let atom_to_idx: HashMap<AtomId, usize> = atom_vec
+    let atom_ids: Vec<AtomId> = mol.atoms().map(|(id, _)| id).collect();
+    let idx_of: HashMap<AtomId, usize> = atom_ids
         .iter()
         .enumerate()
         .map(|(i, &id)| (id, i))
         .collect();
-    let n_atoms = atom_vec.len();
+    let type_of = |aid: AtomId| -> u32 { props.atom_type(idx_of[&aid]) as u32 };
 
-    // Step 4: Build topology from edges
-    let edges: Vec<[usize; 2]> = mol
+    // Build the MMFF topology + numeric type vector once, to drive the
+    // RDKit-validated per-instance parameter resolution (reused from the energy
+    // path) when baking numeric parameters onto each interaction below.
+    let topo = {
+        let base = crate::ff::mmff::topo::Topo::build(mol).map_err(|s| format!("MMFF Topo: {s}"))?;
+        crate::ff::mmff::aromaticity::set_mmff_aromaticity(&base)
+    };
+    let types_u8: Vec<u8> = (0..atom_ids.len()).map(|i| props.atom_type(i)).collect();
+
+    let mut out = mol.clone();
+
+    // 1. Atoms: validated MMFF numeric type + MMFF partial charge.
+    for (i, &aid) in atom_ids.iter().enumerate() {
+        out.set_atom(aid, "type", format!("{}", props.atom_type(i)))
+            .map_err(|e| e.to_string())?;
+        out.set_atom(aid, "charge", props.partial_charge(i))
+            .map_err(|e| e.to_string())?;
+    }
+
+    // 2. Bonds: classify the MMFF bond type; cache it for angle/dihedral classify.
+    let bond_rows: Vec<(_, AtomId, AtomId, f64)> = mol
         .bonds()
-        .map(|(_, bond)| [atom_to_idx[&bond.nodes[0]], atom_to_idx[&bond.nodes[1]]])
+        .map(|(bid, bond)| {
+            let order = match bond.props.get("order") {
+                Some(PropValue::F64(v)) => *v,
+                _ => 1.0,
+            };
+            (bid, bond.nodes[0], bond.nodes[1], order)
+        })
         .collect();
-    let topo = Topology::from_edges(n_atoms, &edges);
-
-    // Build bond order lookup: (min_idx, max_idx) → bond_order
-    let mut bond_order_map: HashMap<(usize, usize), f64> = HashMap::new();
-    for (_, bond) in mol.bonds() {
-        let i = atom_to_idx[&bond.nodes[0]];
-        let j = atom_to_idx[&bond.nodes[1]];
-        let order = match bond.props.get("order") {
-            Some(PropValue::F64(v)) => *v,
-            _ => 1.0,
-        };
-        let key = if i < j { (i, j) } else { (j, i) };
-        bond_order_map.insert(key, order);
-    }
-
-    // Step 5: Build atoms block
-    let mut atoms_block = Block::new();
-    let mut xs = Vec::with_capacity(n_atoms);
-    let mut ys = Vec::with_capacity(n_atoms);
-    let mut zs = Vec::with_capacity(n_atoms);
-    let mut type_labels = Vec::with_capacity(n_atoms);
-
-    for &aid in &atom_vec {
-        let atom = mol.get_atom(aid).map_err(|e| e.to_string())?;
-        xs.push(atom.get_f64("x").unwrap_or(0.0) as F);
-        ys.push(atom.get_f64("y").unwrap_or(0.0) as F);
-        zs.push(atom.get_f64("z").unwrap_or(0.0) as F);
-        let t = atom_types.get(&aid).copied().unwrap_or(0);
-        type_labels.push(format!("{}", t));
-    }
-
-    atoms_block
-        .insert("x", Array1::from_vec(xs).into_dyn())
-        .map_err(|e| e.to_string())?;
-    atoms_block
-        .insert("y", Array1::from_vec(ys).into_dyn())
-        .map_err(|e| e.to_string())?;
-    atoms_block
-        .insert("z", Array1::from_vec(zs).into_dyn())
-        .map_err(|e| e.to_string())?;
-    atoms_block
-        .insert("type", Array1::from_vec(type_labels).into_dyn())
-        .map_err(|e| e.to_string())?;
-
-    // Gasteiger charges
-    let charges_result = compute_gasteiger_charges(mol, 12);
-    let charge_map: HashMap<AtomId, f64> = charges_result
-        .into_iter()
-        .map(|(id, gc)| (id, gc.charge))
-        .collect();
-    let charge_vec: Vec<F> = atom_vec
-        .iter()
-        .map(|aid| charge_map.get(aid).copied().unwrap_or(0.0) as F)
-        .collect();
-    atoms_block
-        .insert("charge", Array1::from_vec(charge_vec).into_dyn())
-        .map_err(|e| e.to_string())?;
-
-    // Helper: get MMFF type for atom index
-    let type_of = |idx: usize| -> u32 {
-        let aid = atom_vec[idx];
-        atom_types.get(&aid).copied().unwrap_or(0)
-    };
-
-    // Step 6: Build bonds block
-    let topo_bonds = topo.bonds();
-    let n_bonds = topo_bonds.len();
-    let mut bi: Vec<U> = Vec::with_capacity(n_bonds);
-    let mut bj: Vec<U> = Vec::with_capacity(n_bonds);
-    let mut bond_types = Vec::with_capacity(n_bonds);
-    // Cache bond_type for each bond (indexed by (min,max) atom index)
-    let mut bond_type_map: HashMap<(usize, usize), u32> = HashMap::new();
-
-    for &[a, b] in &topo_bonds {
-        let t1 = type_of(a);
-        let t2 = type_of(b);
-        let key = if a < b { (a, b) } else { (b, a) };
-        let order = bond_order_map.get(&key).copied().unwrap_or(1.0);
-        let bt = classify_bond_type(t1, t2, order, params);
-        bond_type_map.insert(key, bt);
-
+    let mut bt_map: HashMap<(usize, usize), u32> = HashMap::new();
+    for (bid, a, b, order) in &bond_rows {
+        let (ia, ib) = (idx_of[a], idx_of[b]);
+        let (t1, t2) = (type_of(*a), type_of(*b));
+        let bt = classify_bond_type(t1, t2, *order, params);
         let (lo, hi) = if t1 <= t2 { (t1, t2) } else { (t2, t1) };
-        bi.push(a as U);
-        bj.push(b as U);
-        bond_types.push(format!("{}_{}_{}", bt, lo, hi));
+        out.set_bond_prop(*bid, "type", format!("{}_{}_{}", bt, lo, hi))
+            .map_err(|e| e.to_string())?;
+        // Bake the per-bond numeric parameters (table → equivalence → empirical),
+        // resolved exactly as the RDKit-validated energy path does.
+        let (kb, r0) = crate::ff::mmff::energy::params::bond_params(&topo, &types_u8, ia, ib)
+            .map(|bp| (bp.kb, bp.r0))
+            .unwrap_or((0.0, 0.0));
+        out.set_bond_prop(*bid, "kb", kb).map_err(|e| e.to_string())?;
+        out.set_bond_prop(*bid, "r0", r0).map_err(|e| e.to_string())?;
+        bt_map.insert((ia.min(ib), ia.max(ib)), bt);
     }
-
-    let mut bonds_block = Block::new();
-    bonds_block
-        .insert("atomi", Array1::from_vec(bi).into_dyn())
-        .map_err(|e| e.to_string())?;
-    bonds_block
-        .insert("atomj", Array1::from_vec(bj).into_dyn())
-        .map_err(|e| e.to_string())?;
-    bonds_block
-        .insert("type", Array1::from_vec(bond_types).into_dyn())
-        .map_err(|e| e.to_string())?;
-
-    // Helper to look up bond type between two atom indices
-    let get_bt = |a: usize, b: usize| -> u32 {
-        let key = if a < b { (a, b) } else { (b, a) };
-        bond_type_map.get(&key).copied().unwrap_or(0)
+    let get_bt = |ia: usize, ib: usize| -> u32 {
+        bt_map.get(&(ia.min(ib), ia.max(ib))).copied().unwrap_or(0)
     };
 
-    // Step 7: Build angles block
-    let topo_angles = topo.angles();
-    let n_angles = topo_angles.len();
-    let mut ai: Vec<U> = Vec::with_capacity(n_angles);
-    let mut aj: Vec<U> = Vec::with_capacity(n_angles);
-    let mut ak: Vec<U> = Vec::with_capacity(n_angles);
-    let mut angle_types = Vec::with_capacity(n_angles);
-    let mut stbn_types = Vec::with_capacity(n_angles);
-
-    for &[a, b, c] in &topo_angles {
-        let t1 = type_of(a);
-        let t2 = type_of(b);
-        let t3 = type_of(c);
-        let bt_ab = get_bt(a, b);
-        let bt_bc = get_bt(b, c);
-        let at = classify_angle_type(bt_ab, bt_bc);
-
-        ai.push(a as U);
-        aj.push(b as U);
-        ak.push(c as U);
-        angle_types.push(format!("{}_{}_{}_{}", at, t1, t2, t3));
-        stbn_types.push(format!("{}_{}_{}_{}", at, t1, t2, t3));
-    }
-
-    let mut angles_block = Block::new();
-    angles_block
-        .insert("atomi", Array1::from_vec(ai).into_dyn())
-        .map_err(|e| e.to_string())?;
-    angles_block
-        .insert("atomj", Array1::from_vec(aj).into_dyn())
-        .map_err(|e| e.to_string())?;
-    angles_block
-        .insert("atomk", Array1::from_vec(ak).into_dyn())
-        .map_err(|e| e.to_string())?;
-    angles_block
-        .insert("type", Array1::from_vec(angle_types).into_dyn())
-        .map_err(|e| e.to_string())?;
-    angles_block
-        .insert("stbn_type", Array1::from_vec(stbn_types).into_dyn())
+    // 3. Enumerate angles + dihedrals on the graph (impropers handled below).
+    out.generate_topology(true, true, true)
         .map_err(|e| e.to_string())?;
 
-    // Step 8: Build dihedrals block
-    let topo_dihedrals = topo.dihedrals();
-    let n_dihedrals = topo_dihedrals.len();
-    let mut di: Vec<U> = Vec::with_capacity(n_dihedrals);
-    let mut dj: Vec<U> = Vec::with_capacity(n_dihedrals);
-    let mut dk: Vec<U> = Vec::with_capacity(n_dihedrals);
-    let mut dl: Vec<U> = Vec::with_capacity(n_dihedrals);
-    let mut dih_types = Vec::with_capacity(n_dihedrals);
-
-    for &[a, b, c, d] in &topo_dihedrals {
-        let t1 = type_of(a);
-        let t2 = type_of(b);
-        let t3 = type_of(c);
-        let t4 = type_of(d);
-        let bt_ab = get_bt(a, b);
-        let bt_bc = get_bt(b, c);
-        let bt_cd = get_bt(c, d);
-        let tt = classify_torsion_type(bt_ab, bt_bc, bt_cd);
-
-        di.push(a as U);
-        dj.push(b as U);
-        dk.push(c as U);
-        dl.push(d as U);
-        dih_types.push(format!("{}_{}_{}_{}_{}", tt, t1, t2, t3, t4));
-    }
-
-    let mut dihedrals_block = Block::new();
-    dihedrals_block
-        .insert("atomi", Array1::from_vec(di).into_dyn())
-        .map_err(|e| e.to_string())?;
-    dihedrals_block
-        .insert("atomj", Array1::from_vec(dj).into_dyn())
-        .map_err(|e| e.to_string())?;
-    dihedrals_block
-        .insert("atomk", Array1::from_vec(dk).into_dyn())
-        .map_err(|e| e.to_string())?;
-    dihedrals_block
-        .insert("atoml", Array1::from_vec(dl).into_dyn())
-        .map_err(|e| e.to_string())?;
-    dihedrals_block
-        .insert("type", Array1::from_vec(dih_types).into_dyn())
-        .map_err(|e| e.to_string())?;
-
-    // Step 9: Build impropers block
-    let topo_impropers = topo.impropers();
-    let n_impropers = topo_impropers.len();
-    let mut ii: Vec<U> = Vec::with_capacity(n_impropers);
-    let mut ij: Vec<U> = Vec::with_capacity(n_impropers);
-    let mut ik: Vec<U> = Vec::with_capacity(n_impropers);
-    let mut il: Vec<U> = Vec::with_capacity(n_impropers);
-    let mut imp_types = Vec::with_capacity(n_impropers);
-
-    for &[center, a, b, c] in &topo_impropers {
-        let tc = type_of(center);
-        let ta = type_of(a);
-        let tb = type_of(b);
-        let tcc = type_of(c);
-
-        ii.push(center as U);
-        ij.push(a as U);
-        ik.push(b as U);
-        il.push(c as U);
-        imp_types.push(format!("{}_{}_{}_{}", tc, ta, tb, tcc));
-    }
-
-    let mut impropers_block = Block::new();
-    if n_impropers > 0 {
-        impropers_block
-            .insert("atomi", Array1::from_vec(ii).into_dyn())
-            .map_err(|e| e.to_string())?;
-        impropers_block
-            .insert("atomj", Array1::from_vec(ij).into_dyn())
-            .map_err(|e| e.to_string())?;
-        impropers_block
-            .insert("atomk", Array1::from_vec(ik).into_dyn())
-            .map_err(|e| e.to_string())?;
-        impropers_block
-            .insert("atoml", Array1::from_vec(il).into_dyn())
-            .map_err(|e| e.to_string())?;
-        impropers_block
-            .insert("type", Array1::from_vec(imp_types).into_dyn())
-            .map_err(|e| e.to_string())?;
-    }
-
-    // Step 10: Build non-bonded pairs (exclude 1-2 and 1-3, flag 1-4)
-    let excluded_12: HashSet<(usize, usize)> = topo_bonds
-        .iter()
-        .flat_map(|&[a, b]| {
-            let key = if a < b { (a, b) } else { (b, a) };
-            std::iter::once(key)
-        })
+    // 4. Angles: classify + label. Collect first — `set_angle_prop` borrows `out`
+    //    mutably while `angles()` borrows it immutably.
+    let angle_rows: Vec<_> = out
+        .angles()
+        .map(|(id, a)| (id, a.nodes[0], a.nodes[1], a.nodes[2]))
         .collect();
+    for (id, a, b, c) in angle_rows {
+        let (ia, ib, ic) = (idx_of[&a], idx_of[&b], idx_of[&c]);
+        let at = classify_angle_type(get_bt(ia, ib), get_bt(ib, ic));
+        let label = resolve_angle_label(at, type_of(a), type_of(b), type_of(c));
+        out.set_angle_prop(id, "type", label.clone())
+            .map_err(|e| e.to_string())?;
+        out.set_angle_prop(id, "stbn_type", label)
+            .map_err(|e| e.to_string())?;
+    }
 
-    let excluded_13: HashSet<(usize, usize)> = topo_angles
-        .iter()
-        .flat_map(|&[a, _, c]| {
-            let key = if a < c { (a, c) } else { (c, a) };
-            std::iter::once(key)
-        })
+    // 5. Dihedrals: classify + label.
+    let dih_rows: Vec<_> = out
+        .dihedrals()
+        .map(|(id, d)| (id, d.nodes[0], d.nodes[1], d.nodes[2], d.nodes[3]))
         .collect();
+    for (id, a, b, c, d) in dih_rows {
+        let (ia, ib, ic, il) = (idx_of[&a], idx_of[&b], idx_of[&c], idx_of[&d]);
+        let tt = classify_torsion_type(get_bt(ia, ib), get_bt(ib, ic), get_bt(ic, il));
+        let label = format!(
+            "{}_{}_{}_{}_{}",
+            tt,
+            type_of(a),
+            type_of(b),
+            type_of(c),
+            type_of(d)
+        );
+        out.set_dihedral_prop(id, "type", label)
+            .map_err(|e| e.to_string())?;
+    }
 
-    let set_14: HashSet<(usize, usize)> = topo_dihedrals
-        .iter()
-        .flat_map(|&[a, _, _, d]| {
-            let key = if a < d { (a, d) } else { (d, a) };
-            std::iter::once(key)
-        })
-        .collect();
-
-    let mut pi: Vec<U> = Vec::new();
-    let mut pj: Vec<U> = Vec::new();
-    let mut p14 = Vec::new();
-
-    for a in 0..n_atoms {
-        for b in (a + 1)..n_atoms {
-            let key = (a, b);
-            if excluded_12.contains(&key) || excluded_13.contains(&key) {
-                continue;
-            }
-            pi.push(a as U);
-            pj.push(b as U);
-            p14.push(set_14.contains(&key));
+    // 6. Out-of-plane (Wilson) terms — MMFF-specific enumeration. Only atoms with
+    //    *exactly three* neighbours are trigonal centres; each contributes three
+    //    Wilson permutations that share one `koop`. The centre is placed in the
+    //    second (`atomj`) position to match the `mmff_oop` kernel, which treats
+    //    `atomj` as the centre (mirroring the RDKit-validated energy path). The
+    //    `type` label is the canonical OOP key (peripherals equivalence-degraded +
+    //    sorted), so the kernel resolves `koop` by exact match; centres for which
+    //    MMFF defines no out-of-plane term are skipped.
+    let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); atom_ids.len()];
+    for (_, a, b, _) in &bond_rows {
+        adjacency[idx_of[a]].push(idx_of[b]);
+        adjacency[idx_of[b]].push(idx_of[a]);
+    }
+    for center in 0..atom_ids.len() {
+        if adjacency[center].len() != 3 {
+            continue;
+        }
+        let (a, b, c) = (adjacency[center][0], adjacency[center][1], adjacency[center][2]);
+        let center_id = atom_ids[center];
+        let Some(label) = resolve_oop_label(
+            type_of(center_id),
+            [
+                type_of(atom_ids[a]),
+                type_of(atom_ids[b]),
+                type_of(atom_ids[c]),
+            ],
+        ) else {
+            continue;
+        };
+        // Three Wilson permutations (i, k, l) with the centre fixed in atomj.
+        for &(i, k, l) in &[(a, b, c), (a, c, b), (b, c, a)] {
+            let id = out
+                .add_improper(atom_ids[i], center_id, atom_ids[k], atom_ids[l])
+                .map_err(|e| e.to_string())?;
+            out.set_improper_prop(id, "type", label.clone())
+                .map_err(|e| e.to_string())?;
         }
     }
 
-    let mut pairs_block = Block::new();
-    if !pi.is_empty() {
-        pairs_block
-            .insert("atomi", Array1::from_vec(pi).into_dyn())
-            .map_err(|e| e.to_string())?;
-        pairs_block
-            .insert("atomj", Array1::from_vec(pj).into_dyn())
-            .map_err(|e| e.to_string())?;
-        pairs_block
-            .insert("is_14", Array1::from_vec(p14).into_dyn())
-            .map_err(|e| e.to_string())?;
-    }
-
-    // Assemble frame
-    let mut frame = Frame::new();
-    frame.insert("atoms", atoms_block);
-    frame.insert("bonds", bonds_block);
-    frame.insert("angles", angles_block);
-    frame.insert("dihedrals", dihedrals_block);
-    if n_impropers > 0 {
-        frame.insert("impropers", impropers_block);
-    }
-    if !pairs_block.is_empty() {
-        frame.insert("pairs", pairs_block);
-    }
-
-    Ok(frame)
+    Ok(out)
 }

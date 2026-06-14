@@ -36,12 +36,12 @@
 //!     └─ typifier.build(&mol)          → Potentials (pre-resolved SoA arrays)
 //!           │                                │
 //!           ├─ typify() [internal]     potentials.calc_energy_forces(coords)
-//!           │   ├─ find_rings()                │
-//!           │   ├─ assign_atom_types()   (energy, forces)
-//!           │   ├─ Topology::from_edges()
-//!           │   └─ classify_*_type()
+//!           │   ├─ MmffMolProperties          │
+//!           │   │   (validated types+charges)(energy, forces)
+//!           │   └─ classify_*_type() labels
 //!           │
-//!           └─ compile() [internal]
+//!           ├─ to_frame() → typed Frame
+//!           └─ to_potentials() [generic]
 //! ```
 //!
 //! # Common MMFF Types
@@ -59,7 +59,7 @@
 //! | 44 | NB     | aromatic N (pyridine)|
 //!
 //! Run:
-//!   cargo run -p molrs-core --example typify_molecule
+//!   cargo run -p molcrafts-molrs --example typify_molecule --features ff
 //!
 //! MMFF94 parameters are embedded in the binary — no external data files needed.
 
@@ -147,30 +147,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== Part 4: Atom Type Assignment ===\n");
 
-    let ethane_types = typifier.assign_atom_types(&ethane, &ethane_rings);
-    println!("Ethane atom types:");
-    for (aid, atom) in ethane.atoms() {
-        let sym = atom.get_str("symbol").unwrap_or("?");
-        let t = ethane_types.get(&aid).copied().unwrap_or(0);
-        println!("  {} → type {} ({})", sym, t, type_label(t));
-    }
-
-    let benzene_types = typifier.assign_atom_types(&benzene, &benzene_rings);
-    println!("\nBenzene atom types:");
-    for (aid, atom) in benzene.atoms() {
-        let sym = atom.get_str("symbol").unwrap_or("?");
-        let t = benzene_types.get(&aid).copied().unwrap_or(0);
-        println!("  {} → type {} ({})", sym, t, type_label(t));
-    }
-
-    let aa_rings = find_rings(&acetic_acid);
-    let aa_types = typifier.assign_atom_types(&acetic_acid, &aa_rings);
-    println!("\nAcetic acid atom types:");
-    for (aid, atom) in acetic_acid.atoms() {
-        let sym = atom.get_str("symbol").unwrap_or("?");
-        let t = aa_types.get(&aid).copied().unwrap_or(0);
-        println!("  {} → type {} ({})", sym, t, type_label(t));
-    }
+    print_atom_types("Ethane", &typifier, &ethane)?;
+    print_atom_types("\nBenzene", &typifier, &benzene)?;
+    print_atom_types("\nAcetic acid", &typifier, &acetic_acid)?;
 
     // =========================================================================
     // Part 5: Bond / Angle / Torsion type classification
@@ -217,7 +196,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== Part 6: Inspecting Typed Frame ===\n");
 
-    let frame = typifier.typify(&ethane)?;
+    let frame = typifier.typify(&ethane)?.to_frame();
 
     let atoms = frame.get("atoms").expect("atoms block");
     let bonds = frame.get("bonds").expect("bonds block");
@@ -241,8 +220,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let bond_type_col = bonds.get_string("type").expect("bond type column");
-    let bond_i = bonds.get_uint("i").expect("bond i");
-    let bond_j = bonds.get_uint("j").expect("bond j");
+    let bond_i = bonds.get_uint("atomi").expect("bond atomi");
+    let bond_j = bonds.get_uint("atomj").expect("bond atomj");
     println!("\n  Bond details:");
     for idx in 0..bond_type_col.len() {
         println!(
@@ -301,7 +280,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // =========================================================================
     println!("\n=== Bonus: Benzene ===\n");
 
-    let benz_frame = typifier.typify(&benzene)?;
+    let benz_frame = typifier.typify(&benzene)?.to_frame();
     let benz_atoms = benz_frame.get("atoms").unwrap();
     let benz_types = benz_atoms.get_string("type").unwrap();
     println!("Benzene atom types: {:?}", benz_types.as_slice().unwrap());
@@ -408,6 +387,28 @@ fn build_acetic_acid() -> Atomistic {
 
 fn count(mol: &Atomistic) -> (usize, usize) {
     (mol.atoms().count(), mol.bonds().count())
+}
+
+/// Typify `mol` and print each atom's MMFF numeric type. The validated types now
+/// come from the typed frame's `atoms` `type` column (in graph atom order),
+/// produced by reusing the RDKit-validated MMFF front-end.
+fn print_atom_types(
+    name: &str,
+    typifier: &MMFFTypifier,
+    mol: &Atomistic,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let frame = typifier.typify(mol)?.to_frame();
+    let types = frame
+        .get("atoms")
+        .and_then(|b| b.get_string("type"))
+        .ok_or("atoms type column")?;
+    println!("{name} atom types:");
+    for ((_, atom), ty) in mol.atoms().zip(types.iter()) {
+        let sym = atom.get_str("symbol").unwrap_or("?");
+        let t: u32 = ty.parse().unwrap_or(0);
+        println!("  {} → type {} ({})", sym, t, type_label(t));
+    }
+    Ok(())
 }
 
 fn type_label(t: u32) -> &'static str {

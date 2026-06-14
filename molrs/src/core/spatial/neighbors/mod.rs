@@ -51,9 +51,6 @@ pub use filter::{filter_rad, filter_sann};
 pub use linkcell::LinkCell;
 pub use periodic_buffer::{PeriodicBufferResult, periodic_buffer};
 pub use query::NeighborQuery;
-/// Backward-compatible alias.
-#[deprecated(note = "renamed to NeighborQuery")]
-pub type AABBQuery = NeighborQuery;
 
 // ---------------------------------------------------------------------------
 // QueryMode — distinguishes self-query from cross-query
@@ -344,33 +341,4 @@ impl NeighborList {
         ArrayView2::from_shape((self.n_pairs(), 3), &self.diff_flat)
             .expect("diff_flat shape mismatch")
     }
-
-    // -----------------------------------------------------------------------
-    // Deprecated aliases for backward compatibility
-    // -----------------------------------------------------------------------
-
-    /// First particle indices, one per pair.
-    #[deprecated(note = "use query_point_indices() instead")]
-    #[inline]
-    pub fn idx_i(&self) -> &[u32] {
-        &self.idx_i
-    }
-
-    /// Second particle indices, one per pair.
-    #[deprecated(note = "use point_indices() instead")]
-    #[inline]
-    pub fn idx_j(&self) -> &[u32] {
-        &self.idx_j
-    }
-
-    /// Displacement vectors as an N x 3 array view.
-    #[deprecated(note = "use vectors() instead")]
-    #[inline]
-    pub fn diff(&self) -> FNx3View<'_> {
-        self.vectors()
-    }
 }
-
-/// Backward-compatible type alias.
-#[deprecated(note = "use NeighborList instead")]
-pub type NeighborResult = NeighborList;

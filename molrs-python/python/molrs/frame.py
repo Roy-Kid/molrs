@@ -479,6 +479,20 @@ class Frame(_RsFrame):
         frame.metadata = data.get("metadata", {})
         return frame
 
+    @classmethod
+    def _from_ffi_frameref_capsule(cls, capsule: Any) -> "Frame":
+        """Build a rich ``Frame`` from a ``"molrs.FrameRef"`` capsule.
+
+        The **return path** for a downstream Rust consumer (e.g. molpack hands a
+        packed frame back as an FFI capsule): the Rust base resolves the capsule
+        to a bare ``_RsFrame`` sharing the producer's store, then ``from_dict``
+        upgrades it to this rich subclass so callers get an ``isinstance``-correct
+        ``molrs.Frame``. Shadows the base ``_RsFrame`` staticmethod of the same
+        name, the way ``from_dict`` adds the rich-layer wrapping.
+        """
+        base = _RsFrame._from_ffi_frameref_capsule(capsule)
+        return cls.from_dict(base)
+
     def copy(self) -> "Frame":
         """Deep copy (blocks copied into new storage; box + metadata copied)."""
         new = Frame()

@@ -10,7 +10,7 @@ mol_project:
     test_single: "cargo test {path}"
   arch:
     style: crate-graph
-    rules_section: "## Workspace Crates & Dependency Flow"
+    rules_section: "## Crate Structure & Modules"
   doc:
     style: rustdoc
   science:
@@ -121,8 +121,6 @@ All on the single `molcrafts-molrs` crate (`molrs/Cargo.toml`):
   `zarr` (Zarr V3 + `From<zarrs::*Error>` conversions), `filesystem`
   (→ `zarr`, filesystem store), `blas` (BLAS via `ndarray-linalg`),
   `slow-tests` (expensive integration tests).
-- `f64` / `i64` / `u64` — **deprecated / no-op** (F/I/U are hardcoded to
-  f64/i32/u32); kept so binders that forward them keep resolving.
 
 ## Core Data Model
 
@@ -130,9 +128,7 @@ All on the single `molcrafts-molrs` crate (`molrs/Cargo.toml`):
 
 **Scientific algorithms use high precision; estimation / general code uses natural types.**
 
-- `F = f64` always. The `f64` feature flag is deprecated and ignored.
-- `I = i32` always. The `i64` feature flag is deprecated and ignored.
-- `U = u32` always. The `u64` feature flag is deprecated and ignored.
+- `F = f64`, `I = i32`, `U = u32` — always. There is no compile-time precision switch (the former `f64` / `i64` / `u64` Cargo features were removed).
 - Neighbor list internals use `u32` directly — that's the natural type, no alias needed.
 - The CXX bridge to Atomiverse crosses all coordinates / fields / distances as `f64` unconditionally (the merged crate hardcodes `F = f64`); there is no `cfg!(feature = "f64")` precision switch.
 

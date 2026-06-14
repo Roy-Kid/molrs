@@ -14,9 +14,11 @@
 //!
 //! - Halgren, T.A. (1996). J. Comput. Chem. 17, 490-519. (MMFF94 force field)
 
+use std::ffi::CString;
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyCapsule, PyDict, PyList};
 
 use molrs::ff::ForceField;
 use molrs::ff::mmff::{MmffForceField, MmffMolProperties, MmffVariant};
@@ -24,6 +26,7 @@ use molrs::ff::potential::{Potentials, extract_coords};
 use molrs::ff::typifier::Typifier;
 use molrs::ff::typifier::mmff::MMFFTypifier;
 use molrs::ff::{LBFGS, LbfgsConfig, OptReport};
+use molrs_ffi::ForceFieldRef;
 
 use crate::frame::PyFrame;
 use crate::helpers::{NpF, py_value_err};
@@ -400,11 +403,13 @@ impl PyMMFFTypifier {
     /// ValueError
     ///     If atom types cannot be determined (e.g. unsupported elements).
     fn typify(&self, mol: &PyAtomistic) -> PyResult<PyFrame> {
-        let frame = self
+        // `typify` returns a labeled Atomistic; materialize it to the Frame this
+        // Python method is documented to return.
+        let labeled = self
             .inner
             .typify(mol.core())
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        PyFrame::from_core_frame(frame)
+        PyFrame::from_core_frame(labeled.to_frame())
     }
 
     /// Typify and compile potentials in one step.
@@ -555,6 +560,21 @@ pub fn read_forcefield_xml_py(path: &str) -> PyResult<PyForceField> {
     Ok(PyForceField { inner: forcefield })
 }
 
+/// `Send` wrapper around a `*mut ForceFieldRef` so it can ride inside a
+/// `PyCapsule` (whose payload must be `Send`).
+///
+/// `ForceFieldRef` is `!Send` (it holds an `Rc`) and raw pointers are `!Send`,
+/// but the capsule is only ever created, read, and destroyed while the Python
+/// GIL is held, so no cross-thread `Rc` access occurs. `#[repr(transparent)]`
+/// makes the capsule's `void*` reinterpretable as `*mut *mut ForceFieldRef`,
+/// matching the frame convention a consumer resolves (mirrors
+/// [`crate::frame`]'s `FrameRefPtr`).
+#[repr(transparent)]
+struct ForceFieldRefPtr(*mut ForceFieldRef);
+
+// SAFETY: GIL-guarded, single-threaded use only — see the type-level doc.
+unsafe impl Send for ForceFieldRefPtr {}
+
 #[pymethods]
 impl PyForceField {
     /// Construct an empty force field. Populate it with the ``def_*style`` /
@@ -581,6 +601,36 @@ impl PyForceField {
             .iter()
             .map(|style| format!("{}:{}", style.category(), style.name))
             .collect()
+    }
+
+    /// Export this force field's FFI handle as a ``PyCapsule``.
+    ///
+    /// The force-field analogue of :meth:`Frame._ffi_frameref_capsule`. The
+    /// capsule wraps a :class:`molrs_ffi.ForceFieldRef` that **shares** this
+    /// force field's parameters (one ``Rc`` clone — no deep copy), so a
+    /// downstream Rust consumer (e.g. the molpack relaxer) can resolve it and
+    /// compile potentials with **no marshalling**. The capsule's ``void*`` is
+    /// ``*mut *mut`` :class:`molrs_ffi.ForceFieldRef`, matching the frame
+    /// convention; its name is the C string ``"molrs.ForceFieldRef"``. The
+    /// capsule's destructor reclaims the boxed handle, dropping its ``Rc``.
+    ///
+    /// Returns
+    /// -------
+    /// capsule
+    ///     A ``PyCapsule`` named ``"molrs.ForceFieldRef"``.
+    fn _ffi_forcefield_capsule<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyCapsule>> {
+        // Box a shared handle (Rc clone of this force field) and hand the raw
+        // pointer to the capsule. See `ForceFieldRefPtr` for the Send / layout
+        // contract.
+        let raw = ForceFieldRefPtr(Box::into_raw(Box::new(ForceFieldRef::new(
+            self.inner.clone(),
+        ))));
+        let name = CString::new("molrs.ForceFieldRef").expect("static capsule name");
+        PyCapsule::new_with_destructor(py, raw, Some(name), |ptr: ForceFieldRefPtr, _ctx| {
+            // SAFETY: `ptr.0` came from `Box::into_raw` above and is reclaimed
+            // exactly once when the capsule dies.
+            drop(unsafe { Box::from_raw(ptr.0) });
+        })
     }
 
     // -- builder: styles (idempotent find-or-create) -------------------------

@@ -422,6 +422,27 @@ impl PyFrame {
             drop(unsafe { Box::from_raw(ptr.0) });
         })
     }
+
+    /// Build a `Frame` from a ``"molrs.FrameRef"`` capsule — the **return path**
+    /// for a downstream Rust consumer (e.g. molpack handing back a packed frame).
+    ///
+    /// Symmetric with [`_ffi_frameref_capsule`](Self::_ffi_frameref_capsule):
+    /// the consumer wraps its result frame in a `FrameRef`, exports a capsule of
+    /// the same shape and name, and calls this. The new `Frame` **shares** the
+    /// producer's store (one `Rc` bump), so no deep copy is made.
+    #[staticmethod]
+    fn _from_ffi_frameref_capsule(capsule: &Bound<'_, PyCapsule>) -> PyResult<Self> {
+        // `pointer_checked` validates the capsule name and rejects a null
+        // payload in one step, returning the `*mut *mut FrameRef`.
+        let ptr = capsule.pointer_checked(Some(c"molrs.FrameRef"))?;
+        let pp = ptr.as_ptr() as *const *const FrameRef;
+        // SAFETY: a `"molrs.FrameRef"` capsule's `void*` is `*mut *mut FrameRef`
+        // (the exporter boxes a `*mut FrameRef`). Deref once to reach the cloned
+        // handle and `.clone()` it (two `Rc` bumps) onto the same store. The
+        // capsule is only ever touched under the GIL.
+        let fref = unsafe { (**pp).clone() };
+        Ok(Self { inner: fref })
+    }
 }
 
 /// `Send` wrapper around a `*mut FrameRef` so it can ride inside a

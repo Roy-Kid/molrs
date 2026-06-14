@@ -48,7 +48,7 @@
 use roxmltree::Node;
 
 use super::ForceFieldReader;
-use crate::ff::forcefield::ForceField;
+use crate::ff::forcefield::{ForceField, SpecialBonds};
 
 /// kJ/mol → kcal/mol.
 const KJ_PER_KCAL: f64 = 4.184;
@@ -118,7 +118,14 @@ impl ForceFieldReader for OplsXmlReader {
             }
         }
 
-        build_nonbonded(&mut ff, &masses, &nonbonded, coulomb14, lj14);
+        build_nonbonded(&mut ff, &masses, &nonbonded);
+        // OPLS excludes 1-2/1-3 and scales 1-4 by the <NonbondedForce> values
+        // (commonly 0.5 / 0.5). Owned by the ForceField, consumed by the pair
+        // kernels.
+        ff.set_special_bonds(SpecialBonds {
+            lj: [0.0, 0.0, lj14],
+            coul: [0.0, 0.0, coulomb14],
+        });
         Ok(ff)
     }
 }
@@ -132,16 +139,11 @@ struct NonbondedRow {
 }
 
 /// Build the atom style (`full`: mass + charge per `opls_NNN`) and the two
-/// nonbonded pair styles (`lj/cut`: ε/σ per self-pair; `coul/cut`: charges come
-/// from atoms at evaluation time). Combining rules and 1-4 scaling are NOT baked
-/// here — the scale factors are recorded on the styles for the evaluator.
-fn build_nonbonded(
-    ff: &mut ForceField,
-    masses: &[(String, f64)],
-    nonbonded: &[NonbondedRow],
-    coulomb14: f64,
-    lj14: f64,
-) {
+/// nonbonded pair styles (`lj/cut`: per-atom ε/σ; `coul/cut`: charges come from
+/// atoms at evaluation time). Combining rules and 1-4 scaling are NOT baked here
+/// — combining is the kernel's job, and the 1-4 weights live on the
+/// ForceField's `special_bonds` (set by the caller).
+fn build_nonbonded(ff: &mut ForceField, masses: &[(String, f64)], nonbonded: &[NonbondedRow]) {
     if !masses.is_empty() {
         let atom = ff.def_atomstyle("full");
         for (name, mass) in masses {
@@ -155,11 +157,11 @@ fn build_nonbonded(
     }
 
     if !nonbonded.is_empty() {
-        let lj = ff.def_pairstyle("lj/cut", &[("lj14scale", lj14)]);
+        let lj = ff.def_pairstyle("lj/cut", &[]);
         for r in nonbonded {
             lj.def_pairtype(&r.ty, None, &[("epsilon", r.epsilon), ("sigma", r.sigma)]);
         }
-        ff.def_pairstyle("coul/cut", &[("coulomb14scale", coulomb14)]);
+        ff.def_pairstyle("coul/cut", &[]);
     }
 }
 
@@ -362,11 +364,15 @@ mod tests {
         let pt = lj.get_pairtype("opls_001", None).unwrap();
         assert!((pt.params.get("sigma").unwrap() - 3.75).abs() < 1e-9);
         assert!((pt.params.get("epsilon").unwrap() - 0.43932 / 4.184).abs() < 1e-9);
-        assert!((lj.params.get("lj14scale").unwrap() - 0.5).abs() < 1e-12);
 
-        // coul/cut style present with the coulomb 1-4 scale recorded.
-        let coul = ff.get_style("pair", "coul/cut").unwrap();
-        assert!((coul.params.get("coulomb14scale").unwrap() - 0.5).abs() < 1e-12);
+        // coul/cut style present (charges resolved per-atom from the frame).
+        assert!(ff.get_style("pair", "coul/cut").is_some());
+
+        // The 1-4 scales live on the ForceField's special_bonds (1-2/1-3
+        // excluded) — the single source the pair kernels consume.
+        let sb = ff.special_bonds();
+        assert_eq!(sb.lj, [0.0, 0.0, 0.5]);
+        assert_eq!(sb.coul, [0.0, 0.0, 0.5]);
 
         // atom style carries mass + charge per opls type.
         let atom = ff.get_style("atom", "full").unwrap();

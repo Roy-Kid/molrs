@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use super::{
     AngleType, BondType, DihedralType, ForceField, ImproperType, PairType, Params, StyleDefs,
 };
-use crate::ff::typifier::mmff::{MMFFAtomProp, MMFFEquiv, MMFFParams};
+use crate::ff::typifier::mmff::{MMFFAtomProp, MMFFParams};
 
 // ---------------------------------------------------------------------------
 // Public API — ForceField
@@ -90,12 +90,6 @@ pub fn read_forcefield_xml_str(xml: &str) -> Result<ForceField, String> {
 // Public API — MMFFParams
 // ---------------------------------------------------------------------------
 
-/// Read [`MMFFParams`] from an XML file on disk.
-pub fn read_mmff_params_xml(path: &str) -> Result<MMFFParams, String> {
-    let xml = std::fs::read_to_string(path).map_err(|e| format!("read {}: {}", path, e))?;
-    read_mmff_params_xml_str(&xml)
-}
-
 /// Parse [`MMFFParams`] from an XML string.
 pub fn read_mmff_params_xml_str(xml: &str) -> Result<MMFFParams, String> {
     let doc = roxmltree::Document::parse(xml).map_err(|e| format!("XML parse error: {}", e))?;
@@ -109,34 +103,16 @@ pub fn read_mmff_params_xml_str(xml: &str) -> Result<MMFFParams, String> {
     }
 
     let mut props = HashMap::new();
-    #[allow(clippy::type_complexity)]
-    let mut prop_index: HashMap<(u32, u32, u32, u32, u32, u32, u32, u32), Vec<u32>> =
-        HashMap::new();
-    let mut equiv = HashMap::new();
 
     for child in root.children().filter(|n| n.is_element()) {
-        match child.tag_name().name() {
-            "AtomProperties" => {
-                for prop_node in child
-                    .children()
-                    .filter(|n| n.is_element() && n.tag_name().name() == "Prop")
-                {
-                    let p = parse_atom_prop(&prop_node)?;
-                    let key = (p.atno, p.crd, p.val, p.pilp, p.mltb, p.arom, p.linh, p.sbmb);
-                    prop_index.entry(key).or_default().push(p.type_id);
-                    props.insert(p.type_id, p);
-                }
+        if child.tag_name().name() == "AtomProperties" {
+            for prop_node in child
+                .children()
+                .filter(|n| n.is_element() && n.tag_name().name() == "Prop")
+            {
+                let p = parse_atom_prop(&prop_node)?;
+                props.insert(p.type_id, p);
             }
-            "EquivalenceTable" => {
-                for def_node in child
-                    .children()
-                    .filter(|n| n.is_element() && n.tag_name().name() == "Def")
-                {
-                    let e = parse_equiv(&def_node)?;
-                    equiv.insert(e.type_id, e);
-                }
-            }
-            _ => {}
         }
     }
 
@@ -144,7 +120,7 @@ pub fn read_mmff_params_xml_str(xml: &str) -> Result<MMFFParams, String> {
         return Err("No <AtomProperties> found in XML".to_string());
     }
 
-    Ok(MMFFParams::new(props, prop_index, equiv))
+    Ok(MMFFParams::new(props))
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +185,7 @@ fn numeric_attrs<'a>(node: &'a roxmltree::Node, skip: &[&str]) -> Vec<(&'a str, 
 }
 
 // ---------------------------------------------------------------------------
-// MMFF atom-property / equivalence parsers
+// MMFF atom-property parser
 // ---------------------------------------------------------------------------
 
 fn parse_atom_prop(node: &roxmltree::Node) -> Result<MMFFAtomProp, String> {
@@ -223,16 +199,6 @@ fn parse_atom_prop(node: &roxmltree::Node) -> Result<MMFFAtomProp, String> {
         arom: attr_u32(node, "arom")?,
         linh: attr_u32(node, "linh")?,
         sbmb: attr_u32(node, "sbmb")?,
-    })
-}
-
-fn parse_equiv(node: &roxmltree::Node) -> Result<MMFFEquiv, String> {
-    Ok(MMFFEquiv {
-        type_id: attr_u32(node, "type")?,
-        eq1: attr_u32(node, "eq1")?,
-        eq2: attr_u32(node, "eq2")?,
-        eq3: attr_u32(node, "eq3")?,
-        eq4: attr_u32(node, "eq4")?,
     })
 }
 
@@ -650,6 +616,5 @@ mod tests {
     fn test_mmff_params_xml() {
         let params = read_mmff_params_xml_str(molrs::data::MMFF94_XML).unwrap();
         assert!(params.get_prop(1).is_some());
-        assert!(params.get_equiv(1).is_some());
     }
 }

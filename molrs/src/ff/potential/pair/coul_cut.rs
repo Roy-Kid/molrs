@@ -9,8 +9,6 @@
 //! per-pair charge products `qiqj` already include any exclusion / 1-4 scaling.
 //! Geometric combining and OPLS 1-4 factors are the caller's responsibility.
 
-use std::collections::HashMap;
-
 use crate::ff::forcefield::Params;
 use crate::ff::potential::Potential;
 use crate::ff::potential::geometry::validate_coords;
@@ -84,19 +82,35 @@ impl Potential for PairCoulCut {
     }
 }
 
-/// Construct a [`PairCoulCut`] from style params (`cutoff`, default ∞), per-type
-/// params (`qiqj`), and a Frame's `"pairs"` block (`atomi/atomj/type`).
+/// Construct a [`PairCoulCut`] from **per-atom charges** + a neighbour list.
+///
+/// Reads per-atom `charge` from the atoms block (the molecule carries its own
+/// charges — RESP/AM1-BCC for GAFF, etc.), forms `qᵢqⱼ` for each interacting
+/// pair, and scales 1-4-flagged pairs by the force field's 1-4 Coulomb weight
+/// (projected into `style_params["coulomb14scale"]` by `Style::to_potential`
+/// from the ForceField's `special_bonds`; default `1.0`).
+///
+/// The `pairs` block is the consumer-built neighbour list
+/// (`atomi`/`atomj`/`is_14`) from `intramolecular_pairs`; 1-2/1-3 are already
+/// excluded. `cutoff` comes from `style_params` (default ∞). Charge-free pair
+/// types are not consulted — this kernel is per-atom, mirroring `mmff_ele`.
 pub fn pair_coul_cut_ctor(
     style_params: &Params,
-    type_params: &[(&str, &Params)],
+    _type_params: &[(&str, &Params)],
     frame: &Frame,
 ) -> Result<Box<dyn Potential>, String> {
-    let type_map: HashMap<&str, &Params> = type_params.iter().copied().collect();
     let cutoff = style_params
         .get("cutoff")
         .map(|c| c as F)
         .unwrap_or(F::INFINITY);
+    let scale_14 = style_params.get("coulomb14scale").unwrap_or(1.0) as F;
 
+    let atoms = frame
+        .get("atoms")
+        .ok_or_else(|| "PairCoulCut: frame missing \"atoms\" block".to_string())?;
+    let charges = atoms
+        .get_float("charge")
+        .ok_or_else(|| "PairCoulCut: atoms block missing \"charge\" column".to_string())?;
     let block = frame
         .get("pairs")
         .ok_or_else(|| "PairCoulCut: frame missing \"pairs\" block".to_string())?;
@@ -106,25 +120,22 @@ pub fn pair_coul_cut_ctor(
     let j_col = block
         .get_uint("atomj")
         .ok_or_else(|| "PairCoulCut: pairs block missing \"atomj\" column".to_string())?;
-    let type_col = block
-        .get_string("type")
-        .ok_or_else(|| "PairCoulCut: pairs block missing \"type\" column".to_string())?;
+    let is_14 = block.get_bool("is_14");
 
-    let mut atom_i = Vec::with_capacity(i_col.len());
-    let mut atom_j = Vec::with_capacity(i_col.len());
-    let mut qiqj = Vec::with_capacity(i_col.len());
+    let n = i_col.len();
+    let mut atom_i = Vec::with_capacity(n);
+    let mut atom_j = Vec::with_capacity(n);
+    let mut qiqj = Vec::with_capacity(n);
 
-    for idx in 0..i_col.len() {
-        let label = &type_col[idx];
-        let params = type_map
-            .get(label.as_str())
-            .ok_or_else(|| format!("PairCoulCut: unknown pair type '{}'", label))?;
-        let qq = params
-            .get("qiqj")
-            .ok_or_else(|| format!("PairCoulCut type '{}': missing 'qiqj'", label))?
-            as F;
-        atom_i.push(i_col[idx] as usize);
-        atom_j.push(j_col[idx] as usize);
+    for idx in 0..n {
+        let i = i_col[idx] as usize;
+        let j = j_col[idx] as usize;
+        let mut qq = charges[i] as F * charges[j] as F;
+        if is_14.is_some_and(|b| b[idx]) {
+            qq *= scale_14;
+        }
+        atom_i.push(i);
+        atom_j.push(j);
         qiqj.push(qq);
     }
 

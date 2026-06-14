@@ -226,12 +226,6 @@ impl LineAccumulator {
             self.carry.clear();
         }
     }
-
-    /// True iff `finish` has been called.
-    #[allow(dead_code)]
-    pub fn is_finished(&self) -> bool {
-        self.finished
-    }
 }
 
 /// Strip a trailing `\n` or `\r\n` from `s`, returning the shorter slice.
