@@ -3,6 +3,19 @@
 This page summarizes recent repository history for documentation readers. The
 authoritative release history remains the Git tags and GitHub releases.
 
+## 0.1.3
+
+Adds the force-field FFI surface that downstream Rust consumers (molpack) need.
+
+- **`ForceFieldRef` (new `ff` feature on `molcrafts-molrs-ffi`).** A stable,
+  zero-copy handle for `molrs::ff::ForceField` — the force-field analogue of
+  `FrameRef`. Off by default; enabled via the `ff` feature.
+- **`molrs::ff::potential::intramolecular_pairs`.** Builds the intramolecular
+  neighbour-pair block for a frame.
+- **LAMMPS force-field reader** and per-instance force-field parameters.
+- `molrs::ff::potential` is now a directory module; MMFF typifier internals
+  reorganized. The WASM / TypeScript public API is unchanged.
+
 ## 0.1.2
 
 Maintenance release. No public API or behavior changes — `0.1.2` is a
