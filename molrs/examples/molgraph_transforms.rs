@@ -3,7 +3,7 @@
 //! Demonstrates translation, rotation, cloning, and merging of molecules.
 //! Uses methane (CH4) as the example molecule.
 //!
-//! Run with: `cargo run -p molrs-core --example molgraph_transforms`
+//! Run with: `cargo run -p molcrafts-molrs --example molgraph_transforms`
 
 use molrs::spatial::geometry;
 use molrs::{Atom, Atomistic};

@@ -3,7 +3,7 @@
 //! Demonstrates ring detection, Frame round-trip conversion, and
 //! molecular summary statistics using a benzene (C6H6) molecule.
 //!
-//! Run with: `cargo run -p molrs-core --example molgraph_analysis`
+//! Run with: `cargo run -p molcrafts-molrs --example molgraph_analysis`
 
 use molrs::{Atom, Atomistic, PropValue, find_rings};
 

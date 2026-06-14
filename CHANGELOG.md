@@ -5,6 +5,24 @@ All notable changes to molrs are recorded here. This project follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-14
+
+### Added
+
+- **Force-field FFI handle.** `molrs_ffi::ForceFieldRef` — a stable, zero-copy
+  handle for `molrs::ff::ForceField` (the force-field analogue of `FrameRef`),
+  gated behind a new `ff` feature on `molcrafts-molrs-ffi`. Lets force-field
+  consumers (e.g. molpack) borrow a `ForceField` across the FFI boundary.
+- **`molrs::ff::potential::intramolecular_pairs`** — builds the intramolecular
+  neighbour-pair `Block` for a frame, consumed by relaxation / energy callers.
+- LAMMPS force-field reader and per-instance force-field parameter support.
+
+### Changed
+
+- `molrs::ff::potential` is now a directory module (`potential/`) rather than a
+  single file; MMFF typifier internals reorganized. The WASM / TypeScript
+  public surface (`@molcrafts/molrs` npm) is unchanged.
+
 ## [0.1.0] - 2026-06-10
 
 ### Added

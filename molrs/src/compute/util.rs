@@ -5,10 +5,9 @@
 //! 1. [`MicHelper`] — hoisted minimum-image-convention state. Box kind and PBC
 //!    flags are resolved **once per frame**; the per-atom [`disp`](MicHelper::disp)
 //!    call is pure scalar arithmetic with no allocations or dynamic dispatch.
-//! 2. [`get_positions_generic`] — returns views when the underlying columns are
-//!    contiguous, falling back to owned vectors only for non-contiguous layouts
-//!    (extremely rare). The [`PositionsRef`] enum lets callers dereference into
-//!    `&[F]` without cloning.
+//! 2. [`get_positions_ref`] — zero-copy position triplets: returns borrowed
+//!    views when the underlying columns are contiguous (the common case for
+//!    `Frame` and `FrameView`), avoiding the per-atom copies of an owned `Vec`.
 
 use molrs::Block;
 use molrs::Frame;
@@ -189,41 +188,6 @@ fn column_to_positions<'a, FA: FrameAccess>(
         }
         None => Ok(Positions::Owned(view.iter().copied().collect())),
     }
-}
-
-/// Owned position vectors: (x, y, z) each of length N.
-pub type PositionVecs = (Vec<F>, Vec<F>, Vec<F>);
-
-/// Extract x, y, z positions from the "atoms" block of any [`FrameAccess`] type.
-///
-/// **Legacy path** — always materializes owned `Vec`s. Prefer
-/// [`get_positions_ref`] in hot loops; it avoids the three 8N-byte copies
-/// when the underlying columns are contiguous (the common case for both
-/// `Frame` and `FrameView`).
-pub fn get_positions_generic(frame: &impl FrameAccess) -> Result<PositionVecs, ComputeError> {
-    let xs = frame
-        .get_float("atoms", "x")
-        .ok_or(ComputeError::MissingColumn {
-            block: "atoms",
-            col: "x",
-        })?;
-    let ys = frame
-        .get_float("atoms", "y")
-        .ok_or(ComputeError::MissingColumn {
-            block: "atoms",
-            col: "y",
-        })?;
-    let zs = frame
-        .get_float("atoms", "z")
-        .ok_or(ComputeError::MissingColumn {
-            block: "atoms",
-            col: "z",
-        })?;
-    Ok((
-        xs.iter().copied().collect(),
-        ys.iter().copied().collect(),
-        zs.iter().copied().collect(),
-    ))
 }
 
 /// Zero-copy position triplet when the frame exposes contiguous columns.

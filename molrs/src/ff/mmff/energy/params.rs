@@ -43,7 +43,7 @@ fn is_zero(x: f64) -> bool {
 
 /// MMFF resolved bond parameters.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct BondParams {
+pub(crate) struct BondParams {
     pub r0: f64,
     pub kb: f64,
 }
@@ -359,7 +359,7 @@ fn torsion_lookup(
 // --- bond stretch (explicit + empirical) ---------------------------------
 
 /// RDKit `getMMFFBondStretchParams` + `getMMFFBondStretchEmpiricalRuleParams`.
-pub(super) fn bond_params(topo: &Topo, types: &[u8], i: usize, j: usize) -> Option<BondParams> {
+pub(crate) fn bond_params(topo: &Topo, types: &[u8], i: usize, j: usize) -> Option<BondParams> {
     let bt = bond_type(topo, types, i, j);
     let (ti, tj) = (types[i].min(types[j]), types[i].max(types[j]));
     if let Some(b) = mmff_bond(bt, ti, tj) {

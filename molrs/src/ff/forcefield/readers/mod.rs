@@ -7,10 +7,13 @@
 //! (Å, kcal/mol, radians, e). The resulting `ForceField` is pure molrs units;
 //! there is no downstream unit fixup.
 //!
-//! The first concrete reader is [`OplsXmlReader`] (OPLS-AA / GROMACS XML,
-//! nm/kJ-mol, Ryckaert–Bellemans torsions). Further formats (LAMMPS, AMBER
-//! prmtop) land as additional implementors of [`ForceFieldReader`].
+//! Concrete readers: [`OplsXmlReader`](opls::OplsXmlReader) (OPLS-AA / GROMACS
+//! XML, nm/kJ-mol, Ryckaert–Bellemans torsions) and
+//! [`LammpsFfReader`](lammps::LammpsFfReader) (a LAMMPS `*.ff` include, AMBER/GAFF
+//! flavour). Further formats (AMBER prmtop) land as additional implementors of
+//! [`ForceFieldReader`].
 
+pub mod lammps;
 pub mod opls;
 
 use crate::ff::forcefield::ForceField;

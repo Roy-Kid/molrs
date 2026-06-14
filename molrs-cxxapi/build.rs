@@ -2,10 +2,9 @@ use std::path::PathBuf;
 
 /// CXX bridge interface schema — single source of truth.
 ///
-/// `f64` is replaced by `f32` or `f64` based on the `f64` feature,
-/// matching Atomiverse's `ATV_REAL`.  Only bulk-data ingestion
-/// (coordinates, per-atom fields, distances) uses `f64`.
-/// Scalars cross as `f64` always.
+/// The merged `molcrafts-molrs` crate hardcodes `F = f64`, so every coordinate,
+/// per-atom field, and distance crosses the bridge as `f64` unconditionally
+/// (matching Atomiverse's `ATV_REAL`). There is no precision-switching feature.
 const CXX_BRIDGE_SCHEMA: &str = r#"use super::*;
 
 #[cxx::bridge(namespace = "molrs")]
@@ -86,7 +85,7 @@ pub mod ffi {
 "#;
 
 fn main() {
-    // molrs-core hardcodes F = f64.  No precision substitution needed.
+    // molcrafts-molrs hardcodes F = f64.  No precision substitution needed.
     let bridge_src = CXX_BRIDGE_SCHEMA;
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());

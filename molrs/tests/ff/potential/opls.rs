@@ -7,7 +7,7 @@
 //! pre-resolved, exclusion- and 1-4-scaled list, and the kernels are
 //! topology-blind.
 
-use crate::helpers::{atoms_block, flat_coords, numerical_forces, topo_block};
+use crate::helpers::{flat_coords, numerical_forces, pairs_block, topo_block, typed_atoms_block};
 use molrs::ff::{ForceField, LBFGS, LbfgsConfig};
 use molrs::store::frame::Frame;
 use molrs::types::F;
@@ -32,7 +32,12 @@ fn opls_chain_ff() -> ForceField {
 
 fn opls_chain_frame(coords: &[[F; 3]]) -> Frame {
     let mut frame = Frame::new();
-    frame.insert("atoms", atoms_block(coords));
+    // Per-atom convention: `lj/cut` reads per-atom `type`, `coul/cut` reads
+    // per-atom `charge` (the old per-pair `qiqj` is gone).
+    frame.insert(
+        "atoms",
+        typed_atoms_block(coords, &["C", "C", "C", "C"], Some(&[0.1, -0.1, 0.1, -0.1])),
+    );
     frame.insert(
         "bonds",
         topo_block(
@@ -59,11 +64,8 @@ fn opls_chain_frame(coords: &[[F; 3]]) -> Frame {
             &["C-C-C-C"],
         ),
     );
-    // Only non-excluded pair in a 4-atom chain: the 1-4 pair (0,3).
-    frame.insert(
-        "pairs",
-        topo_block(&[("atomi", &[0]), ("atomj", &[3])], &["C"]),
-    );
+    // Only non-excluded pair in a 4-atom chain: the 1-4 pair (0,3), flagged.
+    frame.insert("pairs", pairs_block(&[0], &[3], &[true]));
     frame
 }
 

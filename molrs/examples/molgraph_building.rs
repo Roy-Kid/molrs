@@ -4,7 +4,7 @@
 //! Covers atom creation, property system, bonds/angles/dihedrals,
 //! neighbor queries, cascading deletion, and coarse-grained beads.
 //!
-//! Run with: `cargo run -p molrs-core --example molgraph_building`
+//! Run with: `cargo run -p molcrafts-molrs --example molgraph_building`
 
 use molrs::system::coarsegrain::CoarseGrain;
 use molrs::{Atom, Atomistic, PropValue, add_hydrogens, remove_hydrogens};

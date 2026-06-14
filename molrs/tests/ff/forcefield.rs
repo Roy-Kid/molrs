@@ -1,10 +1,11 @@
 //! End-to-end tests for `forcefield` (mod + xml): parse / build a `ForceField`
 //! and turn it into evaluable `Potentials` via `to_potentials` against a Frame.
 
-use crate::helpers::{atoms_frame, flat_coords, topo_block};
+use crate::helpers::{atoms_frame, flat_coords, pairs_block, topo_block, typed_atoms_block};
 use molrs::ff::ForceField;
 use molrs::ff::potential::extract_coords;
 use molrs::ff::read_forcefield_xml_str;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 // ---------------------------------------------------------------------------
@@ -39,17 +40,15 @@ fn compile_multi_style_sums_independent_contributions() {
     ff.def_pairstyle("lj/cut", &[("cutoff", 10.0)])
         .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)]);
 
-    // Two atoms at r = 2.0.
+    // Two atoms at r = 2.0; per-atom `type` for lj/cut, `is_14` neighbour list.
     let coords_xyz = [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
-    let mut frame = atoms_frame(&coords_xyz);
+    let mut frame = Frame::new();
+    frame.insert("atoms", typed_atoms_block(&coords_xyz, &["A", "A"], None));
     frame.insert(
         "bonds",
         topo_block(&[("atomi", &[0]), ("atomj", &[1])], &["A-A"]),
     );
-    frame.insert(
-        "pairs",
-        topo_block(&[("atomi", &[0]), ("atomj", &[1])], &["A"]),
-    );
+    frame.insert("pairs", pairs_block(&[0], &[1], &[false]));
 
     let pots = ff.to_potentials(&frame).unwrap();
     assert_eq!(pots.len(), 2);

@@ -23,9 +23,80 @@ pub mod kernels {
     pub use super::pair::lj_cut::{PairLJCut as PairLJ126, pair_lj_cut_ctor as pair_lj126_ctor};
 }
 
-use crate::ff::forcefield::{ForceField, Params};
+use std::borrow::Cow;
+use std::collections::HashSet;
+
+use ndarray::Array1;
+
+use crate::ff::forcefield::{ForceField, Params, SpecialBonds};
+use molrs::store::block::Block;
 use molrs::store::frame::Frame;
-use molrs::types::F;
+use molrs::types::{F, U};
+
+/// Build the intramolecular non-bonded `pairs` block (`atomi`, `atomj`, `is_14`)
+/// from a frame's bond/angle/dihedral topology: every `i < j` pair, excluding
+/// 1-2 (bonded) and 1-3 (angle) pairs and flagging 1-4 (dihedral-end) pairs.
+///
+/// This is the single, force-field-agnostic neighbour list that
+/// [`ForceField::to_potentials`] hands to every pair kernel — the same logic the
+/// MMFF frame builder used to compute privately, lifted here so every force field
+/// (GAFF/LAMMPS, OPLS, MMFF, …) shares one path. Per-pair scaling of the flagged
+/// 1-4 pairs is applied by the pair kernels using the force field's special-bonds
+/// weights, not baked into this list.
+pub fn intramolecular_pairs(frame: &Frame) -> Block {
+    let n_atoms = frame.get("atoms").and_then(|b| b.nrows()).unwrap_or(0);
+    let excluded_12 = end_pairs(frame, "bonds", "atomi", "atomj");
+    let excluded_13 = end_pairs(frame, "angles", "atomi", "atomk");
+    let set_14 = end_pairs(frame, "dihedrals", "atomi", "atoml");
+
+    let mut pi: Vec<U> = Vec::new();
+    let mut pj: Vec<U> = Vec::new();
+    let mut p14: Vec<bool> = Vec::new();
+    for a in 0..n_atoms {
+        for b in (a + 1)..n_atoms {
+            let key = (a, b);
+            if excluded_12.contains(&key) || excluded_13.contains(&key) {
+                continue;
+            }
+            pi.push(a as U);
+            pj.push(b as U);
+            p14.push(set_14.contains(&key));
+        }
+    }
+
+    let mut pairs = Block::new();
+    if !pi.is_empty() {
+        pairs
+            .insert("atomi", Array1::from_vec(pi).into_dyn())
+            .expect("fresh pairs block");
+        pairs
+            .insert("atomj", Array1::from_vec(pj).into_dyn())
+            .expect("fresh pairs block");
+        pairs
+            .insert("is_14", Array1::from_vec(p14).into_dyn())
+            .expect("fresh pairs block");
+    }
+    pairs
+}
+
+/// Sorted `(lo, hi)` end-atom pairs of a topology block (bond ends, angle i–k,
+/// dihedral i–l). A missing block or column yields an empty set.
+fn end_pairs(frame: &Frame, block: &str, col_a: &str, col_b: &str) -> HashSet<(usize, usize)> {
+    let Some(b) = frame.get(block) else {
+        return HashSet::new();
+    };
+    let (Some(a_col), Some(b_col)) = (b.get_uint(col_a), b.get_uint(col_b)) else {
+        return HashSet::new();
+    };
+    a_col
+        .iter()
+        .zip(b_col.iter())
+        .map(|(&i, &j)| {
+            let (i, j) = (i as usize, j as usize);
+            if i < j { (i, j) } else { (j, i) }
+        })
+        .collect()
+}
 
 // ---------------------------------------------------------------------------
 // Potential trait
@@ -172,13 +243,39 @@ impl crate::ff::forcefield::Style {
     /// The `(category, name)` → constructor mapping lives in the
     /// [`registry`](crate::ff::potential::registry); a new potential is added by
     /// registering its kernel, not by editing this dispatch.
-    pub fn to_potential(&self, frame: &Frame) -> Result<Option<Box<dyn Potential>>, String> {
+    pub fn to_potential(
+        &self,
+        frame: &Frame,
+        special_bonds: &SpecialBonds,
+    ) -> Result<Option<Box<dyn Potential>>, String> {
         let category = self.category();
         if category == "atom" {
             return Ok(None);
         }
+        // A style contributes nothing when the molecule carries no topology of its
+        // kind: a bonded style with no bonds/angles/dihedrals/impropers, or a pair
+        // style when the neighbour list is empty (e.g. methane, whose every atom
+        // pair is 1-2 or 1-3 excluded). Skip it rather than letting the kernel ctor
+        // fault on the absent/empty block.
+        let topo_block = match category {
+            "bond" => Some("bonds"),
+            "angle" => Some("angles"),
+            "dihedral" => Some("dihedrals"),
+            "improper" => Some("impropers"),
+            "pair" => Some("pairs"),
+            _ => None,
+        };
+        if let Some(block_name) = topo_block {
+            let rows = frame.get(block_name).and_then(|b| b.nrows()).unwrap_or(0);
+            if rows == 0 {
+                return Ok(None);
+            }
+        }
         let type_params = self.defs.collect_type_params();
-        if type_params.is_empty() {
+        // Bonded styles need type definitions; a pair style may be parameter-free
+        // (e.g. `coul/cut`, whose charges come from the frame), so don't demand
+        // them there — the kernel validates what it actually reads.
+        if type_params.is_empty() && category != "pair" {
             return Err(format!(
                 "Style '{}' ({}) has no type definitions",
                 self.name, category
@@ -194,7 +291,19 @@ impl crate::ff::forcefield::Style {
                 category, self.name
             )
         })?;
-        let pot = ctor(&self.params, &type_refs, frame)?;
+        // Project the ForceField's `special_bonds` 1-4 weights into the params the
+        // pair kernel reads (`lj14scale` / `coulomb14scale`), so the kernel scales
+        // 1-4-flagged pairs without the registry signature carrying special_bonds.
+        // Bonded kernels see their params unchanged.
+        let params: Cow<Params> = if category == "pair" {
+            let mut p = self.params.clone();
+            p.set("lj14scale", special_bonds.lj_14());
+            p.set("coulomb14scale", special_bonds.coul_14());
+            Cow::Owned(p)
+        } else {
+            Cow::Borrowed(&self.params)
+        };
+        let pot = ctor(&params, &type_refs, frame)?;
         Ok(Some(pot))
     }
 }
@@ -269,7 +378,7 @@ impl ForceField {
             {
                 continue;
             }
-            if let Some(pot) = style.to_potential(frame)? {
+            if let Some(pot) = style.to_potential(frame, self.special_bonds())? {
                 pots.push(pot);
             }
         }
@@ -334,18 +443,22 @@ mod tests {
     }
 
     fn make_lj_frame() -> Frame {
+        // Two atoms 2 Å apart, each of per-atom `type` "A" (the kernel reads
+        // per-atom LJ params keyed by it and Lorentz-Berthelot-combines).
         let mut frame = make_atoms_only_frame();
+        frame
+            .get_mut("atoms")
+            .unwrap()
+            .insert(
+                "type",
+                Array1::from_vec(vec!["A".to_string(), "A".to_string()]).into_dyn(),
+            )
+            .unwrap();
 
-        let mut pairs = Block::new();
-        pairs
-            .insert("atomi", Array1::from_vec(vec![0 as U]).into_dyn())
-            .unwrap();
-        pairs
-            .insert("atomj", Array1::from_vec(vec![1 as U]).into_dyn())
-            .unwrap();
-        pairs
-            .insert("type", Array1::from_vec(vec!["A".to_string()]).into_dyn())
-            .unwrap();
+        // Build the neighbour list the real way — `intramolecular_pairs` owns
+        // the atomi/atomj/is_14 convention; with no bonds it yields the single
+        // unexcluded (0,1) pair, is_14 = false.
+        let pairs = intramolecular_pairs(&frame);
         frame.insert("pairs", pairs);
 
         frame
@@ -452,6 +565,127 @@ mod tests {
             let sum = forces[dim] + forces[3 + dim];
             assert!(sum.abs() < 1e-5);
         }
+    }
+
+    #[test]
+    fn lj_cut_combines_distinct_types_lorentz_berthelot() {
+        // Two atoms 2.5 Å apart of distinct types A and B; the kernel must
+        // Lorentz-Berthelot-combine their per-atom params.
+        let mut frame = make_atoms_only_frame();
+        frame
+            .get_mut("atoms")
+            .unwrap()
+            .insert("x", Array1::from_vec(vec![0.0 as F, 2.5 as F]).into_dyn())
+            .unwrap();
+        frame
+            .get_mut("atoms")
+            .unwrap()
+            .insert(
+                "type",
+                Array1::from_vec(vec!["A".to_string(), "B".to_string()]).into_dyn(),
+            )
+            .unwrap();
+        frame.insert("pairs", intramolecular_pairs(&frame));
+
+        let mut ff = ForceField::new("test");
+        ff.def_pairstyle("lj/cut", &[])
+            .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)])
+            .def_type("B", &[("epsilon", 4.0), ("sigma", 3.0)]);
+
+        let pots = ff.to_potentials(&frame).unwrap();
+        let coords = extract_coords(&frame).unwrap();
+        let (energy, _) = pots.calc_energy_forces(&coords);
+
+        // ε = √(1·4) = 2, σ = (1+3)/2 = 2, at r = 2.5.
+        let (eps, sigma, r) = (2.0_f64, 2.0_f64, 2.5_f64);
+        let sr6 = (sigma / r).powi(6);
+        let expected = 4.0 * eps * (sr6 * sr6 - sr6);
+        assert!(
+            (energy - expected).abs() < 1e-9,
+            "energy={energy} expected={expected}"
+        );
+    }
+
+    #[test]
+    fn lj_cut_applies_special_bonds_14_scaling() {
+        // A 4-atom chain 0-1-2-3 (bonds 0-1-2-3, angles, one dihedral) so the
+        // neighbour list excludes 1-2/1-3 and flags only the (0,3) pair is_14.
+        // With special_bonds lj 1-4 = 0.5, the (0,3) LJ energy is halved.
+        let mut frame = Frame::new();
+        let mut atoms = Block::new();
+        atoms
+            .insert(
+                "x",
+                Array1::from_vec(vec![0.0 as F, 1.0, 2.0, 3.0]).into_dyn(),
+            )
+            .unwrap();
+        for col in ["y", "z"] {
+            atoms
+                .insert(col, Array1::from_vec(vec![0.0 as F; 4]).into_dyn())
+                .unwrap();
+        }
+        atoms
+            .insert(
+                "type",
+                Array1::from_vec(vec!["A".to_string(); 4]).into_dyn(),
+            )
+            .unwrap();
+        frame.insert("atoms", atoms);
+
+        let mut bonds = Block::new();
+        bonds
+            .insert("atomi", Array1::from_vec(vec![0 as U, 1, 2]).into_dyn())
+            .unwrap();
+        bonds
+            .insert("atomj", Array1::from_vec(vec![1 as U, 2, 3]).into_dyn())
+            .unwrap();
+        frame.insert("bonds", bonds);
+
+        let mut angles = Block::new();
+        angles
+            .insert("atomi", Array1::from_vec(vec![0 as U, 1]).into_dyn())
+            .unwrap();
+        angles
+            .insert("atomk", Array1::from_vec(vec![2 as U, 3]).into_dyn())
+            .unwrap();
+        frame.insert("angles", angles);
+
+        let mut dihedrals = Block::new();
+        dihedrals
+            .insert("atomi", Array1::from_vec(vec![0 as U]).into_dyn())
+            .unwrap();
+        dihedrals
+            .insert("atoml", Array1::from_vec(vec![3 as U]).into_dyn())
+            .unwrap();
+        frame.insert("dihedrals", dihedrals);
+
+        // The real neighbour list: only (0,3), flagged is_14.
+        let pairs = intramolecular_pairs(&frame);
+        assert_eq!(
+            pairs.nrows(),
+            Some(1),
+            "expected exactly the (0,3) 1-4 pair"
+        );
+        frame.insert("pairs", pairs);
+
+        let mut ff = ForceField::new("test");
+        ff.def_pairstyle("lj/cut", &[])
+            .def_type("A", &[("epsilon", 1.0), ("sigma", 1.0)]);
+        let mut sb = *ff.special_bonds();
+        sb.lj[2] = 0.5;
+        ff.set_special_bonds(sb);
+
+        let pots = ff.to_potentials(&frame).unwrap();
+        let coords = extract_coords(&frame).unwrap();
+        let (energy, _) = pots.calc_energy_forces(&coords);
+
+        // (0,3) at r = 3, ε = σ = 1, scaled by the 0.5 1-4 weight.
+        let sr6 = (1.0_f64 / 3.0).powi(6);
+        let expected = 0.5 * 4.0 * (sr6 * sr6 - sr6);
+        assert!(
+            (energy - expected).abs() < 1e-12,
+            "energy={energy} expected={expected}"
+        );
     }
 
     #[test]

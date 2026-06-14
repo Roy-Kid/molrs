@@ -27,7 +27,7 @@ pub(crate) mod charges;
 pub mod energy;
 mod hybrid;
 pub mod tables;
-mod topo;
+pub(crate) mod topo;
 
 pub use energy::{MmffEnergyBreakdown, MmffForceField};
 

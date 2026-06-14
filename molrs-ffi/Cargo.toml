@@ -1,6 +1,6 @@
 [package]
 name = "molcrafts-molrs-ffi"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 authors = ["MolCrafts"]
 description = "FFI layer for molrs with handle-based abstractions"
@@ -14,13 +14,14 @@ name = "molrs_ffi"
 [workspace]
 
 [features]
-f64 = ["molrs/f64"]
-i64 = ["molrs/i64"]
-u64 = ["molrs/u64"]
+# Stable handle for `molrs::ff::ForceField` (the `ForceFieldRef` analogue of
+# `FrameRef`). Gated because `molrs::ff` is; only force-field consumers
+# (e.g. molpack) enable it — wasm / cxxapi / capi do not.
+ff = ["molrs/ff"]
 
 [dependencies]
 # The merged crate with only its always-on core (default-features = false).
-molrs = { path = "../molrs", package = "molcrafts-molrs", version = "0.1.2", default-features = false }
+molrs = { path = "../molrs", package = "molcrafts-molrs", version = "0.1.3", default-features = false }
 slotmap = "1.0"
 
 [dev-dependencies]

@@ -418,3 +418,77 @@ fn lbfgs_minimize_batch_matches_single() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Generic-path parity (ac-004): the same RDKit fixtures evaluated through
+// `MMFFTypifier::build` -> `ForceField::to_potentials` (typify + nonbonded_pairs
+// + the generic kernels, including the now-wired out-of-plane term) must
+// reproduce the RDKit reference energy and a finite-difference-consistent
+// gradient. e_benzene / e_caffeine exercise the out-of-plane path.
+// ---------------------------------------------------------------------------
+
+fn generic_pots(name: &str) -> (molrs::ff::potential::Potentials, Vec<f64>) {
+    use molrs::ff::typifier::mmff::MMFFTypifier;
+    let dir = fixtures_dir();
+    let mol = load_sdf(&dir.join(format!("{name}.sdf")));
+    let coords = coords_of(&dir.join(format!("{name}.sdf")));
+    let pots = MMFFTypifier::mmff94()
+        .expect("load MMFF94")
+        .build(&mol)
+        .unwrap_or_else(|e| panic!("{name}: generic build failed: {e}"));
+    (pots, coords)
+}
+
+#[test]
+fn generic_path_total_energy_matches_rdkit() {
+    // Validated subset: molecules whose every MMFF parameter is an exact or
+    // equivalence-degraded table hit (bond/angle/stretch-bend/torsion/vdw/ele;
+    // out-of-plane is exercised by molecules below once their stbn/torsion
+    // labels resolve). Aromatic / sp2 molecules (benzene, caffeine, ethylene)
+    // still need stretch-bend + torsion eq-fallback label resolution — the
+    // remaining ac-004 work — so they are not yet asserted here.
+    let names = ["e_ethane"];
+    let mut fails = Vec::new();
+    for name in names {
+        let (pots, coords) = generic_pots(name);
+        let got = pots.calc_energy_forces(&coords).0;
+        let want = ref_energy(name);
+        let delta = (got - want).abs();
+        println!("{name:12} generic={got:14.6}  rdkit={want:14.6}  d={delta:.3e}");
+        if delta > ENERGY_TOL {
+            fails.push(format!(
+                "{name}: generic={got:.6} rdkit={want:.6} d={delta:.3e}"
+            ));
+        }
+    }
+    assert!(
+        fails.is_empty(),
+        "generic-path energy mismatches vs RDKit:\n  {}",
+        fails.join("\n  ")
+    );
+}
+
+#[test]
+fn generic_path_gradient_matches_finite_difference() {
+    let h = 1.0e-5;
+    for name in ["e_ethane"] {
+        let (pots, coords) = generic_pots(name);
+        let (_, forces) = pots.calc_energy_forces(&coords);
+        let mut max_err = 0.0f64;
+        for idx in 0..coords.len() {
+            let mut cp = coords.clone();
+            cp[idx] += h;
+            let ep = pots.calc_energy_forces(&cp).0;
+            let mut cm = coords.clone();
+            cm[idx] -= h;
+            let em = pots.calc_energy_forces(&cm).0;
+            let fd_grad = (ep - em) / (2.0 * h);
+            max_err = max_err.max((forces[idx] + fd_grad).abs());
+        }
+        println!("{name:12} generic grad max_err={max_err:.3e}");
+        assert!(
+            max_err < 1.0e-5,
+            "{name}: generic gradient FD max err {max_err:.3e} >= 1e-5"
+        );
+    }
+}

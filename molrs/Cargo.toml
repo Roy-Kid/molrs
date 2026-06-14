@@ -54,11 +54,6 @@ zarr       = ["dep:zarrs"]
 filesystem = ["zarr", "zarrs/filesystem"]
 blas       = ["dep:ndarray-linalg"]
 slow-tests = []
-# Deprecated / no-op (F/I/U are hardcoded to f64/i32/u32); kept so binders that
-# forward them (molrs-ffi/wasm/python) keep resolving.
-f64 = []
-i64 = []
-u64 = []
 
 [dependencies]
 # Always-on (core foundation).
