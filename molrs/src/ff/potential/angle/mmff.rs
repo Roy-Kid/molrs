@@ -159,6 +159,17 @@ pub fn mmff_stbn_ctor(
     let jc = block.get_uint("atomj").ok_or("missing atomj")?;
     let kc = block.get_uint("atomk").ok_or("missing atomk")?;
     let tc = block.get_string("stbn_type").ok_or("missing stbn_type")?;
+    // Per-angle reference bond lengths, merged onto the angles block by the
+    // typifier (`merge_stbn_r0`) — they are per-bond params, not per-stbn-type.
+    let r0ij = block
+        .get_float("r0_ij")
+        .ok_or("mmff_stbn: missing \"r0_ij\" column (merge_stbn_r0 not run)")?;
+    let r0kj = block
+        .get_float("r0_kj")
+        .ok_or("mmff_stbn: missing \"r0_kj\" column (merge_stbn_r0 not run)")?;
+    let th0 = block
+        .get_float("theta0")
+        .ok_or("mmff_stbn: missing \"theta0\" column (merge_stbn_r0 not run)")?;
 
     let n = ic.len();
     let mut pot = MMFFStretchBend {
@@ -182,10 +193,9 @@ pub fn mmff_stbn_ctor(
             .push(p.get("kba_ijk").ok_or("missing kba_ijk")? as F);
         pot.kba_kji
             .push(p.get("kba_kji").ok_or("missing kba_kji")? as F);
-        pot.r0_ij.push(p.get("r0_ij").ok_or("missing r0_ij")? as F);
-        pot.r0_kj.push(p.get("r0_kj").ok_or("missing r0_kj")? as F);
-        pot.theta0
-            .push((p.get("theta0").ok_or("missing theta0")? as F).to_radians());
+        pot.r0_ij.push(r0ij[idx] as F);
+        pot.r0_kj.push(r0kj[idx] as F);
+        pot.theta0.push((th0[idx] as F).to_radians());
     }
     Ok(Box::new(pot))
 }

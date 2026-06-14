@@ -8,7 +8,7 @@
 //!   - 15 bonds: Li-N, 2×N-S, 4×S=O, 2×S-C, 6×C-F
 //!
 //! Run:
-//!   cargo run -p molcrafts-molrs-ff --example typify_litfsi
+//!   cargo run -p molcrafts-molrs --example typify_litfsi --features ff
 
 use molrs::ff::typifier::Typifier;
 use molrs::ff::typifier::mmff::MMFFTypifier;
@@ -69,16 +69,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ring_info = molrs::find_rings(&mol);
     println!("Rings detected: {}", ring_info.num_rings());
 
-    let atom_types = typifier.assign_atom_types(&mol, &ring_info);
+    // typify → labeled Atomistic → Frame (the generic `to_potentials` input). The
+    // validated MMFF numeric types live in the atoms block's `type` column, in
+    // graph atom order.
+    let frame = match typifier.typify(&mol) {
+        Ok(typed) => typed.to_frame(),
+        Err(e) => {
+            println!("\nMMFF typification unsupported for this system: {e}");
+            println!(
+                "(MMFF94's RDKit-validated front-end does not type bare Li (Z=3); a\n\
+                 faithful LiTFSI run needs Li⁺/anion formal charges or an\n\
+                 MMFF-supported analogue.)"
+            );
+            return Ok(());
+        }
+    };
+    let atom_types = frame
+        .get("atoms")
+        .and_then(|b| b.get_string("type"))
+        .expect("atoms type column");
 
     println!("\n--- MMFF94 Atom Type Assignments ---\n");
     println!("{:<6} {:<8} {:<6} Description", "Index", "Element", "Type");
     println!("{}", "-".repeat(50));
 
-    let atoms_vec: Vec<_> = mol.atoms().collect();
-    for (i, (aid, atom)) in atoms_vec.iter().enumerate() {
+    for (i, ((_aid, atom), ty)) in mol.atoms().zip(atom_types.iter()).enumerate() {
         let sym = atom.get_str("symbol").unwrap_or("?");
-        let t = atom_types.get(aid).copied().unwrap_or(0);
+        let t: u32 = ty.parse().unwrap_or(0);
         let desc = type_description(sym, t);
         println!("{:<6} {:<8} {:<6} {}", i, sym, t, desc);
     }
@@ -87,8 +104,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 3: Inspect typed Frame
     // =========================================================================
     println!("\n--- Typed Frame ---\n");
-
-    let frame = typifier.typify(&mol)?;
 
     let atoms_block = frame.get("atoms").expect("atoms block");
     let bonds_block = frame.get("bonds").expect("bonds block");
@@ -106,8 +121,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let bond_types = bonds_block.get_string("type").expect("bond type");
-    let bond_i = bonds_block.get_uint("i").expect("bond i");
-    let bond_j = bonds_block.get_uint("j").expect("bond j");
+    let bond_i = bonds_block.get_uint("atomi").expect("bond atomi");
+    let bond_j = bonds_block.get_uint("atomj").expect("bond atomj");
     println!("\n--- Bond Type Labels ---\n");
     for idx in 0..bond_types.len() {
         println!(

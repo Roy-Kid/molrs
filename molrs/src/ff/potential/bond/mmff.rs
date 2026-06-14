@@ -1,7 +1,5 @@
 //! MMFF94 bond stretching: E = (1/2)*143.9325*kb*dr^2*(1 + cs*dr + 7/12*cs^2*dr^2)
 
-use std::collections::HashMap;
-
 use crate::ff::forcefield::Params;
 use crate::ff::potential::Potential;
 use crate::ff::potential::geometry::{mag3, sub3, validate_coords};
@@ -58,10 +56,12 @@ impl Potential for MMFFBondStretch {
 
 pub fn mmff_bond_ctor(
     _sp: &Params,
-    tp: &[(&str, &Params)],
+    _tp: &[(&str, &Params)],
     frame: &Frame,
 ) -> Result<Box<dyn Potential>, String> {
-    let type_map: HashMap<&str, &Params> = tp.iter().copied().collect();
+    // Per-instance parameters: the MMFF typifier baked `kb`/`r0` onto each bond
+    // (table → equivalence fallback → empirical rules). This kernel only reads the
+    // columns and evaluates — no force-field-specific resolution lives here.
     let block = frame
         .get("bonds")
         .ok_or("mmff_bond: missing \"bonds\" block")?;
@@ -71,9 +71,12 @@ pub fn mmff_bond_ctor(
     let j_col = block
         .get_uint("atomj")
         .ok_or("mmff_bond: missing \"atomj\"")?;
-    let ty_col = block
-        .get_string("type")
-        .ok_or("mmff_bond: missing \"type\"")?;
+    let kb_col = block
+        .get_float("kb")
+        .ok_or("mmff_bond: missing \"kb\" column (typifier did not bake bond params)")?;
+    let r0_col = block
+        .get_float("r0")
+        .ok_or("mmff_bond: missing \"r0\" column (typifier did not bake bond params)")?;
 
     let n = i_col.len();
     let (mut ai, mut aj, mut kb, mut r0) = (
@@ -82,15 +85,11 @@ pub fn mmff_bond_ctor(
         Vec::with_capacity(n),
         Vec::with_capacity(n),
     );
-
     for idx in 0..n {
-        let p = type_map
-            .get(ty_col[idx].as_str())
-            .ok_or_else(|| format!("mmff_bond: unknown type '{}'", ty_col[idx]))?;
         ai.push(i_col[idx] as usize);
         aj.push(j_col[idx] as usize);
-        kb.push(p.get("kb").ok_or("mmff_bond: missing 'kb'")? as F);
-        r0.push(p.get("r0").ok_or("mmff_bond: missing 'r0'")? as F);
+        kb.push(kb_col[idx] as F);
+        r0.push(r0_col[idx] as F);
     }
     Ok(Box::new(MMFFBondStretch {
         atom_i: ai,

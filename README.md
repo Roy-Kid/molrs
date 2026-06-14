@@ -38,16 +38,19 @@ By becoming the dependable core the rest of the MolCrafts ecosystem builds on, m
 
 ## Capabilities
 
-| Crate | Capability |
-|-------|------------|
-| `molcrafts-molrs` | Unified façade — re-exports every sub-crate under one namespace, opt in via feature flags |
-| `molcrafts-molrs-core` | Frame / Block column store, MolGraph topology, elements, rings, stereochemistry, Gasteiger charges, hydrogen perception, simulation boxes, neighbor search (LinkCell / brute force) |
-| `molcrafts-molrs-io` | Readers / writers for PDB, XYZ, mol2, SDF, CIF, GRO, POSCAR, CHGCAR, Cube, LAMMPS data/dump, DCD, Zarr V3 trajectories — plus a SMILES/SMARTS parser |
-| `molcrafts-molrs-compute` | Trajectory analysis: RDF, MSD, clustering, gyration / inertia tensors, PCA, k-means, density, diffraction, PMFT, order parameters, dielectric, environment matching |
-| `molcrafts-molrs-ff` | Force fields and potentials — MMFF94 bond/angle/torsion/oop/vdW/electrostatics, LJ, PME — with an atom typifier |
-| `molcrafts-molrs-conformer` | 3D conformer generation: distance geometry, fragment assembly, optimization, rotor search, stereo guards |
-| `molcrafts-molrs-signal` | Signal processing — FFT-based autocorrelation, window functions, frequency grids |
-| `molcrafts-molrs-cxxapi` | CXX bridge for zero-copy integration with Atomiverse C++ |
+molrs ships as a single crate, `molcrafts-molrs`, whose sub-systems are
+feature-gated modules (opt in via Cargo features; `full` enables all):
+
+| Module (feature) | Capability |
+|------------------|------------|
+| `core` (always on) | Frame / Block column store, MolGraph topology, elements, rings, stereochemistry, Gasteiger charges, hydrogen perception, simulation boxes, neighbor search (LinkCell / brute force) |
+| `io` (`io`) | Readers / writers for PDB, XYZ, mol2, SDF, CIF, GRO, POSCAR, CHGCAR, Cube, LAMMPS data/dump, DCD, Zarr V3 trajectories — plus a SMILES/SMARTS parser (`smiles`) |
+| `compute` (`compute`) | Trajectory analysis: RDF, MSD, clustering, gyration / inertia tensors, PCA, k-means, density, diffraction, PMFT, order parameters, dielectric, environment matching |
+| `ff` (`ff`) | Force fields and potentials — MMFF94 bond/angle/torsion/oop/vdW/electrostatics, LJ, PME — with an atom typifier |
+| `conformer` (`conformer`) | 3D conformer generation: distance geometry, fragment assembly, optimization, rotor search, stereo guards |
+| `signal` (`signal`) | Signal processing — FFT-based autocorrelation, window functions, frequency grids |
+
+The companion crate `molcrafts-molrs-cxxapi` provides a CXX bridge for zero-copy integration with Atomiverse C++.
 
 ## Install
 

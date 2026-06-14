@@ -4,7 +4,7 @@
 //! etc. with their parameters. A [`ForceField`] holds [`Style`]s, each of which
 //! holds typed parameter sets via [`StyleDefs`]. The forcefield can be compiled
 //! into computational [`Potential`](super::potential::Potential) objects via
-//! [`ForceField::compile`].
+//! [`ForceField::to_potentials`].
 
 pub mod readers;
 pub mod xml;
@@ -57,15 +57,7 @@ impl Params {
         self.inner.iter().map(|(k, v)| (k.as_str(), *v))
     }
 
-    pub fn inner(&self) -> &HashMap<String, f64> {
-        &self.inner
-    }
-
     // -- string params (element, and other string metadata by convention) --
-
-    pub fn get_str(&self, key: &str) -> Option<&str> {
-        self.strings.get(key).map(|s| s.as_str())
-    }
 
     pub fn set_str(&mut self, key: &str, value: &str) {
         self.strings.insert(key.to_owned(), value.to_owned());
@@ -646,10 +638,51 @@ impl Style {
 /// // Compile into Potentials with a Frame containing topology
 /// // let potentials = ff.to_potentials(&frame).unwrap();
 /// ```
+/// Per-nonbonded-kind 1-2 / 1-3 / 1-4 interaction scale weights — LAMMPS
+/// `special_bonds` semantics, owned by the [`ForceField`].
+///
+/// A weight of `0.0` fully excludes that neighbour class; `1.0` leaves it at
+/// full strength. molrs realises 1-2 / 1-3 *exclusion* by **omitting** those
+/// pairs from the neighbour list (`intramolecular_pairs`), so the pair kernels
+/// consume only the 1-4 weight (`[2]`) today; the 1-2 / 1-3 entries are stored
+/// for completeness and for force fields that *scale* (rather than exclude)
+/// close neighbours.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpecialBonds {
+    /// LJ / van-der-Waals `[1-2, 1-3, 1-4]` scale weights.
+    pub lj: [f64; 3],
+    /// Coulomb `[1-2, 1-3, 1-4]` scale weights.
+    pub coul: [f64; 3],
+}
+
+impl Default for SpecialBonds {
+    /// Exclude 1-2 and 1-3 neighbours; leave 1-4 unscaled. Force-field readers
+    /// override the 1-4 weights (Amber: lj `0.5`, coul `0.8333`).
+    fn default() -> Self {
+        Self {
+            lj: [0.0, 0.0, 1.0],
+            coul: [0.0, 0.0, 1.0],
+        }
+    }
+}
+
+impl SpecialBonds {
+    /// The LJ 1-4 scale weight (the `[2]` entry of [`Self::lj`]).
+    pub fn lj_14(&self) -> f64 {
+        self.lj[2]
+    }
+
+    /// The Coulomb 1-4 scale weight (the `[2]` entry of [`Self::coul`]).
+    pub fn coul_14(&self) -> f64 {
+        self.coul[2]
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ForceField {
     pub name: String,
     styles: Vec<Style>,
+    special_bonds: SpecialBonds,
 }
 
 impl ForceField {
@@ -657,7 +690,21 @@ impl ForceField {
         Self {
             name: name.to_owned(),
             styles: Vec::new(),
+            special_bonds: SpecialBonds::default(),
         }
+    }
+
+    /// The force field's [`SpecialBonds`] 1-2 / 1-3 / 1-4 nonbonded scale
+    /// weights. Pair kernels apply the 1-4 weight to flagged (`is_14`) pairs.
+    pub fn special_bonds(&self) -> &SpecialBonds {
+        &self.special_bonds
+    }
+
+    /// Replace the [`SpecialBonds`] weights. Force-field readers set these per
+    /// force field (Amber/GAFF, OPLS, …); the default excludes 1-2/1-3 and
+    /// leaves 1-4 unscaled.
+    pub fn set_special_bonds(&mut self, special_bonds: SpecialBonds) {
+        self.special_bonds = special_bonds;
     }
 
     // -- def_*style: register or retrieve existing style --
@@ -893,6 +940,7 @@ impl ForceField {
         let used_impropers = used("impropers");
 
         let mut out = ForceField::new(&self.name);
+        out.special_bonds = self.special_bonds;
         for style in &self.styles {
             let defs = match &style.defs {
                 StyleDefs::Atom(types) => StyleDefs::Atom(

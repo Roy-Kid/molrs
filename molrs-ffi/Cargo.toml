@@ -14,9 +14,10 @@ name = "molrs_ffi"
 [workspace]
 
 [features]
-f64 = ["molrs/f64"]
-i64 = ["molrs/i64"]
-u64 = ["molrs/u64"]
+# Stable handle for `molrs::ff::ForceField` (the `ForceFieldRef` analogue of
+# `FrameRef`). Gated because `molrs::ff` is; only force-field consumers
+# (e.g. molpack) enable it — wasm / cxxapi / capi do not.
+ff = ["molrs/ff"]
 
 [dependencies]
 # The merged crate with only its always-on core (default-features = false).

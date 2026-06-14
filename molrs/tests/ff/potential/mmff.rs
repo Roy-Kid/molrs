@@ -2,20 +2,16 @@
 //!
 //! The MMFF kernel structs (`MMFFBondStretch`, `MMFFAngleBend`, ...) expose no
 //! public constructor — they are built only through `mmff_*_ctor` during
-//! `ForceField::compile`. The genuine public path is therefore
+//! `ForceField::to_potentials`. The genuine public path is therefore
 //! `MMFFTypifier::build(mol) -> Potentials`, which we drive here with molecules
 //! built in code. Direct unit construction of each kernel is covered by inline
 //! `#[cfg(test)]` modules in src.
 //!
-//! NOTE (production defect, see suite report): the end-to-end MMFF `compile`
-//! path is currently broken for any molecule that has angles. The
-//! `mmff_stbn` (stretch-bend) kernel constructor requires per-type params
-//! `r0_ij` / `r0_kj`, but the embedded `MMFF94_XML` `StretchBend` entries only
-//! carry `kba_ijk` / `kba_kji`; the equilibrium bond lengths live in the bond
-//! table and are never merged in. `build()` therefore returns
-//! `Err("missing r0_ij")`. These tests pin that observed behavior so the suite
-//! stays GREEN; when the merge is implemented they will flip and must be
-//! updated to assert finite energy/forces (see the commented assertions).
+//! All generic-path MMFF kernels are wired: stretch-bend merges its per-angle
+//! `r0_ij` / `r0_kj` / `theta0` (via the typifier's `merge_stbn_r0`), and
+//! out-of-plane (`mmff_oop`) resolves each trigonal centre's `koop` through the
+//! canonical equivalence-degraded key the typifier emits, so `build()` yields a
+//! complete `Potentials` with finite energy and forces.
 
 use molrs::ff::typifier::Typifier;
 use molrs::ff::typifier::mmff::MMFFTypifier;
@@ -62,36 +58,35 @@ fn ethane() -> Atomistic {
 
 #[test]
 fn ethane_typifies_to_a_complete_frame() {
-    // The typification half of the pipeline is fully functional: it produces a
-    // Frame with atoms/bonds/angles/dihedrals/pairs blocks ready for compile.
+    // The typification half: `typify` returns a labeled Atomistic that
+    // materializes (`to_frame`) into atoms/bonds/angles/dihedrals blocks ready
+    // for compile. The neighbour list (`pairs`) is `build()`'s job, not typify's.
     let mol = ethane();
-    let frame = typifier().typify(&mol).expect("typify ethane");
+    let frame = typifier().typify(&mol).expect("typify ethane").to_frame();
     assert_eq!(frame.get("atoms").unwrap().nrows(), Some(8));
     assert_eq!(frame.get("bonds").unwrap().nrows(), Some(7));
     assert_eq!(frame.get("angles").unwrap().nrows(), Some(12));
     assert_eq!(frame.get("dihedrals").unwrap().nrows(), Some(9));
-    assert!(frame.contains_key("pairs"));
+    // typify is pairs-free now — `build()` owns the neighbour list.
+    assert!(!frame.contains_key("pairs"));
     // The angles block carries the stretch-bend type column the stbn kernel
     // reads — confirming the topology side is wired up.
     assert!(frame.get("angles").unwrap().contains_key("stbn_type"));
 }
 
 #[test]
-fn ethane_build_currently_fails_on_stretch_bend_params() {
-    // DOCUMENTED PRODUCTION DEFECT: compile of the stretch-bend kernel needs
-    // r0_ij/r0_kj which the embedded MMFF94 XML does not supply for StretchBend
-    // type rows. Until the param merge is added, build() returns this error.
+fn ethane_build_succeeds_with_all_kernels() {
+    // Ethane's carbons are four-coordinate, so MMFF defines no out-of-plane
+    // term; every kernel resolves (stretch-bend params merged, oop correctly
+    // skipped) and build() yields finite energy + forces.
     let mol = ethane();
-    let err = typifier().build(&mol).expect_err("stbn ctor should fail");
+    let pots = typifier().build(&mol).expect("build potentials");
+    let frame = typifier().typify(&mol).expect("typify").to_frame();
+    let coords = molrs::ff::potential::extract_coords(&frame).expect("coords");
+    let (e, forces) = pots.calc_energy_forces(&coords);
+    assert!(e.is_finite(), "energy not finite: {e}");
     assert!(
-        err.contains("r0_ij") || err.contains("r0_kj"),
-        "expected missing stretch-bend bond length, got: {err}"
+        forces.iter().all(|f| f.is_finite()),
+        "non-finite force component"
     );
-
-    // When the defect is fixed, replace the above with:
-    //   let pots = typifier().build(&mol).expect("build potentials");
-    //   let coords = /* flat positions */;
-    //   let (e, forces) = pots.calc_energy_forces(&coords);
-    //   assert!(e.is_finite());
-    //   assert!(forces.iter().all(|f| f.is_finite()));
 }

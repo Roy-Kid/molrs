@@ -26,7 +26,7 @@ mod bond;
 mod geom;
 mod nonbonded;
 mod oop;
-mod params;
+pub(crate) mod params;
 mod stretchbend;
 mod torsion;
 

@@ -54,6 +54,39 @@ pub fn topo_block(idx_cols: &[(&str, &[U])], types: &[&str]) -> Block {
     block
 }
 
+/// `"atoms"` block with x/y/z + per-atom `type` (and optional `charge`) — the
+/// per-atom convention the `lj/cut` / `coul/cut` kernels read.
+pub fn typed_atoms_block(coords: &[[F; 3]], types: &[&str], charges: Option<&[F]>) -> Block {
+    let mut atoms = atoms_block(coords);
+    atoms
+        .insert(
+            "type",
+            Array1::from_vec(types.iter().map(|s| s.to_string()).collect()).into_dyn(),
+        )
+        .unwrap();
+    if let Some(q) = charges {
+        atoms
+            .insert("charge", Array1::from_vec(q.to_vec()).into_dyn())
+            .unwrap();
+    }
+    atoms
+}
+
+/// `"pairs"` neighbour-list block in the per-atom convention (`atomi/atomj/is_14`).
+pub fn pairs_block(atomi: &[U], atomj: &[U], is_14: &[bool]) -> Block {
+    let mut block = Block::new();
+    block
+        .insert("atomi", Array1::from_vec(atomi.to_vec()).into_dyn())
+        .unwrap();
+    block
+        .insert("atomj", Array1::from_vec(atomj.to_vec()).into_dyn())
+        .unwrap();
+    block
+        .insert("is_14", Array1::from_vec(is_14.to_vec()).into_dyn())
+        .unwrap();
+    block
+}
+
 /// Flat `[x0,y0,z0, ...]` coordinate vector from `[x,y,z]` positions.
 pub fn flat_coords(coords: &[[F; 3]]) -> Vec<F> {
     coords.iter().flat_map(|p| [p[0], p[1], p[2]]).collect()

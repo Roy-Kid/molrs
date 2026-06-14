@@ -1,10 +1,11 @@
 //! Lennard-Jones 12-6 pair potential: E = 4*eps*((sigma/r)^12 - (sigma/r)^6).
 
-use crate::helpers::{atoms_frame, numerical_forces, topo_block};
+use crate::helpers::{numerical_forces, pairs_block, typed_atoms_block};
 use molrs::ff::ForceField;
 use molrs::ff::potential::Potential;
 use molrs::ff::potential::extract_coords;
 use molrs::ff::potential::pair::lj_cut::PairLJCut;
+use molrs::store::frame::Frame;
 use molrs::types::F;
 
 const EPS: F = 1.0;
@@ -86,11 +87,14 @@ fn compile_path_resolves_self_pair_type() {
     let mut ff = ForceField::new("pair-only");
     ff.def_pairstyle("lj/cut", &[("cutoff", 10.0)])
         .def_type("Ar", &[("epsilon", EPS), ("sigma", SIGMA)]);
-    let mut frame = atoms_frame(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
+    // Per-atom convention: atoms carry `type`; the neighbour list is
+    // `atomi/atomj/is_14`. Two Ar atoms Lorentz-Berthelot-combine to (EPS, SIGMA).
+    let mut frame = Frame::new();
     frame.insert(
-        "pairs",
-        topo_block(&[("atomi", &[0]), ("atomj", &[1])], &["Ar"]),
+        "atoms",
+        typed_atoms_block(&[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], &["Ar", "Ar"], None),
     );
+    frame.insert("pairs", pairs_block(&[0], &[1], &[false]));
     let pots = ff.to_potentials(&frame).unwrap();
     let coords = extract_coords(&frame).unwrap();
     let expected = 4.0 * (1.0 / 4096.0 - 1.0 / 64.0);
