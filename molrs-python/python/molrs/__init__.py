@@ -85,6 +85,9 @@ from .molrs import (
     read_forcefield_xml_str,
     read_opls_xml,
     read_opls_xml_str,
+    read_lammps_forcefield,
+    read_lammps_forcefield_str,
+    intramolecular_pairs,
     extract_coords,
     build_mmff_potentials,
     # Field-name convention submodule
@@ -138,6 +141,8 @@ from .forcefield import (  # noqa: F401
     read_forcefield_xml_str,
     read_opls_xml,
     read_opls_xml_str,
+    read_lammps_forcefield,
+    read_lammps_forcefield_str,
 )
 
 from . import io  # molpy-compatible I/O facade (read_lammps_data, …)
@@ -232,6 +237,9 @@ __all__ = [
     "read_forcefield_xml_str",
     "read_opls_xml",
     "read_opls_xml_str",
+    "read_lammps_forcefield",
+    "read_lammps_forcefield_str",
+    "intramolecular_pairs",
     "extract_coords",
     "signal_acf_fft",
     "signal_apply_window",

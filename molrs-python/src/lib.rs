@@ -208,6 +208,12 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(forcefield::read_forcefield_xml_str_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::read_opls_xml_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::read_opls_xml_str_py, m)?)?;
+    m.add_function(wrap_pyfunction!(forcefield::read_lammps_forcefield_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        forcefield::read_lammps_forcefield_str_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(forcefield::intramolecular_pairs_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::extract_coords_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::build_mmff_potentials_py, m)?)?;
 
