@@ -17,7 +17,7 @@ frame. Parameters flow as keyword args by convention: numeric ones (``k``,
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeVar
 
 from .molrs import ForceField as _RsForceField
 from .molrs import read_forcefield_xml as _rs_read_forcefield_xml
@@ -26,6 +26,10 @@ from .molrs import read_opls_xml as _rs_read_opls_xml
 from .molrs import read_opls_xml_str as _rs_read_opls_xml_str
 from .molrs import read_lammps_forcefield as _rs_read_lammps_forcefield
 from .molrs import read_lammps_forcefield_str as _rs_read_lammps_forcefield_str
+
+# def_style returns a bound handle of the SAME Style subclass it was given, so
+# `ff.def_style(AtomStyle(...)).def_type(...)` keeps the subclass-specific def_type.
+_StyleT = TypeVar("_StyleT", bound="Style")
 
 
 def _name_of(x: Any) -> str:
@@ -635,7 +639,7 @@ class ForceField(_RsForceField):
         else:
             getattr(_RsForceField, f"def_{category}style")(self, name)
 
-    def def_style(self, style: Style) -> Style:
+    def def_style(self, style: _StyleT) -> _StyleT:
         """Register ``style`` (an unbound :class:`Style`, e.g.
         ``BondHarmonicStyle()``) and return a bound handle of the same class."""
         self._ensure_style(style.category, style.name)
