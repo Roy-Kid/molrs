@@ -3,7 +3,8 @@
 //! E(φ) = Σ_{n=1..3} K_n · [1 − cos(n·φ − φ_n)]
 //!
 //! `K_n` are force constants (kcal/mol) and `φ_n` the per-term phases in
-//! degrees. This kernel covers the *core* three-term cosine expansion that the
+//! radians (readers normalize at their boundary). This kernel covers the *core*
+//! three-term cosine expansion that the
 //! molpy `class2` dihedral data model carries (`k1`,`phi1`,…,`k3`,`phi3`). The
 //! optional class2 cross terms (mbt / ebt / at / aat / bb13), which are emitted
 //! as separate LAMMPS coeff lines and not part of this style's per-type params,
@@ -94,7 +95,7 @@ pub fn dihedral_class2_ctor(
         let mut t = [(0.0 as F, 0.0 as F); 3];
         for (m, slot) in t.iter_mut().enumerate() {
             let kn = p.get(&format!("k{}", m + 1)).unwrap_or(0.0) as F;
-            let pn = (p.get(&format!("phi{}", m + 1)).unwrap_or(0.0) as F).to_radians();
+            let pn = p.get(&format!("phi{}", m + 1)).unwrap_or(0.0) as F; // radians
             *slot = (kn, pn);
         }
         terms.push(t);

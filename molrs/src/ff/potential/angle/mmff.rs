@@ -1,4 +1,8 @@
 //! MMFF94 angle bending and stretch-bend coupling kernels.
+//!
+//! `theta0` is consumed in radians; the MMFF typifier normalizes the XML's
+//! degree reference angles to radians at the reader boundary
+//! (`forcefield::xml::read_mmff_params_xml_str`).
 
 use std::collections::HashMap;
 
@@ -78,7 +82,7 @@ pub fn mmff_angle_ctor(
         aj.push(jc[idx] as usize);
         ak.push(kc[idx] as usize);
         ka.push(p.get("ka").ok_or("missing 'ka'")? as F);
-        th0.push((p.get("theta0").ok_or("missing 'theta0'")? as F).to_radians());
+        th0.push(p.get("theta0").ok_or("missing 'theta0'")? as F); // radians
     }
     Ok(Box::new(MMFFAngleBend {
         atom_i: ai,
@@ -195,7 +199,7 @@ pub fn mmff_stbn_ctor(
             .push(p.get("kba_kji").ok_or("missing kba_kji")? as F);
         pot.r0_ij.push(r0ij[idx] as F);
         pot.r0_kj.push(r0kj[idx] as F);
-        pot.theta0.push((th0[idx] as F).to_radians());
+        pot.theta0.push(th0[idx] as F); // radians (typifier normalized at read)
     }
     Ok(Box::new(pot))
 }

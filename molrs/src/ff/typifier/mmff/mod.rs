@@ -137,8 +137,9 @@ fn merge_stbn_r0(frame: &mut Frame, ff: &ForceField) -> Result<(), String> {
         .filter_map(|(name, p)| p.get("r0").map(|r0| (name, r0)))
         .collect();
 
-    // theta0 (reference angle, degrees) per angle-type label, from mmff_angle —
-    // the stretch-bend term references the same equilibrium angle as the bend.
+    // theta0 (reference angle, radians — normalized at the XML reader boundary)
+    // per angle-type label, from mmff_angle — the stretch-bend term references
+    // the same equilibrium angle as the bend.
     let theta0_by_type: HashMap<String, f64> = ff
         .get_style("angle", "mmff_angle")
         .map(|s| {

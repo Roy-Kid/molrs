@@ -108,10 +108,11 @@ pub fn angle_harmonic_ctor(
             .or_else(|| params.get("k0"))
             .ok_or_else(|| format!("AngleHarmonic type '{}': missing 'k' (or 'k0')", label))?
             as F;
+        // theta0 is consumed in radians; readers normalize at their boundary.
         let theta0_rad = params
             .get("theta0")
             .ok_or_else(|| format!("AngleHarmonic type '{}': missing 'theta0'", label))?
-            .to_radians() as F;
+            as F;
 
         atom_i.push(i_col[idx] as usize);
         atom_j.push(j_col[idx] as usize);

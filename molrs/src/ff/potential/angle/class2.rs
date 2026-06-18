@@ -3,7 +3,7 @@
 //!
 //! The COMPASS/class2 anharmonic angle core term (cross-terms bb/ba are
 //! separate styles, not implemented here). Parameters per type: `theta0`
-//! (degrees, converted to radians at construction), `k2`, `k3`, `k4`.
+//! (radians; readers normalize to radians at their boundary), `k2`, `k3`, `k4`.
 
 use std::collections::HashMap;
 
@@ -118,7 +118,7 @@ pub fn angle_class2_ctor(
         ai.push(i_col[idx] as usize);
         aj.push(j_col[idx] as usize);
         ak.push(k_col[idx] as usize);
-        t0.push(need(p, "theta0", label)?.to_radians());
+        t0.push(need(p, "theta0", label)?); // consumed in radians
         k2.push(need(p, "k2", label)?);
         k3.push(need(p, "k3", label)?);
         k4.push(need(p, "k4", label)?);

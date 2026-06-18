@@ -1,6 +1,6 @@
 ---
 title: 力场角度/相位单位约定归一（kernels 吃弧度，readers 边界换算）
-status: approved
+status: code-complete
 created: 2026-06-18
 ---
 
@@ -51,14 +51,14 @@ molrs 的角/二面角/improper kernel 一律在构造期对 `theta0`/`phase`/`c
 
 ## Tasks
 
-- [ ] Write a failing OPLS equilibrium-angle-energy test (θ=θ0 ⇒ angle energy ≈ 0) — currently RED due to the double-conversion
-- [ ] Write/invert reader-convention tests (lammps angle theta0 stored as radians; compile_path expects radians) — RED
-- [ ] Add deg→rad normalization in LAMMPS reader (angle theta0, dihedral phase, improper chi0) + rewrite its unit doc-block
-- [ ] Add deg→rad normalization in the MMFF typifier theta0 storage; audit mmff/energy/* path stays correct (RDKit parity unchanged)
-- [ ] Drop .to_radians() from angle (harmonic/class2/mmff) + dihedral (periodic/charmm/class2) + improper (periodic/harmonic) kernels; update doc-blocks to "radians"
-- [ ] Update CLAUDE.md core convention (angle/phase/chi0 radians internal, normalized at reader boundary)
-- [ ] Verify atomically: OPLS build() angle energy ≈0 at equilibrium; LAMMPS angle energies unchanged; MMFF RDKit parity (e_ethane ~2e-5) unchanged; full angle/dihedral/improper energy suites green
-- [ ] Run cargo fmt --all --check && cargo clippy -- -D warnings && cargo test (ff feature set)
+- [x] Write a failing OPLS equilibrium-angle-energy test (θ=θ0 ⇒ angle energy ≈ 0) — was RED (105.77 kcal/mol), now GREEN (`potential::opls::opls_angle_energy_zero_at_reference`)
+- [x] Write/invert reader-convention tests (lammps angle theta0 stored as radians; compile_path expects radians) — `angle_theta0_normalized_to_radians`, `compile_path_consumes_radians`
+- [x] Add deg→rad normalization in LAMMPS reader (angle theta0, dihedral phase, improper chi0) + rewrite its unit doc-block
+- [x] Add deg→rad normalization at the MMFF XML reader boundary (`parse_mmff_angles` in `forcefield/xml.rs`, the single source for the generic MMFF angle Params); audited mmff/energy/* — fully self-contained (own params.rs tables, never reads the generic readers), RDKit parity unchanged
+- [x] Drop .to_radians() from angle (harmonic/class2/mmff) + dihedral (periodic/charmm/class2) + improper (periodic/harmonic) kernels; update doc-blocks to "radians"
+- [x] Update CLAUDE.md core convention (angle/phase/chi0 radians internal, normalized at reader boundary)
+- [x] Verify atomically: OPLS angle energy ≈0 at equilibrium; LAMMPS angle energies unchanged; MMFF RDKit parity (generic_path_total_energy_matches_rdkit) unchanged; full angle/dihedral/improper + opls/mmff suites green (839 lib + 98 ff integration tests)
+- [x] Run cargo fmt --all --check && cargo clippy --features "io,signal,smiles,ff,conformer" --lib --tests -- -D warnings && cargo test (all clean)
 
 ## Testing strategy
 

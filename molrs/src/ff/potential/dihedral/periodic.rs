@@ -4,7 +4,8 @@
 //!
 //! AMBER-family torsions are a sum of cosine terms per quadruple. The parameter
 //! encoding is **per-term indexed keys** `k{m}`, `n{m}`, `d{m}` (1-indexed, `d`
-//! in degrees), scanned upward from `m = 1` until a term is absent. A single
+//! the phase in radians — readers normalize at their boundary), scanned upward
+//! from `m = 1` until a term is absent. A single
 //! unindexed `k`/`n`/`d` triple is accepted as the one-term case (the common
 //! GAFF default), keeping the form identical to one CHARMM term. This is the
 //! canonical encoding the molpy → molrs ForceField bridge emits.
@@ -80,7 +81,7 @@ fn collect_terms(p: &Params, label: &str) -> Result<Vec<Term>, String> {
         terms.push(Term {
             k: kk.unwrap() as F,
             n: n as F,
-            d: (d as F).to_radians(),
+            d: d as F, // radians (readers normalize at their boundary)
         });
         m += 1;
     }
@@ -94,7 +95,7 @@ fn collect_terms(p: &Params, label: &str) -> Result<Vec<Term>, String> {
             terms.push(Term {
                 k: k as F,
                 n: n as F,
-                d: (d as F).to_radians(),
+                d: d as F, // radians (readers normalize at their boundary)
             });
         } else {
             return Err(format!(

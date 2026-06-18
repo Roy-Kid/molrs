@@ -6,7 +6,8 @@
 //! quadruple I-J-K-L: χ = |φ| ∈ [0, π], where φ = atan2(…) is the signed
 //! dihedral. Hence dχ/dφ = sign(φ), so dE/dφ = 2K(χ − χ₀)·sign(φ), projected
 //! onto Cartesian forces by the shared dihedral routine. `χ₀` is the
-//! equilibrium angle in degrees (0 for a planar centre).
+//! equilibrium angle in radians (0 for a planar centre); readers normalize the
+//! LAMMPS degree value to radians at their boundary.
 
 use std::collections::HashMap;
 
@@ -62,7 +63,7 @@ impl Potential for ImproperHarmonic {
     }
 }
 
-/// Construct an [`ImproperHarmonic`] from per-type params (`k`, `chi0` degrees)
+/// Construct an [`ImproperHarmonic`] from per-type params (`k`, `chi0` radians)
 /// and a Frame's `"impropers"` block (`atomi/atomj/atomk/atoml/type`).
 pub fn improper_harmonic_ctor(
     _sp: &Params,
@@ -97,7 +98,7 @@ pub fn improper_harmonic_ctor(
         ak.push(kc[idx] as usize);
         al.push(lc[idx] as usize);
         kk.push(p.get("k").ok_or("improper_harmonic: missing k")? as F);
-        cc.push((p.get("chi0").unwrap_or(0.0) as F).to_radians());
+        cc.push(p.get("chi0").unwrap_or(0.0) as F); // radians (normalized at read)
     }
     Ok(Box::new(ImproperHarmonic {
         atom_i: ai,

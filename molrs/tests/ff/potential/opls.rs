@@ -79,6 +79,49 @@ fn start_coords() -> [[F; 3]; 4] {
     ]
 }
 
+/// ac-001 (ff-radians-convention): OPLS stores `theta0` in radians (GROMACS
+/// native). With the kernel consuming radians directly — no double
+/// `.to_radians()` in the ctor — the harmonic-angle energy at the reference
+/// angle is ~0, not the ~100+ kcal/mol the old double-conversion produced
+/// (1.911 rad mistakenly read as degrees → 0.0334 rad → dθ ≈ 1.878).
+#[test]
+fn opls_angle_energy_zero_at_reference() {
+    let theta0 = 1.911_f64; // OPLS water/backbone reference, radians
+
+    let mut ff = ForceField::new("opls-angle");
+    ff.def_anglestyle("harmonic")
+        .def_type("C-C-C", &[("k", 60.0), ("theta0", theta0)]);
+
+    // Place three atoms so the i-j-k angle at vertex j is exactly theta0:
+    // i and k each at distance r from j, splayed ±theta0/2 about the x axis.
+    let r = 1.5_f64;
+    let half = theta0 / 2.0;
+    let xyz = [
+        [r * half.cos(), r * half.sin(), 0.0],
+        [0.0, 0.0, 0.0],
+        [r * half.cos(), -r * half.sin(), 0.0],
+    ];
+
+    let mut frame = Frame::new();
+    frame.insert(
+        "angles",
+        topo_block(
+            &[("atomi", &[0]), ("atomj", &[1]), ("atomk", &[2])],
+            &["C-C-C"],
+        ),
+    );
+
+    let pots = ff
+        .to_potentials(&frame)
+        .expect("compile angle-only OPLS frame");
+    let coords = flat_coords(&xyz);
+    let (e, _) = pots.calc_energy_forces(&coords);
+    assert!(
+        e.abs() < 1e-6,
+        "OPLS angle energy at the reference angle must be ~0, got {e} kcal/mol"
+    );
+}
+
 #[test]
 fn opls_assembly_compiles_and_force_matches_finite_difference() {
     let ff = opls_chain_ff();
