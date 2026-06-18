@@ -28,6 +28,12 @@ use molrs::io::trajectory::dcd::{
 use molrs::io::trajectory::lammps_dump::{
     LAMMPSTrajReader, open_lammps_dump, read_lammps_dump, write_lammps_dump,
 };
+use molrs::io::trajectory::trr::{
+    TrrReader, open_trr, read_trr as read_trr_rs, write_trr as write_trr_rs,
+};
+use molrs::io::trajectory::xtc::{
+    XtcReader, open_xtc, read_xtc as read_xtc_rs, write_xtc as write_xtc_rs,
+};
 use molrs::store::frame::Frame as CoreFrame;
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
@@ -1056,6 +1062,348 @@ pub fn write_dcd(path: &str, frames: Vec<PyRef<'_, PyFrame>>) -> PyResult<()> {
         .map(|f| f.clone_core_frame())
         .collect::<PyResult<_>>()?;
     write_dcd_rs(path, &core_frames).map_err(io_error_to_pyerr)
+}
+
+// ============================================================================
+// GROMACS TRR / XTC trajectories
+// ============================================================================
+
+/// Read every frame of a GROMACS TRR trajectory and return a list of Frames.
+///
+/// TRR is the full-precision GROMACS format. Each frame's ``"atoms"`` block has
+/// ``id`` and ``x``/``y``/``z`` (nm), plus ``vx``/``vy``/``vz`` and
+/// ``fx``/``fy``/``fz`` when the frame carries velocities / forces. The box is
+/// in ``frame.simbox``; ``step``/``time``/``lambda`` in ``frame.meta``.
+///
+/// For long trajectories prefer the lazy :class:`TRRTrajReader`.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a ``.trr`` file.
+///
+/// Returns
+/// -------
+/// list[Frame]
+///
+/// Examples
+/// --------
+/// >>> frames = molrs.read_trr("traj.trr")
+#[pyfunction]
+pub fn read_trr(path: &str) -> PyResult<Vec<PyFrame>> {
+    let frames = read_trr_rs(path).map_err(io_error_to_pyerr)?;
+    frames.into_iter().map(PyFrame::from_core_frame).collect()
+}
+
+/// Read every frame of a GROMACS XTC trajectory and return a list of Frames.
+///
+/// XTC is the compressed GROMACS format (lossy, ``1/precision`` nm resolution).
+/// Each frame's ``"atoms"`` block has ``id`` and ``x``/``y``/``z`` (nm); the box
+/// is in ``frame.simbox``; ``step``/``time``/``precision`` in ``frame.meta``.
+/// Both the classic (1995) and 2023 magic numbers are accepted.
+///
+/// For long trajectories prefer the lazy :class:`XTCTrajReader`.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a ``.xtc`` file.
+///
+/// Returns
+/// -------
+/// list[Frame]
+///
+/// Examples
+/// --------
+/// >>> frames = molrs.read_xtc("traj.xtc")
+#[pyfunction]
+pub fn read_xtc(path: &str) -> PyResult<Vec<PyFrame>> {
+    let frames = read_xtc_rs(path).map_err(io_error_to_pyerr)?;
+    frames.into_iter().map(PyFrame::from_core_frame).collect()
+}
+
+/// Lazy, indexed reader for GROMACS TRR trajectory files.
+///
+/// Builds a per-frame byte-offset index on first random access (or eagerly via
+/// ``build_index()``); subsequent ``reader[i]`` / ``read_step(i)`` is an O(1)
+/// seek plus one frame parse. Exposes the same surface as
+/// :class:`DCDTrajReader`.
+#[pyclass(name = "TRRTrajReader", unsendable)]
+pub struct PyTrrTrajReader {
+    inner: Option<TrrReader<Box<dyn ReadSeek>>>,
+    cursor: usize,
+}
+
+impl PyTrrTrajReader {
+    fn reader(&mut self) -> PyResult<&mut TrrReader<Box<dyn ReadSeek>>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("operation on a closed TRRTrajReader"))
+    }
+}
+
+#[pymethods]
+impl PyTrrTrajReader {
+    #[new]
+    fn py_new(path: &str) -> PyResult<Self> {
+        let inner = open_trr(path).map_err(io_error_to_pyerr)?;
+        Ok(Self {
+            inner: Some(inner),
+            cursor: 0,
+        })
+    }
+
+    /// Number of frames in the trajectory (triggers index construction).
+    #[getter]
+    fn n_frames(&mut self) -> PyResult<usize> {
+        traj_len(self.reader()?)
+    }
+
+    /// Force the frame-offset index to be built now.
+    fn build_index(&mut self) -> PyResult<()> {
+        self.reader()?.build_index().map_err(io_error_to_pyerr)
+    }
+
+    /// Read a single frame by index (supports negative indexing).
+    fn read_frame(&mut self, index: isize) -> PyResult<PyFrame> {
+        traj_read_frame(self.reader()?, index)
+    }
+
+    /// Read an explicit list of frame indices (each may be negative).
+    fn read_frames(&mut self, indices: Vec<isize>) -> PyResult<Vec<PyFrame>> {
+        traj_read_frames(self.reader()?, indices)
+    }
+
+    /// Read a contiguous range of frames, Python-slice style.
+    #[pyo3(signature = (start=0, stop=None, step=1))]
+    fn read_range(
+        &mut self,
+        start: isize,
+        stop: Option<isize>,
+        step: isize,
+    ) -> PyResult<Vec<PyFrame>> {
+        traj_read_range(self.reader()?, start, stop, step)
+    }
+
+    /// Eagerly read every frame into a list.
+    fn read_all(&mut self) -> PyResult<Vec<PyFrame>> {
+        traj_read_all(self.reader()?)
+    }
+
+    /// Release the underlying file handle. Further reads raise ``ValueError``.
+    fn close(&mut self) {
+        self.inner = None;
+    }
+
+    fn __len__(&mut self) -> PyResult<usize> {
+        traj_len(self.reader()?)
+    }
+
+    fn __getitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        traj_getitem(self.reader()?, key)
+    }
+
+    fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        let mut slf = slf;
+        slf.cursor = 0;
+        slf
+    }
+
+    fn __next__(&mut self) -> PyResult<Option<PyFrame>> {
+        let cursor = self.cursor;
+        let frame = traj_read_step(self.reader()?, cursor)?;
+        if frame.is_some() {
+            self.cursor += 1;
+        }
+        Ok(frame)
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    #[pyo3(signature = (_exc_type=None, _exc_value=None, _traceback=None))]
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<Py<PyAny>>,
+        _exc_value: Option<Py<PyAny>>,
+        _traceback: Option<Py<PyAny>>,
+    ) -> bool {
+        self.inner = None;
+        false
+    }
+
+    fn __repr__(&mut self) -> String {
+        match self.inner.as_mut() {
+            Some(r) => match r.len() {
+                Ok(n) => format!("TRRTrajReader(n_frames={})", n),
+                Err(_) => "TRRTrajReader(<unread>)".to_string(),
+            },
+            None => "TRRTrajReader(<closed>)".to_string(),
+        }
+    }
+}
+
+/// Lazy, indexed reader for GROMACS XTC trajectory files.
+///
+/// Like :class:`TRRTrajReader` but for the compressed XTC format. Frame sizes
+/// vary (compression), so the byte-offset index is built by a single scan;
+/// random access is O(1) thereafter.
+#[pyclass(name = "XTCTrajReader", unsendable)]
+pub struct PyXtcTrajReader {
+    inner: Option<XtcReader<Box<dyn ReadSeek>>>,
+    cursor: usize,
+}
+
+impl PyXtcTrajReader {
+    fn reader(&mut self) -> PyResult<&mut XtcReader<Box<dyn ReadSeek>>> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("operation on a closed XTCTrajReader"))
+    }
+}
+
+#[pymethods]
+impl PyXtcTrajReader {
+    #[new]
+    fn py_new(path: &str) -> PyResult<Self> {
+        let inner = open_xtc(path).map_err(io_error_to_pyerr)?;
+        Ok(Self {
+            inner: Some(inner),
+            cursor: 0,
+        })
+    }
+
+    /// Number of frames in the trajectory (triggers index construction).
+    #[getter]
+    fn n_frames(&mut self) -> PyResult<usize> {
+        traj_len(self.reader()?)
+    }
+
+    /// Force the frame-offset index to be built now.
+    fn build_index(&mut self) -> PyResult<()> {
+        self.reader()?.build_index().map_err(io_error_to_pyerr)
+    }
+
+    /// Read a single frame by index (supports negative indexing).
+    fn read_frame(&mut self, index: isize) -> PyResult<PyFrame> {
+        traj_read_frame(self.reader()?, index)
+    }
+
+    /// Read an explicit list of frame indices (each may be negative).
+    fn read_frames(&mut self, indices: Vec<isize>) -> PyResult<Vec<PyFrame>> {
+        traj_read_frames(self.reader()?, indices)
+    }
+
+    /// Read a contiguous range of frames, Python-slice style.
+    #[pyo3(signature = (start=0, stop=None, step=1))]
+    fn read_range(
+        &mut self,
+        start: isize,
+        stop: Option<isize>,
+        step: isize,
+    ) -> PyResult<Vec<PyFrame>> {
+        traj_read_range(self.reader()?, start, stop, step)
+    }
+
+    /// Eagerly read every frame into a list.
+    fn read_all(&mut self) -> PyResult<Vec<PyFrame>> {
+        traj_read_all(self.reader()?)
+    }
+
+    /// Release the underlying file handle. Further reads raise ``ValueError``.
+    fn close(&mut self) {
+        self.inner = None;
+    }
+
+    fn __len__(&mut self) -> PyResult<usize> {
+        traj_len(self.reader()?)
+    }
+
+    fn __getitem__(&mut self, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        traj_getitem(self.reader()?, key)
+    }
+
+    fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        let mut slf = slf;
+        slf.cursor = 0;
+        slf
+    }
+
+    fn __next__(&mut self) -> PyResult<Option<PyFrame>> {
+        let cursor = self.cursor;
+        let frame = traj_read_step(self.reader()?, cursor)?;
+        if frame.is_some() {
+            self.cursor += 1;
+        }
+        Ok(frame)
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    #[pyo3(signature = (_exc_type=None, _exc_value=None, _traceback=None))]
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<Py<PyAny>>,
+        _exc_value: Option<Py<PyAny>>,
+        _traceback: Option<Py<PyAny>>,
+    ) -> bool {
+        self.inner = None;
+        false
+    }
+
+    fn __repr__(&mut self) -> String {
+        match self.inner.as_mut() {
+            Some(r) => match r.len() {
+                Ok(n) => format!("XTCTrajReader(n_frames={})", n),
+                Err(_) => "XTCTrajReader(<unread>)".to_string(),
+            },
+            None => "XTCTrajReader(<closed>)".to_string(),
+        }
+    }
+}
+
+/// Write Frames to a GROMACS TRR trajectory file (single precision).
+///
+/// Each frame's ``"atoms"`` block must have ``x``/``y``/``z`` (nm); optional
+/// ``vx``/``vy``/``vz`` and ``fx``/``fy``/``fz`` are written when present. The
+/// box, if any, is taken from each ``frame.simbox``.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frames : list[Frame]
+#[pyfunction]
+pub fn write_trr(path: &str, frames: Vec<PyRef<'_, PyFrame>>) -> PyResult<()> {
+    let core_frames: Vec<_> = frames
+        .iter()
+        .map(|f| f.clone_core_frame())
+        .collect::<PyResult<_>>()?;
+    write_trr_rs(path, &core_frames).map_err(io_error_to_pyerr)
+}
+
+/// Write Frames to a GROMACS XTC trajectory file (lossy compression).
+///
+/// Each frame's ``"atoms"`` block must have ``x``/``y``/``z`` (nm). The
+/// quantization precision is taken from ``frame.meta["precision"]`` when
+/// present, else defaults to 1000 (i.e. 0.001 nm resolution). The box, if any,
+/// is taken from each ``frame.simbox``.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Output file path.
+/// frames : list[Frame]
+#[pyfunction]
+pub fn write_xtc(path: &str, frames: Vec<PyRef<'_, PyFrame>>) -> PyResult<()> {
+    let core_frames: Vec<_> = frames
+        .iter()
+        .map(|f| f.clone_core_frame())
+        .collect::<PyResult<_>>()?;
+    write_xtc_rs(path, &core_frames).map_err(io_error_to_pyerr)
 }
 
 /// Intermediate representation of a parsed SMILES or SMARTS string.

@@ -58,48 +58,43 @@ class TestStaticDielectric:
 
 
 class TestEHSpectrum:
-    def test_import(self):
-        from molrs.dielectric import Dielectric
+    """ε(ω) Einstein-Helfand route: DebyeRelaxation raw ACF + EH Fit."""
 
-        assert callable(Dielectric.einstein_helfand_spectrum)
+    def test_import(self):
+        import molrs
+
+        assert callable(molrs.DebyeRelaxation)
+        assert callable(molrs.EinsteinHelfandSpectrum)
 
     def test_shape(self):
-        from molrs.dielectric import Dielectric
+        import molrs
 
         dm = np.ones((100, 3)) * 0.1
-        s = Dielectric.einstein_helfand_spectrum(
-            dm,
-            dt=0.001,
-            volume=1000.0,
-            temperature=300.0,
-            epsilon_inf=1.0,
-            max_correlation_time=10,
-            window_type="hann",
-        )
+        raw = molrs.DebyeRelaxation(1000.0, 300.0, "tinfoil").compute(dm, 0.001, 10)
+        s = molrs.EinsteinHelfandSpectrum(
+            0.001, 1000.0, 300.0, 1.0, raw["zero_lag_variance"]
+        ).fit(raw["acf"])
         assert len(s["frequencies"]) > 0
-        assert len(s["frequencies"]) == len(s["epsilon_real"]) == len(s["epsilon_imag"])
+        assert len(s["frequencies"]) == len(s["eps_real"]) == len(s["eps_imag"])
 
 
 class TestGKSpectrum:
-    def test_import(self):
-        from molrs.dielectric import Dielectric
+    """ε(ω) Green-Kubo route: GreenKuboConductivity raw current ACF + GK Fit."""
 
-        assert callable(Dielectric.green_kubo_spectrum)
+    def test_import(self):
+        import molrs
+
+        assert callable(molrs.GreenKuboConductivity)
+        assert callable(molrs.GreenKuboSpectrum)
 
     def test_shape(self):
-        from molrs.dielectric import Dielectric
+        import molrs
 
         j = np.ones((100, 3)) * 0.001
-        s = Dielectric.green_kubo_spectrum(
-            j,
-            dt=0.001,
-            volume=1000.0,
-            temperature=300.0,
-            epsilon_inf=1.0,
-            max_correlation_time=10,
-            window_type="hann",
-        )
+        raw = molrs.GreenKuboConductivity().compute(j, 0.001, 10)
+        s = molrs.GreenKuboSpectrum(0.001, 1000.0, 300.0, 1.0, "hann").fit(raw["jacf"])
         assert s["frequencies"] is not None
+        assert len(s["frequencies"]) == len(s["eps_real"]) == len(s["eps_imag"])
 
 
 class TestDecomposeCurrent:

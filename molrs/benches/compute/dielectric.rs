@@ -5,13 +5,24 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 use molrs::compute::dielectric::{
-    compute_current_density, compute_dipole_moment, einstein_helfand_spectrum, green_kubo_spectrum,
-    static_dielectric_constant, static_dielectric_constant_components,
+    compute_current_density, compute_dipole_moment, static_dielectric_constant,
+    static_dielectric_constant_components,
 };
+use molrs::compute::fit::{
+    DebyeRelaxation, EinsteinHelfandSpectrum, EwaldBoundary, GreenKuboConductivity,
+    GreenKuboSpectrum,
+};
+use molrs::compute::traits::{Compute, Fit};
+use molrs::store::frame::Frame as CoreFrame;
 use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use std::time::Duration;
+
+/// Empty frame slice for the series-based raw computes (`frames` is unused).
+fn no_frames() -> Vec<&'static CoreFrame> {
+    Vec::new()
+}
 
 // ── Sweep constants ──────────────────────────────────────────────────────────
 
@@ -107,7 +118,7 @@ fn bench_static_components(c: &mut Criterion) {
     group.finish();
 }
 
-// ── Einstein-Helfand spectrum ────────────────────────────────────────────────
+// ── Einstein-Helfand spectrum (raw DebyeRelaxation ACF + ε(ω) Fit) ────────────
 
 fn bench_einstein_helfand(c: &mut Criterion) {
     let mut group = c.benchmark_group("dielectric/einstein_helfand");
@@ -119,16 +130,22 @@ fn bench_einstein_helfand(c: &mut Criterion) {
         group.throughput(Throughput::Elements(nf as u64));
         group.bench_with_input(BenchmarkId::from_parameter(nf), &nf, |b, _| {
             b.iter(|| {
+                let raw = DebyeRelaxation {
+                    volume: VOLUME,
+                    temperature: TEMPERATURE,
+                    boundary: EwaldBoundary::TinFoil,
+                }
+                .compute(&no_frames(), (&dm, DT, MAX_CORRELATION))
+                .unwrap();
                 std::hint::black_box(
-                    einstein_helfand_spectrum(
-                        &dm,
-                        DT,
-                        VOLUME,
-                        TEMPERATURE,
-                        EPSILON_INF,
-                        MAX_CORRELATION,
-                        "hann",
-                    )
+                    EinsteinHelfandSpectrum {
+                        dt: DT,
+                        volume: VOLUME,
+                        temperature: TEMPERATURE,
+                        epsilon_inf: EPSILON_INF,
+                        zero_lag_variance: raw.zero_lag_variance,
+                    }
+                    .fit(&raw.acf)
                     .unwrap(),
                 );
             })
@@ -138,7 +155,7 @@ fn bench_einstein_helfand(c: &mut Criterion) {
     group.finish();
 }
 
-// ── Green-Kubo spectrum ──────────────────────────────────────────────────────
+// ── Green-Kubo spectrum (raw GreenKuboConductivity ACF + ε(ω) Fit) ────────────
 
 fn bench_green_kubo(c: &mut Criterion) {
     let mut group = c.benchmark_group("dielectric/green_kubo");
@@ -147,19 +164,24 @@ fn bench_green_kubo(c: &mut Criterion) {
     for &nf in &FRAME_COUNTS[..4] {
         let dm = synthetic_dipoles(nf, 42);
         let j = compute_current_density(&dm, DT, VOLUME).unwrap();
+        // Skip the NaN row 0 (no previous frame); the GK ε(ω) route forms the
+        // current ACF over the post-NaN series.
+        let j_post: Array2<f64> = j.slice(ndarray::s![1.., ..]).to_owned();
         group.throughput(Throughput::Elements(nf as u64));
         group.bench_with_input(BenchmarkId::from_parameter(nf), &nf, |b, _| {
             b.iter(|| {
+                let raw = GreenKuboConductivity
+                    .compute(&no_frames(), (&j_post, DT, MAX_CORRELATION))
+                    .unwrap();
                 std::hint::black_box(
-                    green_kubo_spectrum(
-                        &j,
-                        DT,
-                        VOLUME,
-                        TEMPERATURE,
-                        EPSILON_INF,
-                        MAX_CORRELATION,
-                        "hann",
-                    )
+                    GreenKuboSpectrum {
+                        dt: DT,
+                        volume: VOLUME,
+                        temperature: TEMPERATURE,
+                        epsilon_inf: EPSILON_INF,
+                        window_type: "hann".to_string(),
+                    }
+                    .fit(&raw.jacf)
                     .unwrap(),
                 );
             })

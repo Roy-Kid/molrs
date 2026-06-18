@@ -28,6 +28,7 @@ use molrs::ff::typifier::mmff::MMFFTypifier;
 use molrs::ff::{LBFGS, LbfgsConfig, OptReport};
 use molrs_ffi::ForceFieldRef;
 
+use crate::block::PyBlock;
 use crate::frame::PyFrame;
 use crate::helpers::{NpF, py_value_err};
 use crate::molgraph::PyAtomistic;
@@ -1090,4 +1091,87 @@ pub fn read_opls_xml_str_py(xml: &str) -> PyResult<PyForceField> {
         .read_str(xml)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     Ok(PyForceField { inner: forcefield })
+}
+
+/// Read a LAMMPS force-field include (``*.ff``) into a :class:`ForceField`.
+///
+/// Parses the ``pair_style``/``pair_coeff`` + ``bond_style``/``angle_style``/
+/// ``dihedral_style`` (``fourier``) [+ optional ``improper_style``] include that
+/// molpy's ``LAMMPSForceFieldWriter`` emits (AMBER/GAFF flavour), normalizing it
+/// to molrs units (Å, kcal/mol, radians, e): LAMMPS harmonic ``K`` → molrs
+/// ``k = 2K``, angle/phase values stay in degrees (the kernels convert), and the
+/// ``fourier`` dihedral maps to the molrs ``periodic`` kernel. AMBER 1-4 scaling
+/// (LJ ×0.5, Coulomb ×1/1.2) is recorded on the force field's special bonds.
+/// Distinct from :func:`read_forcefield_xml` (molrs's own schema) and
+/// :func:`read_opls_xml` (OPLS-AA / GROMACS XML).
+///
+/// Per-atom charge and mass live in the LAMMPS *data* file, not this include, so
+/// they are not read here: Coulomb charges are drawn from the frame at evaluation
+/// time and masses are irrelevant to geometry relaxation.
+///
+/// Parameters
+/// ----------
+/// path : str
+///     Path to a LAMMPS force-field include (``*.ff``).
+///
+/// Returns
+/// -------
+/// ForceField
+///
+/// Raises
+/// ------
+/// ValueError
+///     On an unsupported style, a coefficient before its style declaration, a
+///     wrong-arity type label, or a non-numeric parameter (reading is total —
+///     never a silent skip).
+#[pyfunction]
+#[pyo3(name = "read_lammps_forcefield")]
+pub fn read_lammps_forcefield_py(path: &str) -> PyResult<PyForceField> {
+    use molrs::ff::ForceFieldReader;
+    let forcefield = molrs::ff::LammpsFfReader::new()
+        .read(path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    Ok(PyForceField { inner: forcefield })
+}
+
+/// Parse a LAMMPS force-field include from a string (same format and unit
+/// normalization as :func:`read_lammps_forcefield`).
+#[pyfunction]
+#[pyo3(name = "read_lammps_forcefield_str")]
+pub fn read_lammps_forcefield_str_py(text: &str) -> PyResult<PyForceField> {
+    use molrs::ff::ForceFieldReader;
+    let forcefield = molrs::ff::LammpsFfReader::new()
+        .read_str(text)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    Ok(PyForceField { inner: forcefield })
+}
+
+/// Build the intramolecular non-bonded neighbour list for a typed frame.
+///
+/// Returns a :class:`Block` with ``atomi`` / ``atomj`` / ``is_14`` columns — the
+/// exact list :meth:`ForceField.to_potentials` consumes for the pair (van der
+/// Waals + Coulomb) kernels. 1-2 and 1-3 neighbours are excluded (from the
+/// frame's ``bonds`` / ``angles`` blocks); 1-4 pairs (from ``dihedrals``) are
+/// flagged so the kernels apply the force field's special-bonds scaling.
+///
+/// Insert the result as the frame's ``"pairs"`` block before
+/// :meth:`ForceField.to_potentials` when you need the non-bonded terms — e.g. a
+/// single-molecule geometry optimization where intramolecular van der Waals
+/// drives chain collapse. (``to_potentials`` silently drops the pair styles when
+/// no ``"pairs"`` block is present, so bonded-only optimizations need nothing.)
+///
+/// Parameters
+/// ----------
+/// frame : Frame
+///     A typed frame with ``atoms`` and the topology blocks
+///     (``bonds`` / ``angles`` / ``dihedrals``) used for exclusions.
+///
+/// Returns
+/// -------
+/// Block
+#[pyfunction]
+#[pyo3(name = "intramolecular_pairs")]
+pub fn intramolecular_pairs_py(frame: &PyFrame) -> PyResult<PyBlock> {
+    let core = frame.clone_core_frame()?;
+    PyBlock::from_core_block(molrs::ff::potential::intramolecular_pairs(&core))
 }

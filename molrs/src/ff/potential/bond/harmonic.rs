@@ -103,9 +103,12 @@ pub fn bond_harmonic_ctor(
         let params = type_map
             .get(label.as_str())
             .ok_or_else(|| format!("BondHarmonic: unknown bond type '{}'", label))?;
+        // Accept `k` (LAMMPS / hand-built) or its `k0` alias (the OPLS XML
+        // reader emits `k0`/`r0`). Either spelling is the harmonic force const.
         let k0 = params
             .get("k")
-            .ok_or_else(|| format!("BondHarmonic type '{}': missing 'k'", label))?
+            .or_else(|| params.get("k0"))
+            .ok_or_else(|| format!("BondHarmonic type '{}': missing 'k' (or 'k0')", label))?
             as F;
         let r0 = params
             .get("r0")

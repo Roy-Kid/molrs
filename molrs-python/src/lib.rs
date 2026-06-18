@@ -72,6 +72,7 @@ use compute::{
 };
 
 mod compute_extra;
+mod compute_fit;
 mod dielectric;
 mod signal;
 mod transport;
@@ -147,6 +148,10 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<io::PyLAMMPSTrajReader>()?;
     m.add_function(wrap_pyfunction!(io::read_dcd, m)?)?;
     m.add_class::<io::PyDcdTrajReader>()?;
+    m.add_function(wrap_pyfunction!(io::read_trr, m)?)?;
+    m.add_class::<io::PyTrrTrajReader>()?;
+    m.add_function(wrap_pyfunction!(io::read_xtc, m)?)?;
+    m.add_class::<io::PyXtcTrajReader>()?;
     m.add_function(wrap_pyfunction!(io::read_gro, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_chgcar_file, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_cube_file, m)?)?;
@@ -159,6 +164,8 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(io::write_lammps, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_lammps_traj, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_dcd, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_trr, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_xtc, m)?)?;
     // SMILES
     m.add_function(wrap_pyfunction!(io::parse_smiles, m)?)?;
     m.add_class::<io::PySmilesIR>()?;
@@ -208,6 +215,12 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(forcefield::read_forcefield_xml_str_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::read_opls_xml_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::read_opls_xml_str_py, m)?)?;
+    m.add_function(wrap_pyfunction!(forcefield::read_lammps_forcefield_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        forcefield::read_lammps_forcefield_str_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(forcefield::intramolecular_pairs_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::extract_coords_py, m)?)?;
     m.add_function(wrap_pyfunction!(forcefield::build_mmff_potentials_py, m)?)?;
 
@@ -234,6 +247,12 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Additional analyzers ported from freud (Steinhardt, Nematic, …).
     compute_extra::register(m)?;
+
+    // Raw-compute + explicit-fit classes (phase-02 compute/fit repoint):
+    // VACF / EinsteinConductivity / GreenKuboConductivity / … + LinearFit /
+    // RunningIntegral / Plateau / DebyeFit / PowerSpectrum / IRSpectrum /
+    // RamanSpectrum at the top level (`molrs.VACF`, `molrs.LinearFit`, …).
+    compute_fit::register(m)?;
 
     // Signal processing
     m.add_function(wrap_pyfunction!(signal::signal_acf_fft, m)?)?;

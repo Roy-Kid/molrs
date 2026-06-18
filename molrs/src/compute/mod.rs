@@ -57,6 +57,7 @@ pub mod dielectric;
 pub mod diffraction;
 pub mod environment;
 pub mod error;
+pub mod fit;
 pub mod gyration_tensor;
 pub mod inertia_tensor;
 pub mod jacf;
@@ -84,10 +85,8 @@ pub use density::{
     LocalDensity, LocalDensityResult, SphereVoxelization, SphereVoxelizationResult,
 };
 pub use dielectric::{
-    ConductivityResult, DielectricSpectrum, StaticDielectricResult, compute_current_density,
-    compute_dipole_moment, decompose_current, einstein_helfand_conductivity,
-    einstein_helfand_spectrum, green_kubo_spectrum, static_dielectric_constant,
-    static_dielectric_constant_components,
+    StaticDielectricResult, compute_current_density, compute_dipole_moment, decompose_current,
+    static_dielectric_constant, static_dielectric_constant_components,
 };
 pub use diffraction::{
     DiffractionPattern, DiffractionPatternResult, StaticStructureFactorDebye,
@@ -100,12 +99,22 @@ pub use environment::{
     LocalBondProjectionResult, LocalDescriptors, LocalDescriptorsResult, MatchEnv, MatchEnvResult,
 };
 pub use error::ComputeError;
+pub use fit::{
+    DebyeFit, DebyeFitResult, DebyeRelaxation, DebyeRelaxationResult, DielectricSpectrumResult,
+    EinsteinConductivity, EinsteinConductivityResult, EinsteinDiffusion, EinsteinDiffusionArgs,
+    EinsteinHelfandSpectrum, EwaldBoundary, GreenKuboConductivity, GreenKuboConductivityResult,
+    GreenKuboDiffusion, GreenKuboSpectrum, IRFlux, IRFluxResult, IRSpectrum, LinearFit,
+    LinearFitResult, Plateau, PlateauResult, PowerSpectrum, RamanSpectrum, RamanTensor,
+    RamanTensorResult, RunningIntegral, RunningIntegralResult, VACF, VacfResult,
+};
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
-pub use jacf::{JacfResult, green_kubo_conductivity};
+// `jacf` is now a documentation-only module: the Green–Kubo conductivity is the
+// `GreenKuboConductivity` (raw ACF) + `fit::RunningIntegral` composition. Its
+// former `JacfResult` / `green_kubo_conductivity` exports were removed.
 pub use kmeans::{KMeans, KMeansResult};
 pub use msd::{MSD, MSDResult, MSDTimeSeries, MsdMode};
-pub use onsager::{OnsagerResult, onsager_correlation};
+pub use onsager::{OnsagerCorrelation, OnsagerResult};
 pub use order::{
     ContinuousCoordination, ContinuousCoordinationResult, Cubatic, CubaticResult, Hexatic,
     HexaticResult, Nematic, NematicResult, RotationalAutocorrelation,
@@ -120,5 +129,5 @@ pub use pmft::{
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
 pub use rdf::{RDF, RDFResult};
 pub use result::{ComputeResult, DescriptorRow};
-pub use spectra::{RamanSpectrum, Spectrum, ir_spectrum, power_spectrum, raman_spectrum};
-pub use traits::Compute;
+pub use spectra::{RamanSpectrumResult, SpectrumResult};
+pub use traits::{Compute, Fit};
