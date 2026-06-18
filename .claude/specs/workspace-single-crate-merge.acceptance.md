@@ -109,7 +109,10 @@ criteria:
       yanked (molpack's 0.1.0 pin keeps resolving) and that molcrafts-molrs takes a
       coordinated minor/major version bump as a breaking change; molpack migration
       is logged as an out-of-tree follow-up.
-    status: pending
+    status: verified
+    note: |
+      VERIFIED 2026-06-18 (--manual, /mol:close): don't-yank + coordinated version-bump +
+      molpack-migration-follow-up decision recorded in CHANGELOG.md ([Unreleased]). Asserted met.
 ---
 
 # Acceptance criteria — workspace-single-crate-merge

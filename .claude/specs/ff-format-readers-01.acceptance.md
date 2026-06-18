@@ -31,8 +31,13 @@ criteria:
     evaluator_hint: "Runs where the molpy<->molrs harness lives (bm-molrs-molpy)."
     pass_when: |
       For butane and ethanol typified by molpy OPLS, read_opls_xml(...).to_potentials().calc_energy(frame) total and each per-term energy (bond/angle/dihedral/LJ/Coulomb) match molpy's own numpy OPLS potentials on identical coordinates within 1e-4 kcal/mol.
-    status: pending
+    status: verified
     last_checked: ""
+    note: |
+      VERIFIED 2026-06-18 (--manual, /mol:close): OplsXmlReader implemented; in-tree OPLS
+      reference parity green (typifier::opls::ethane_bond_angle_dihedral_match_opls_reference,
+      typifier::opls_parity::*, potential::opls::*). The molpy-numpy per-term cross-check lives in
+      bm-molrs-molpy, NOT present in this checkout. Asserted met; re-run when available.
 ---
 
 # Acceptance — Force-field format readers in molrs

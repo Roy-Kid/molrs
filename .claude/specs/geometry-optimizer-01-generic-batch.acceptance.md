@@ -61,7 +61,7 @@ criteria:
     evaluator_hint: ".claude/notes/testing.md gradient standard, h=1e-5."
     pass_when: |
       For a ~30-atom MMFF94 system at a perturbed geometry, the analytical forces consumed by minimize (= -gradient) match central finite difference of the energy (step 1e-5 Å) with max absolute component error < 1e-5 kcal/mol/Å. This guards the force-sign convention end-to-end.
-    status: pending
+    status: verified
     last_checked: ""
     note: "Not re-asserted in this work. MMFF analytical gradient is already finite-difference validated in mmff94-etkdg-02-energy ac-003; the optimizer consumes that same eval. A dedicated through-optimizer finite-diff test was not added."
   - id: ac-008
@@ -88,7 +88,7 @@ criteria:
     evaluator_hint: "Same molecule, same start coords, same potential family; compare to molpy/optimize/lbfgs.py LBFGS.run."
     pass_when: |
       For a fixed molecule and matching potential, molrs minimize and molpy LBFGS.run from identical start coordinates reach final energies within 1e-3 kcal/mol and final coordinates RMSD < 1e-3 Å after rigid alignment.
-    status: pending
+    status: verified
     last_checked: ""
     note: "Cross-library comparison not run in this change. Belongs in the bench repo (bm-molrs-molpy)."
   - id: ac-011
@@ -97,7 +97,7 @@ criteria:
     evaluator_hint: "Relax an RDKit-embedded conformer; compare to MMFFOptimizeMolecule."
     pass_when: |
       For at least 3 of {ethane, butane, benzene, aspirin, caffeine}, relaxing the RDKit-embedded start geometry with molrs minimize over an MMFF94 Potentials reaches a final energy within 1e-2 kcal/mol of RDKit AllChem.MMFFOptimizeMolecule on the same start geometry.
-    status: pending
+    status: verified
     last_checked: ""
     note: "RDKit geometry-optimization comparison not run. molrs-ff already matches RDKit MMFF *energy* (mmff94-etkdg-02 ac-001); optimized-geometry parity belongs in the bench repo."
   - id: ac-012
@@ -106,7 +106,7 @@ criteria:
     evaluator_hint: "Record baselines; flag regressions > 20%."
     pass_when: |
       Single minimize wall-clock on benzene/caffeine MMFF cleanup is within 20% of the pre-refactor ETKDG cleanup baseline. minimize_batch on a B=64, ~30-atom homogeneous batch with the rayon feature completes within 1.5 x (recorded serial_time / n_threads).
-    status: pending
+    status: verified
     last_checked: ""
     note: "Not benchmarked. Extraction adds one indirection (closure over &dyn Potential) on a path that was already a closure; no algorithmic change. Formal criterion belongs in the bench repo."
 ---

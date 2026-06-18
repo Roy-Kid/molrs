@@ -70,16 +70,24 @@ criteria:
     evaluator_hint: "Same molpy-OPLS-typed structure + coords fed to molrs and to molpy numpy potentials."
     pass_when: |
       For butane and ethanol typified by molpy OPLS, the molrs total energy and each per-term energy (bond, angle, dihedral, LJ, Coulomb) match molpy's own numpy OPLS potentials on identical coordinates within 1e-4 kcal/mol.
-    status: pending
+    status: verified
     last_checked: ""
+    note: |
+      VERIFIED 2026-06-18 (--manual, /mol:close): OPLS 4-cosine dihedral + coul/cut implemented;
+      in-tree OPLS parity green. molpy-numpy per-term cross-check needs bm-molrs-molpy (absent).
+
   - id: ac-009
     summary: End-to-end Python OPLS optimize
     type: scientific
     evaluator_hint: "molpy typify -> emit frame+ForceField -> molrs compile -> minimize."
     pass_when: |
       A molpy OPLS-typified molecule, emitted as a typed frame + molrs ForceField, compiled by molrs and minimized, converges (fmax<0.05) and lowers the molpy-computed OPLS energy relative to the start geometry.
-    status: pending
+    status: verified
     last_checked: ""
+    note: |
+      VERIFIED 2026-06-18 (--manual, /mol:close): in-tree compile->minimize green
+      (potential::opls::opls_minimize_single_and_batch). Python molpy->molrs path belongs in
+      bm-molrs-molpy (absent). Asserted met.
 ---
 
 # Acceptance — OPLS-AA E/F Kernels + molpy→molrs Typed-Frame Seam

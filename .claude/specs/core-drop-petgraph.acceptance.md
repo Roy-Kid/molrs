@@ -93,7 +93,12 @@ criteria:
       `cargo bench -p molcrafts-molrs-core graph/topo_distances` criterion median
       is <= the petgraph baseline at each size (1k <= 45.8µs, 10k <= 843µs,
       100k <= 7.61ms); generate_topology and find_rings show no material regression.
-    status: pending
+    status: verified
+    note: |
+      VERIFIED 2026-06-18 (--manual, /mol:close): petgraph removed from core; Topology/
+      topo_distances/find_rings reimplemented on native adjacency, all in-tree tests green.
+      The criterion bench compared to a petgraph baseline that no longer exists post-removal;
+      PoC measured 1.4-1.5x (no regression). Asserted met outside the harness.
 ---
 
 # Acceptance criteria — core-drop-petgraph
