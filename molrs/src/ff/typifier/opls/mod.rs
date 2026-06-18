@@ -87,6 +87,24 @@ impl OplsTypifier {
         Ok(Self::new(meta, ff))
     }
 
+    /// Build a typifier from the embedded canonical OPLS-AA parameter set
+    /// ([`molrs::data::OPLSAA_XML`](crate::core::data::OPLSAA_XML)).
+    ///
+    /// The XML is compiled into the binary, so this is the standalone path: the
+    /// OPLS typifier needs no external file on disk. The embedded copy uses
+    /// lowercase SMARTS `c` for aromatic ring carbons / hydrogens
+    /// (RDKit-faithful aromatic matching), so benzene-type rings type exactly as
+    /// molpy's ground truth. Mirrors
+    /// [`MMFFTypifier::mmff94`](crate::ff::typifier::mmff::MMFFTypifier::mmff94).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if parsing the embedded XML fails (should not happen for the
+    /// shipped data).
+    pub fn oplsaa() -> Result<Self, String> {
+        Self::from_xml_str(molrs::data::OPLSAA_XML)
+    }
+
     /// Construct directly from already-parsed metadata and force field
     /// (strict bonded matching).
     pub fn new(meta: OplsTypingMeta, ff: ForceField) -> Self {

@@ -13,9 +13,12 @@
 //!   generator reconciles the molpy reader's deg/0.5-prefactor conventions, see
 //!   that script's header).
 //!
-//! Both sides consume the *same* `tests-data/xml/oplsaa.xml` — the generator
-//! reads molrs's copy, not molpy's bundled (differing) one — so this isolates
-//! *engine* semantics rather than force-field-version drift.
+//! molrs types from its **embedded canonical** OPLS-AA force field
+//! ([`molrs::data::OPLSAA_XML`] via [`OplsTypifier::oplsaa`]) — the durable,
+//! committed-in-molrs copy — so the force-field source is independent of
+//! `scripts/fetch-test-data.sh`. The generator fed molpy that same canonical
+//! (c-corrected) XML, so this isolates *engine* semantics rather than
+//! force-field-version drift.
 //!
 //! # Gating
 //!
@@ -24,15 +27,26 @@
 //! `python molpy/scripts/gen_opls_fixtures.py` (with molpy installed) to
 //! regenerate, or fetch via `scripts/fetch-test-data.sh`.
 //!
-//! # The known C/c divergence (characterized, not papered over)
+//! # The C/c aromatic seam (gap closed)
 //!
-//! molpy's uppercase-`C` SMARTS matches by **atomic number only**; the molrs
-//! engine is RDKit-faithful and distinguishes aliphatic `C` from aromatic `c`.
-//! Aromatic molecules (benzene / toluene) therefore type differently. Fixtures
-//! flagged `known_gap` are **measured and reported** (per-atom molpy-vs-molrs
-//! type, the divergent indices) but do **not** fail the suite. The hard parity
-//! gate (ac-001 100% per-atom, ac-002 params-in-tolerance) runs on the
-//! agreeable set (aliphatic / alcohol / ether — the PEO-relevant chemistry).
+//! The molrs SMARTS engine is RDKit-faithful: it perceives aromatic atoms (from
+//! order ~1.5 ring bonds) and matches them with lowercase `c`, reserving
+//! uppercase `C` for aliphatic carbon. The OPLS XML's aromatic ring-carbon /
+//! -hydrogen defs use lowercase `c`, so molrs now types the benzene / toluene
+//! ring atoms exactly as molpy's ground truth (opls_145 ring C, opls_146 ring
+//! H). `opls_parity_aromatic_per_atom_now_matches_molpy` asserts this: benzene
+//! is full 12/12 per-atom parity; toluene agrees on every ring H and non-ipso
+//! ring carbon, with the only residual being the two substituent-junction
+//! carbons where molrs picks the more specific OPLS override (ipso
+//! opls_141->opls_145, methyl opls_135->opls_148).
+//!
+//! The hard agreeable-set gate (ac-001 100% per-atom, ac-002 params-in-tolerance)
+//! runs on the aliphatic / alcohol / ether set (the PEO-relevant chemistry); the
+//! benzene/toluene fixtures keep molpy's `known_gap` flag so they stay out of
+//! that *bonded-term-name* gate — molrs serializes an OPLS wildcard dihedral end
+//! as the verbatim empty class (`-CA-CA-`) where molpy normalizes it to `*`
+//! (`*-CA-CA-*`); that naming convention is a separate seam, not an aromatic
+//! typing gap (the matched params agree).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -70,11 +84,6 @@ fn fixture_files(dir: &Path) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
-}
-
-/// The real bundled OPLS-AA force field — the same file the generator fed molpy.
-fn oplsaa_xml() -> String {
-    std::fs::read_to_string(helpers::data_path("xml/oplsaa.xml")).expect("read oplsaa.xml")
 }
 
 // ===========================================================================
@@ -441,8 +450,11 @@ fn opls_parity_agreeable_set_exact_per_atom_and_params() {
         return;
     };
 
-    let typifier = OplsTypifier::from_xml_str(&oplsaa_xml())
-        .expect("build OplsTypifier")
+    // Source the FF from the embedded canonical OPLS-AA XML (durable, committed
+    // in molrs — independent of `fetch-test-data.sh`), not the gitignored
+    // tests-data copy. The fixtures (ground truth) stay gated separately.
+    let typifier = OplsTypifier::oplsaa()
+        .expect("build OplsTypifier from embedded OPLS-AA XML")
         // ac-004: lenient (no estimator) — matches the molpy non-strict run; a
         // term with no candidate is left bare, never estimated.
         .with_strict(false);
@@ -572,20 +584,42 @@ fn opls_parity_fixture_coverage() {
 }
 
 #[test]
-fn opls_parity_aromatic_divergence_characterized() {
-    // Known-gap characterization (NOT a hard gate): aromatic fixtures
-    // (benzene/toluene) are expected to diverge because molpy's uppercase-C
-    // SMARTS matches by atomic number while molrs distinguishes aromatic c.
-    // This test MEASURES + REPORTS the divergence precisely; it asserts only
-    // that the gap is real and confined to aromatic-ring atoms, never claiming
-    // agreement. Skips cleanly when fixtures are absent.
+fn opls_parity_aromatic_per_atom_now_matches_molpy() {
+    // Aromatic per-atom parity (the closed C/c gap). The OPLS XML's aromatic
+    // ring-carbon / -hydrogen defs use lowercase `c` (RDKit-faithful), so molrs
+    // now perceives the benzene/toluene ring atoms as aromatic and types them
+    // exactly as molpy's ground truth (opls_145 ring C, opls_146 ring H). This
+    // was formerly a `known_gap` characterization that only *reported* the
+    // divergence; it is now a hard parity assertion.
+    //
+    // The fixtures are still flagged `known_gap` by molpy's generator (so they
+    // stay out of the strict agreeable-set term gate, which would also assert
+    // bonded-term *names* — see the separate wildcard-naming note below); this
+    // test re-reads those same fixtures and asserts the aromatic typing agrees.
+    //
+    // benzene: full 12/12 per-atom parity (ring C → opls_145, ring H → opls_146).
+    //
+    // toluene: agrees on every ring H and every non-ipso ring carbon; the only
+    // residual divergences are the two substituent-junction carbons, where molrs
+    // assigns the MORE specific OPLS type than molpy's ground truth:
+    //   * the ipso ring carbon — molrs opls_145 (aromatic CA, which `overrides`
+    //     the generic alkene opls_141) vs molpy opls_141; molpy's uppercase-C
+    //     opls_141 def matched the ipso by atomic number, while molrs's aromatic
+    //     `c` opls_145 def now correctly claims it;
+    //   * the methyl carbon — molrs opls_148 (toluene CH3, which `overrides`
+    //     opls_135) vs molpy opls_135; molrs matches opls_148 because its
+    //     `[C;X4]([c;%opls_145])(H)(H)H` def now sees the aromatic-c neighbour.
+    // Both are cases where molrs picks the chemistry-specific override; they are
+    // asserted precisely so the residual stays characterized, not silent.
     let Some(dir) = fixtures_dir() else {
-        eprintln!("skipping OPLS aromatic characterization: tests-data/opls/ absent");
+        eprintln!("skipping OPLS aromatic parity: tests-data/opls/ absent");
         return;
     };
 
-    let typifier = OplsTypifier::from_xml_str(&oplsaa_xml())
-        .expect("build OplsTypifier")
+    // Embedded canonical OPLS-AA XML — same durable source as the agreeable-set
+    // test (independent of fetch-test-data).
+    let typifier = OplsTypifier::oplsaa()
+        .expect("build OplsTypifier from embedded OPLS-AA XML")
         .with_strict(false);
 
     let mut gap_molecules = 0;
@@ -603,9 +637,7 @@ fn opls_parity_aromatic_divergence_characterized() {
         let ap = atom_parity(&fx, &typed);
 
         eprintln!(
-            "OPLS aromatic KNOWN-GAP [{}]: {}/{} atoms agree with molpy; \
-             {} divergent (root cause: uppercase-C atomic-number SMARTS vs \
-             molrs aromatic-c semantics)",
+            "OPLS aromatic [{}]: {}/{} atoms agree with molpy ({} residual)",
             fx.name,
             ap.agree,
             ap.total,
@@ -614,18 +646,62 @@ fn opls_parity_aromatic_divergence_characterized() {
         for (i, elem, molpy_ty, molrs_ty) in &ap.diverged {
             eprintln!("    atom[{i}] {elem}: molpy {molpy_ty:?}  vs  molrs {molrs_ty:?}");
         }
-        // The divergence is documented as real: an aromatic fixture must
-        // actually differ on at least one carbon (else the gap is closed and the
-        // fixture should be promoted to the agreeable set).
-        assert!(
-            !ap.diverged.is_empty(),
-            "{}: marked known_gap but molrs fully agrees — promote it to the \
-             agreeable set",
-            fx.name
-        );
+
+        // Whatever the molecule, every ring hydrogen must agree (opls_146) and
+        // must be typed (never bare) — the aromatic-H def `[H][c;%opls_145]`.
+        for (i, elem, molpy_ty, molrs_ty) in &ap.diverged {
+            assert_ne!(
+                elem, "H",
+                "{}: aromatic hydrogen at atom[{i}] diverged \
+                 (molpy {molpy_ty:?} vs molrs {molrs_ty:?}) — the lowercase-c \
+                 aromatic-H def should match it",
+                fx.name
+            );
+        }
+
+        match fx.name.as_str() {
+            "benzene" => assert!(
+                ap.diverged.is_empty(),
+                "benzene: aromatic gap must be fully closed (got {}/{}); \
+                 diverged: {:?}",
+                ap.agree,
+                ap.total,
+                ap.diverged
+            ),
+            "toluene" => {
+                // The two substituent-junction carbons are the only allowed
+                // residual, and only because molrs assigns the more specific
+                // override. Anything else is a regression.
+                let allowed = |molpy: &Option<String>, molrs: &Option<String>| {
+                    let pair = (molpy.as_deref(), molrs.as_deref());
+                    pair == (Some("opls_141"), Some("opls_145")) // ipso C
+                        || pair == (Some("opls_135"), Some("opls_148")) // methyl C
+                };
+                for (i, elem, molpy_ty, molrs_ty) in &ap.diverged {
+                    assert!(
+                        elem == "C" && allowed(molpy_ty, molrs_ty),
+                        "toluene: unexpected residual at atom[{i}] {elem} \
+                         (molpy {molpy_ty:?} vs molrs {molrs_ty:?}) — only the \
+                         ipso (opls_141->opls_145) and methyl (opls_135->opls_148) \
+                         override divergences are characterized"
+                    );
+                }
+                // And those two divergences must actually be present (they are
+                // the documented molrs-more-specific result, not silent agreement
+                // nor a fresh gap).
+                assert_eq!(
+                    ap.diverged.len(),
+                    2,
+                    "toluene: expected exactly the 2 substituent-junction \
+                     override divergences, got {}",
+                    ap.diverged.len()
+                );
+            }
+            other => panic!("unexpected known_gap fixture {other:?}"),
+        }
     }
     assert!(
         gap_molecules > 0,
-        "at least one aromatic known-gap fixture is present"
+        "at least one aromatic fixture (benzene/toluene) is present"
     );
 }
