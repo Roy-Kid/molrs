@@ -1,6 +1,6 @@
 ---
 title: OPLS-AA 成键参数匹配下沉 molrs（specificity + 通配 + layer 排序）
-status: approved
+status: code-complete
 created: 2026-06-18
 ---
 

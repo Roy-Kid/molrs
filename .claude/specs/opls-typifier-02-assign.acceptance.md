@@ -107,8 +107,16 @@ criteria:
     pass_when: |
       `cargo fmt --all --check`, `cargo clippy --all-targets --all-features
       -- -D warnings`, and `cargo test --all-features` all exit 0.
-    status: pending
+    status: verified
     note: |
+      RESOLVED 2026-06-18: full `--all-features` gate now exits 0 with the brew
+      openblas env (LIBRARY_PATH + DYLD_FALLBACK_LIBRARY_PATH +
+      RUSTFLAGS="-L/opt/homebrew/opt/openblas/lib -lopenblas"). fmt --all --check
+      clean; clippy --all-targets --all-features -D warnings clean; test
+      --all-features all binaries green, 0 failed. Prior blockers (compute/fit
+      WIP, io/xtc teammate WIP, blas link) resolved via upstream merge + openblas
+      env. See [[project_molrs_allfeatures_blas]].
+
       ff-scoped gate GREEN: `cargo fmt --all --check` clean; `cargo clippy
       --features "io,signal,smiles,ff,conformer" --lib --tests -- -D warnings`
       no issues; `cargo test --features "io,signal,smiles,ff,conformer"` =

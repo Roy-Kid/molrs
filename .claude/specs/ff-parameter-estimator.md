@@ -1,6 +1,6 @@
 ---
 title: 基于相似性的力场缺失成键参数估计器（Rust，FF 无关）
-status: approved
+status: code-complete
 created: 2026-06-18
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: OPLS-AA SMARTS 原子分型下沉 molrs（typing-meta + SMARTS 分型）
-status: approved
+status: code-complete
 created: 2026-06-18
 ---
 

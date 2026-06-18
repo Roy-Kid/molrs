@@ -1,6 +1,6 @@
 ---
 title: OPLS-AA 分层依赖原子分型引擎（%opls_NNN）下沉 molrs
-status: approved
+status: code-complete
 created: 2026-06-18
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: OPLS-AA typifier parity 验证台（vs molpy OplsTypifier）
-status: approved
+status: code-complete
 created: 2026-06-18
 ---
 
