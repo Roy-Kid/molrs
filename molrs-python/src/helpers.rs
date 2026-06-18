@@ -76,6 +76,28 @@ pub fn py_value_err<E: std::fmt::Display>(e: E) -> PyErr {
     PyValueError::new_err(e.to_string())
 }
 
+/// Emit exactly one `DeprecationWarning` from a legacy free-function binding.
+///
+/// Used by the phase-02 compute/fit repoint: every legacy bundled-result free
+/// function (`dielectric_*_conductivity`, `dielectric_*_spectrum`,
+/// `transport_green_kubo_conductivity`, …) warns at call time WITHOUT changing
+/// its return shape, steering callers to the raw-compute + explicit-fit classes
+/// (`EinsteinConductivity` + `LinearFit`, `GreenKuboConductivity` +
+/// `RunningIntegral`, …). `stacklevel = 1` points the warning at the caller's
+/// Python frame.
+pub(crate) fn warn_deprecated(py: Python<'_>, message: &str) -> PyResult<()> {
+    use pyo3::types::PyType;
+    let warning: Py<PyType> = py
+        .get_type::<pyo3::exceptions::PyDeprecationWarning>()
+        .into();
+    PyErr::warn(
+        py,
+        warning.bind(py),
+        std::ffi::CString::new(message)?.as_c_str(),
+        1,
+    )
+}
+
 /// Collect owned core [`Frame`]s from a single `Frame` or a list of them.
 /// Used by every batch-`compute` binding to accept both shapes.
 ///

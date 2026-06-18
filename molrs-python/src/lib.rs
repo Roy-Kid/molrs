@@ -72,6 +72,7 @@ use compute::{
 };
 
 mod compute_extra;
+mod compute_fit;
 mod dielectric;
 mod signal;
 mod transport;
@@ -240,6 +241,12 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Additional analyzers ported from freud (Steinhardt, Nematic, …).
     compute_extra::register(m)?;
+
+    // Raw-compute + explicit-fit classes (phase-02 compute/fit repoint):
+    // VACF / EinsteinConductivity / GreenKuboConductivity / … + LinearFit /
+    // RunningIntegral / Plateau / DebyeFit / PowerSpectrum / IRSpectrum /
+    // RamanSpectrum at the top level (`molrs.VACF`, `molrs.LinearFit`, …).
+    compute_fit::register(m)?;
 
     // Signal processing
     m.add_function(wrap_pyfunction!(signal::signal_acf_fft, m)?)?;

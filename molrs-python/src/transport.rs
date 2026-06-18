@@ -10,7 +10,7 @@ use molrs::compute::{jacf, onsager, persist};
 use numpy::{IntoPyArray, PyReadonlyArray2, PyReadonlyArray3};
 use pyo3::prelude::*;
 
-use crate::helpers::py_value_err;
+use crate::helpers::{py_value_err, warn_deprecated};
 
 #[pyfunction]
 #[pyo3(signature = (p_i, p_j, dt, max_correlation_time))]
@@ -31,6 +31,11 @@ pub(crate) fn transport_onsager_correlation<'py>(
     Ok(dict.into())
 }
 
+/// **Deprecated** (phase-02 compute/fit repoint): superseded by the explicit
+/// raw current ACF (:class:`molrs.GreenKuboConductivity`) +
+/// :class:`molrs.RunningIntegral` (+ :class:`molrs.Plateau`) composition. This
+/// binding still works and returns the unchanged dict (``lag_times``/``jacf``/
+/// ``sigma_running``/``sigma``), but emits a ``DeprecationWarning``.
 #[pyfunction]
 #[pyo3(signature = (current, dt, volume, temperature, max_correlation_time))]
 pub(crate) fn transport_green_kubo_conductivity<'py>(
@@ -41,6 +46,12 @@ pub(crate) fn transport_green_kubo_conductivity<'py>(
     temperature: f64,
     max_correlation_time: usize,
 ) -> PyResult<Py<PyAny>> {
+    warn_deprecated(
+        py,
+        "transport_green_kubo_conductivity is deprecated; compose \
+         molrs.GreenKuboConductivity (raw current ACF) with \
+         molrs.RunningIntegral instead.",
+    )?;
     let j = current.as_array().to_owned();
     let result = jacf::green_kubo_conductivity(&j, dt, volume, temperature, max_correlation_time)
         .map_err(py_value_err)?;

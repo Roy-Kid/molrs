@@ -1,6 +1,6 @@
 ---
 title: Repoint Python + molpy + bench consumers onto raw-compute + fit composition
-status: approved
+status: code-complete
 created: 2026-06-18
 ---
 
@@ -52,17 +52,17 @@ created: 2026-06-18
 
 ## Tasks
 
-- [ ] Write failing parity tests for new PyO3 raw-compute + fit bindings (molrs-python/tests/test_fit_repoint.py)
-- [ ] Implement EinsteinConductivity/GreenKuboConductivity/EinsteinDiffusion/GreenKuboDiffusion/VACF/DebyeRelaxation pyclass bindings in molrs-python/src/{transport.rs,dielectric.rs}
-- [ ] Implement LinearFit/RunningIntegral/Plateau/DebyeFit/PowerSpectrum/IRSpectrum/RamanSpectrum pyclass bindings in molrs-python/src/compute_extra.rs and register in lib.rs
-- [ ] Add DeprecationWarning + deprecated docstrings to existing free-function bindings in molrs-python/src/{dielectric.rs,transport.rs,compute_extra.rs} without changing return shapes
-- [ ] Rebuild maturin wheel and verify import of new molrs classes
-- [ ] Write failing regression tests pinning molpy wrapper outputs to pre-migration values (molpy/tests/compute/test_fit_repoint.py)
-- [ ] Repoint molpy compute wrappers in molpy/src/molpy/compute/{dielectric.py,jacf.py,msd.py,onsager.py,mcd.py,persist.py,decomposition.py} to delegate to molrs raw-compute + fit
-- [ ] Migrate molpy ad-hoc DebyeFit (molpy/src/molpy/compute/result.py:168) to delegate to molrs DebyeFit
-- [ ] Repoint bm-molrs-molpy conductivity/diffusion/spectra benches to raw-compute + fit, preserving two-budget freud-parity floors
-- [ ] Verify new-path sigma/D/spectrum reproduce old-path values within documented tolerance and reference-library equality holds
-- [ ] Run full check + test suite
+- [x] Write failing parity tests for new PyO3 raw-compute + fit bindings (molrs-python/tests/test_fit_repoint.py)
+- [x] Implement EinsteinConductivity/GreenKuboConductivity/EinsteinDiffusion/GreenKuboDiffusion/VACF/DebyeRelaxation pyclass bindings in molrs-python/src/{transport.rs,dielectric.rs}
+- [x] Implement LinearFit/RunningIntegral/Plateau/DebyeFit/PowerSpectrum/IRSpectrum/RamanSpectrum pyclass bindings in molrs-python/src/compute_extra.rs and register in lib.rs
+- [x] Add DeprecationWarning + deprecated docstrings to existing free-function bindings in molrs-python/src/{dielectric.rs,transport.rs,compute_extra.rs} without changing return shapes
+- [x] Rebuild maturin wheel and verify import of new molrs classes
+- [x] Write failing regression tests pinning molpy wrapper outputs to pre-migration values (molpy/tests/compute/test_fit_repoint.py)
+- [x] Repoint molpy compute wrappers in molpy/src/molpy/compute/{dielectric.py,jacf.py,msd.py,onsager.py,mcd.py,persist.py,decomposition.py} to delegate to molrs raw-compute + fit
+- [x] Migrate molpy ad-hoc DebyeFit — N/A: molpy `result.py:fit_debye` is a FREQUENCY-domain dielectric fit (ε″/(ε′−ε∞)=ωτ); molrs `DebyeFit` is TIME-domain ACF (Φ(t)=A·e^{−t/τ}) — different quantities. molrs `DebyeFit` exposed as new class; molpy's distinct fit correctly retained (see phase-03/follow-up note).
+- [ ] Repoint bm-molrs-molpy benches — PARKED: bm-molrs-molpy absent from this checkout (owes /mol:bench; ac-009/ac-010).
+- [x] Verify new-path sigma/D/spectrum reproduce old-path values within documented tolerance and reference-library equality holds
+- [x] Run full check + test suite
 
 ## Testing strategy
 

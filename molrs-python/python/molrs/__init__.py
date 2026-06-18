@@ -96,6 +96,22 @@ from .molrs import (
     signal_acf_fft,
     signal_apply_window,
     signal_frequency_grid,
+    # Raw-compute + explicit-fit classes (compute/fit repoint). Raw computes
+    # return ONLY a raw curve (no fitted sigma/D); the fit classes consume that
+    # curve and yield the derived coefficient/spectrum.
+    VACF,
+    GreenKuboDiffusion,
+    EinsteinDiffusion,
+    EinsteinConductivity,
+    GreenKuboConductivity,
+    DebyeRelaxation,
+    LinearFit,
+    RunningIntegral,
+    Plateau,
+    DebyeFit,
+    PowerSpectrum,
+    IRSpectrum,
+    RamanSpectrum,
 )
 
 # Rich Python Frame/Block layer (pandas-style API; CSV engine in Rust on the
@@ -244,4 +260,18 @@ __all__ = [
     "signal_acf_fft",
     "signal_apply_window",
     "signal_frequency_grid",
+    # Raw-compute + explicit-fit classes.
+    "VACF",
+    "GreenKuboDiffusion",
+    "EinsteinDiffusion",
+    "EinsteinConductivity",
+    "GreenKuboConductivity",
+    "DebyeRelaxation",
+    "LinearFit",
+    "RunningIntegral",
+    "Plateau",
+    "DebyeFit",
+    "PowerSpectrum",
+    "IRSpectrum",
+    "RamanSpectrum",
 ]

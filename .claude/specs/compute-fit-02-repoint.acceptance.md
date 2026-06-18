@@ -11,7 +11,8 @@ criteria:
       GreenKuboDiffusion, VACF, DebyeRelaxation, LinearFit, RunningIntegral,
       Plateau, DebyeFit, PowerSpectrum, IRSpectrum, RamanSpectrum as
       constructible classes (each `hasattr(molrs, name)` is True and callable).
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-002
     summary: Raw-compute returns only its curve, no fitted coefficient
     type: code
@@ -21,7 +22,8 @@ criteria:
       VACF returns a raw curve (ndarray or dict of arrays) and does NOT contain
       a fitted scalar (no 'sigma'/'D' key on the raw result); the coefficient
       appears only after composing the matching fit class.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-003
     summary: Legacy free-function bindings emit DeprecationWarning, unchanged output
     type: runtime
@@ -33,7 +35,8 @@ criteria:
       bindings emits exactly one DeprecationWarning when called, and the
       returned dict/scalar is byte-for-byte identical to the pre-change output
       on the same fixture.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-004
     summary: New pipeline reproduces old conductivity/diffusion coefficient
     type: scientific
@@ -78,7 +81,8 @@ criteria:
       implementation (no local least-squares / FFT / running-integral loop);
       they only construct and call molrs raw-compute + fit classes. result.py
       no longer defines an ad-hoc DebyeFit body.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-008
     summary: maturin wheel rebuilt and molpy integration tests green against it
     type: runtime
@@ -87,7 +91,8 @@ criteria:
       The maturin wheel is rebuilt from the modified molrs-python sources and
       installed, then `pytest molpy/tests/compute` passes with zero failures
       and zero errors against the freshly built wheel.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-009
     summary: Bench reference-library equality holds via raw+fit path
     type: scientific
@@ -116,7 +121,8 @@ criteria:
       `cargo fmt --all --check && cargo clippy -- -D warnings && cargo check`
       passes for molrs-python, and the molrs + molpy + bench test suites run
       green after the repoint.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
 ---
 
 # Acceptance criteria

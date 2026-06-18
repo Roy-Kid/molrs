@@ -6,7 +6,7 @@ use numpy::{
 };
 use pyo3::prelude::*;
 
-use crate::helpers::py_value_err;
+use crate::helpers::{py_value_err, warn_deprecated};
 
 #[pyfunction]
 pub(crate) fn dielectric_compute_dipole_moment<'py>(
@@ -43,6 +43,11 @@ pub(crate) fn dielectric_static_dielectric_constant<'py>(
     diel::static_dielectric_constant(&dm, volume, temperature, epsilon_inf).map_err(py_value_err)
 }
 
+/// **Deprecated** (phase-02 compute/fit repoint): the bundled spectrum free
+/// function is superseded by the explicit raw-compute + spectral-transform
+/// composition. Build the raw dipole-flux ACF and pass it to
+/// :class:`molrs.IRSpectrum` / :class:`molrs.PowerSpectrum`. This binding still
+/// works and returns the unchanged dict, but emits a ``DeprecationWarning``.
 #[pyfunction]
 #[pyo3(signature = (dipole_moments, dt, volume, temperature, epsilon_inf, max_correlation_time, window_type="hann"))]
 #[allow(clippy::too_many_arguments)]
@@ -56,6 +61,11 @@ pub(crate) fn dielectric_einstein_helfand_spectrum<'py>(
     max_correlation_time: usize,
     window_type: &str,
 ) -> PyResult<Py<PyAny>> {
+    warn_deprecated(
+        py,
+        "dielectric_einstein_helfand_spectrum is deprecated; compose the raw \
+         dipole-flux ACF with molrs.IRSpectrum / molrs.PowerSpectrum instead.",
+    )?;
     let dm = dipole_moments.as_array().to_owned();
     let result = diel::einstein_helfand_spectrum(
         &dm,
@@ -76,6 +86,10 @@ pub(crate) fn dielectric_einstein_helfand_spectrum<'py>(
     Ok(dict.into())
 }
 
+/// **Deprecated** (phase-02 compute/fit repoint): superseded by the explicit
+/// raw current ACF (:class:`molrs.GreenKuboConductivity`) + spectral transform
+/// composition. This binding still works and returns the unchanged dict, but
+/// emits a ``DeprecationWarning``.
 #[pyfunction]
 #[pyo3(signature = (current_density, dt, volume, temperature, epsilon_inf, max_correlation_time, window_type="hann"))]
 #[allow(clippy::too_many_arguments)]
@@ -89,6 +103,11 @@ pub(crate) fn dielectric_green_kubo_spectrum<'py>(
     max_correlation_time: usize,
     window_type: &str,
 ) -> PyResult<Py<PyAny>> {
+    warn_deprecated(
+        py,
+        "dielectric_green_kubo_spectrum is deprecated; compose the raw current \
+         ACF (molrs.GreenKuboConductivity) with a spectral transform instead.",
+    )?;
     let cd = current_density.as_array().to_owned();
     let result = diel::green_kubo_spectrum(
         &cd,
@@ -109,6 +128,12 @@ pub(crate) fn dielectric_green_kubo_spectrum<'py>(
     Ok(dict.into())
 }
 
+/// **Deprecated** (phase-02 compute/fit repoint): superseded by the explicit
+/// raw collective-dipole MSD (:class:`molrs.EinsteinConductivity`) +
+/// :class:`molrs.LinearFit` composition, which keeps "what was measured"
+/// separate from "how the analyst fits it". This binding still works and
+/// returns the unchanged dict (``lag_times``/``msd``/``sigma``/``slope``/
+/// ``fit_start``/``fit_end``), but emits a ``DeprecationWarning``.
 #[pyfunction]
 #[pyo3(signature = (translational_dipole, dt, volume, temperature, max_correlation_time, fit_start_frac=0.1, fit_end_frac=0.5))]
 #[allow(clippy::too_many_arguments)]
@@ -122,6 +147,12 @@ pub(crate) fn dielectric_einstein_helfand_conductivity<'py>(
     fit_start_frac: f64,
     fit_end_frac: f64,
 ) -> PyResult<Py<PyAny>> {
+    warn_deprecated(
+        py,
+        "dielectric_einstein_helfand_conductivity is deprecated; compose \
+         molrs.EinsteinConductivity (raw collective-dipole MSD) with \
+         molrs.LinearFit instead.",
+    )?;
     let td = translational_dipole.as_array().to_owned();
     let result = diel::einstein_helfand_conductivity(
         &td,
