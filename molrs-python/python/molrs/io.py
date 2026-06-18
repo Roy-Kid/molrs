@@ -39,16 +39,22 @@ from .frame import Frame  # canonical rich Frame (spec frame-block-sink-01)
 from .molrs import (
     DCDTrajReader as _DCDTrajReader,
     LAMMPSTrajReader as _LAMMPSTrajReader,
+    TRRTrajReader as _TRRTrajReader,
+    XTCTrajReader as _XTCTrajReader,
     XYZTrajReader as _XYZTrajReader,
     read_gro as _read_gro,
     read_lammps as _read_lammps,
     read_pdb as _read_pdb,
     read_pdb_trajectory as _read_pdb_trajectory,
+    read_trr as _read_trr,
+    read_xtc as _read_xtc,
     read_xyz as _read_xyz,
     write_gro as _write_gro,
     write_lammps as _write_lammps,
     write_pdb as _write_pdb,
     write_pdb_trajectory as _write_pdb_trajectory,
+    write_trr as _write_trr,
+    write_xtc as _write_xtc,
     write_xyz as _write_xyz,
 )
 
@@ -161,6 +167,43 @@ def read_gro(file: str | PathLike[str]) -> list[Any]:
     return [_wrap(f) for f in frames]
 
 
+def read_trr(file: str | PathLike[str]) -> list[Any]:
+    """Read all frames from a GROMACS TRR trajectory.
+
+    Args:
+        file: Path to a ``.trr`` file.
+
+    Returns:
+        List of molrs ``Frame`` objects (``id``, ``x``/``y``/``z`` in nm, plus
+        ``vx``/``vy``/``vz`` and ``fx``/``fy``/``fz`` when present).
+
+    Raises:
+        OSError: If the file cannot be opened or parsed.
+    """
+    frames = _read_trr(str(file))
+    for f in frames:
+        _noop_fmt.canonicalize_frame(f)
+    return [_wrap(f) for f in frames]
+
+
+def read_xtc(file: str | PathLike[str]) -> list[Any]:
+    """Read all frames from a GROMACS XTC (compressed) trajectory.
+
+    Args:
+        file: Path to a ``.xtc`` file (classic 1995 or 2023 magic).
+
+    Returns:
+        List of molrs ``Frame`` objects (``id``, ``x``/``y``/``z`` in nm).
+
+    Raises:
+        OSError: If the file cannot be opened or parsed.
+    """
+    frames = _read_xtc(str(file))
+    for f in frames:
+        _noop_fmt.canonicalize_frame(f)
+    return [_wrap(f) for f in frames]
+
+
 def write_lammps_data(
     file: str | PathLike[str],
     frame: Any,
@@ -210,6 +253,24 @@ def write_gro(file: str | PathLike[str], frame: Any) -> None:
     """
     _gro_fmt.localize_frame(frame)
     _write_gro(str(file), frame)
+
+
+def write_trr(file: str | PathLike[str], frames: Any) -> None:
+    """Write a list of Frames to a GROMACS TRR trajectory (single precision).
+
+    Each frame needs ``x``/``y``/``z`` (nm); optional ``vx``/``vy``/``vz`` and
+    ``fx``/``fy``/``fz`` are written when present.
+    """
+    _write_trr(str(file), list(frames))
+
+
+def write_xtc(file: str | PathLike[str], frames: Any) -> None:
+    """Write a list of Frames to a GROMACS XTC trajectory (lossy compression).
+
+    Each frame needs ``x``/``y``/``z`` (nm); the quantization precision is taken
+    from ``frame.meta['precision']`` if present, else 1000 (0.001 nm).
+    """
+    _write_xtc(str(file), list(frames))
 
 
 # ===================================================================
@@ -337,10 +398,7 @@ class TrajectoryReader:
         return False
 
     def __repr__(self) -> str:
-        return (
-            f"TrajectoryReader(n_frames={self.n_frames}, "
-            f"files={len(self._readers)})"
-        )
+        return f"TrajectoryReader(n_frames={self.n_frames}, files={len(self._readers)})"
 
 
 def read_lammps_trajectory(
@@ -384,19 +442,45 @@ def read_dcd_trajectory(file: PathInput | Sequence[PathInput]) -> TrajectoryRead
     return TrajectoryReader(readers, _noop_fmt)
 
 
+def read_trr_trajectory(file: PathInput | Sequence[PathInput]) -> TrajectoryReader:
+    """Open a GROMACS TRR trajectory as a lazy :class:`TrajectoryReader`.
+
+    Accepts a single path or a list of paths whose frames are concatenated.
+    Random access is O(1) after a one-time index scan.
+    """
+    readers = [_TRRTrajReader(p) for p in _as_paths(file)]
+    return TrajectoryReader(readers, _noop_fmt)
+
+
+def read_xtc_trajectory(file: PathInput | Sequence[PathInput]) -> TrajectoryReader:
+    """Open a GROMACS XTC (compressed) trajectory as a lazy :class:`TrajectoryReader`.
+
+    Accepts a single path or a list of paths whose frames are concatenated.
+    Random access is O(1) after a one-time index scan.
+    """
+    readers = [_XTCTrajReader(p) for p in _as_paths(file)]
+    return TrajectoryReader(readers, _noop_fmt)
+
+
 __all__ = [
     "read_lammps_data",
     "read_pdb",
     "read_pdb_trajectory",
     "read_xyz",
     "read_gro",
+    "read_trr",
+    "read_xtc",
     "write_lammps_data",
     "write_pdb",
     "write_pdb_trajectory",
     "write_xyz",
     "write_gro",
+    "write_trr",
+    "write_xtc",
     "TrajectoryReader",
     "read_lammps_trajectory",
     "read_xyz_trajectory",
     "read_dcd_trajectory",
+    "read_trr_trajectory",
+    "read_xtc_trajectory",
 ]

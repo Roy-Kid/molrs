@@ -73,6 +73,16 @@ def dcd_dir(tests_data_dir: Path) -> Path:
 
 
 @pytest.fixture(scope="session")
+def trr_dir(tests_data_dir: Path) -> Path:
+    return tests_data_dir / "trr"
+
+
+@pytest.fixture(scope="session")
+def xtc_dir(tests_data_dir: Path) -> Path:
+    return tests_data_dir / "xtc"
+
+
+@pytest.fixture(scope="session")
 def lammps_dir(tests_data_dir: Path) -> Path:
     return tests_data_dir / "lammps"
 
