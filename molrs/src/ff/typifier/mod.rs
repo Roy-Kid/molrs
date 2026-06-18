@@ -9,6 +9,9 @@
 use molrs::Atomistic;
 
 pub mod mmff;
+pub mod opls;
+
+pub use opls::OplsTypifier;
 
 /// A typifier assigns force-field type IDs to a molecular graph and returns the
 /// **labeled graph** (not a [`Frame`]).

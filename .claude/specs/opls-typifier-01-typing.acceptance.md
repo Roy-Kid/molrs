@@ -10,7 +10,7 @@ criteria:
       OplsTypingMeta keyed by opls_NNN, where a known modern row (e.g. opls_135)
       carries class="CT", a non-empty def SMARTS, and a row with overrides parses
       the comma list into Vec<String>; a row missing def yields def=None.
-    status: pending
+    status: verified
   - id: ac-002
     summary: priority resolution matches molpy _OplsAtomTypifier
     type: code
@@ -20,7 +20,7 @@ criteria:
       explicit `priority` wins; else (+len(overrides)) − (times overridden);
       plus layer*stride. The highest-priority type is selected for an atom
       matched by multiple defs.
-    status: pending
+    status: verified
   - id: ac-003
     summary: read_opls_xml potential parsing unchanged (no regression)
     type: code
@@ -29,7 +29,7 @@ criteria:
       All existing OplsXmlReader tests (ff/forcefield/readers/opls.rs) pass
       unchanged; read_opls_typing_xml_str is additive and does not alter the
       ForceField produced by read_opls_xml.
-    status: pending
+    status: verified
   - id: ac-004
     summary: SMARTS atom typing on real molecules incl. recursive def
     type: scientific
@@ -38,7 +38,7 @@ criteria:
       annotate_opls assigns opls_NNN atom types over molecules read from
       tests-data/, including at least one def using recursive $() SMARTS; typed
       atoms carry type, class, and charge props. No synthetic happy-path inputs.
-    status: pending
+    status: verified
   - id: ac-005
     summary: malformed SMARTS def fails fast
     type: code
@@ -46,7 +46,7 @@ criteria:
     pass_when: |
       A type whose def is an unparseable SMARTS string causes OplsTypifier
       construction (or typify) to return Err, never silently dropping the type.
-    status: pending
+    status: verified
   - id: ac-006
     summary: lint, type check, and test suite clean
     type: runtime
@@ -54,6 +54,17 @@ criteria:
       `cargo fmt --all --check`, `cargo clippy --all-targets --all-features
       -- -D warnings`, and `cargo test --all-features` all exit 0.
     status: pending
+    note: |
+      Partially verified. fmt clean; clippy + tests GREEN for every in-scope
+      feature set (io,signal,smiles,ff,conformer): 1191 passed / 0 failed,
+      ff-scoped clippy clean. The literal `--all-features` invocation does NOT
+      yet exit 0 because the `compute` feature is broken by PRE-EXISTING,
+      UNRELATED working-tree WIP (uncommitted edits under molrs/src/compute/ +
+      an untracked molrs/src/compute/fit/ whose mod.rs declares
+      `pub mod raw_computes;`/`pub mod spectral;` but raw_computes.rs is missing,
+      so `compute::spectra` fails to import `compute::fit::forward_fft_onesided`).
+      This is independent of the OPLS typifier (ff-only) and was left untouched
+      per scope. Re-run `--all-features` once the compute WIP lands.
 ---
 
 # Acceptance criteria

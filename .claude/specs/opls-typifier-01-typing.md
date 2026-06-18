@@ -58,14 +58,20 @@ SMARTS 解析/匹配全用 `core/chem/smarts`（`SmartsPattern::parse`/`find_mat
 
 ## Tasks
 
-- [ ] Write failing tests for OplsTypingMeta parse (class/def/overrides/priority/layer round-trip from real oplsaa.xml rows) in molrs/tests/ff/typifier/opls.rs
-- [ ] Implement read_opls_typing_xml_str in molrs/src/ff/forcefield/xml.rs and OplsTypingMeta/OplsTypeRow in molrs/src/ff/typifier/opls/meta.rs
-- [ ] Write failing tests for priority resolution (explicit priority, overrides +/-, layer stride) matching molpy _OplsAtomTypifier
-- [ ] Implement priority/overrides/layer ranking in molrs/src/ff/typifier/opls/typing.rs
-- [ ] Write failing tests for SMARTS atom typing on real molecules (tests-data) including recursive SMARTS def_ patterns
-- [ ] Implement annotate_opls (SmartsPattern::parse cache + find_matches + per-atom best-type pick + type/class/charge write-back) and OplsTypifier::typify
-- [ ] Add rustdoc with units/conventions for OplsTypifier public API; note legacy-no-def rows are out of scope
-- [ ] Run cargo fmt --all --check && cargo clippy -- -D warnings && cargo test --all-features
+- [x] Write failing tests for OplsTypingMeta parse (class/def/overrides/priority/layer round-trip from real oplsaa.xml rows) in molrs/tests/ff/typifier/opls.rs
+- [x] Implement read_opls_typing_xml_str in molrs/src/ff/forcefield/xml.rs and OplsTypingMeta/OplsTypeRow in molrs/src/ff/typifier/opls/meta.rs
+- [x] Write failing tests for priority resolution (explicit priority, overrides +/-, layer stride) matching molpy _OplsAtomTypifier
+- [x] Implement priority/overrides/layer ranking in molrs/src/ff/typifier/opls/typing.rs
+- [x] Write failing tests for SMARTS atom typing on real molecules (tests-data) including recursive SMARTS def_ patterns
+- [x] Implement annotate_opls (SmartsPattern::parse cache + find_matches + per-atom best-type pick + type/class/charge write-back) and OplsTypifier::typify
+- [x] Add rustdoc with units/conventions for OplsTypifier public API; note legacy-no-def rows are out of scope
+- [~] Run cargo fmt --all --check && cargo clippy -- -D warnings && cargo test --all-features
+      (fmt + clippy + tests GREEN for all in-scope features io,signal,smiles,ff,conformer:
+      1191 passed / 0 failed; ff-scoped clippy clean. Literal `--all-features` is BLOCKED
+      by pre-existing, unrelated compute WIP — uncommitted working-tree changes under
+      molrs/src/compute/ + an untracked compute/fit/ dir whose mod.rs declares
+      `pub mod raw_computes; pub mod spectral;` but raw_computes.rs is missing. Not in this
+      spec's scope; left untouched.)
 
 ## Testing strategy
 

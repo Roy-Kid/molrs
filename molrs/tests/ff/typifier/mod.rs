@@ -2,3 +2,6 @@
 
 #[path = "mmff.rs"]
 mod mmff;
+
+#[path = "opls.rs"]
+mod opls;
