@@ -4,7 +4,7 @@
 //! slope, intercept, coefficient of determination, and the inclusive index
 //! bounds of the window actually fitted. The slope arithmetic is the same OLS
 //! lifted into [`ols_slope_intercept_r2`](super::ols_slope_intercept_r2) from
-//! `dielectric::einstein_helfand_conductivity`, so a `LinearFit` over the same
+//! the Einstein–Helfand ionic-conductivity OLS, so a `LinearFit` over the same
 //! curve and fractions reproduces that function's slope bit-for-bit.
 
 use ndarray::Array1;
@@ -37,7 +37,7 @@ impl ComputeResult for LinearFitResult {}
 ///
 /// The window is given as `(start_frac, end_frac)` fractions of the curve's
 /// last index `n − 1`, matching the `fit_start_frac` / `fit_end_frac` semantics
-/// of `dielectric::einstein_helfand_conductivity`:
+/// of the Einstein–Helfand ionic conductivity:
 ///
 /// ```text
 ///     fit_start = round((n − 1)·start_frac)
@@ -91,7 +91,7 @@ impl Fit for LinearFit {
         }
 
         let last = n - 1;
-        // Same index derivation as einstein_helfand_conductivity (max_lag = last).
+        // Same index derivation as the Einstein–Helfand conductivity (max_lag = last).
         let mut fit_start = (last as f64 * start_frac).round() as usize;
         let mut fit_end = (last as f64 * end_frac).round() as usize;
         if fit_end >= last {

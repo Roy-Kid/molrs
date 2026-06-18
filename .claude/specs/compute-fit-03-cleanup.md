@@ -1,6 +1,6 @@
 ---
 title: compute-fit-03-cleanup — remove legacy bundled-derived results and free-function compute paths (BREAKING)
-status: approved
+status: code-complete
 created: 2026-06-18
 ---
 
@@ -69,16 +69,16 @@ created: 2026-06-18
 
 ## Tasks
 
-- [ ] Write failing tests for raw `ConductivityResult`/`JacfResult` field removal + `EinsteinConductivity`/`GreenKuboConductivity` + `LinearFit`/`RunningIntegral` composition (molrs/src/compute/dielectric.rs, molrs/src/compute/jacf.rs)
-- [ ] Remove derived fields / bundled types + inline OLS, trapezoidal, and transform helpers from dielectric.rs and jacf.rs (molrs/src/compute/dielectric.rs, molrs/src/compute/jacf.rs)
-- [ ] Write failing tests for OnsagerCorrelation and spectra raw-compute structs returning unwindowed ACFs (molrs/src/compute/onsager.rs, molrs/src/compute/spectra/power_spectrum.rs, molrs/src/compute/spectra/ir_spectrum.rs, molrs/src/compute/spectra/raman_spectrum.rs)
-- [ ] Convert onsager_correlation, power_spectrum, ir_spectrum, raman_spectrum free functions to Compute structs and delete window_and_fft/acf_to_spectrum/acf_to_intensities from spectra/mod.rs (molrs/src/compute/onsager.rs, molrs/src/compute/spectra/mod.rs, molrs/src/compute/spectra/power_spectrum.rs, molrs/src/compute/spectra/ir_spectrum.rs, molrs/src/compute/spectra/raman_spectrum.rs)
-- [ ] Update compute re-exports for removed symbols and new structs (molrs/src/compute/mod.rs)
-- [ ] Remove deprecated PyO3 bindings and converge registration (molrs-python/src/dielectric.rs, molrs-python/src/transport.rs, molrs-python/src/lib.rs)
-- [ ] Remove transition shims from molpy and molrs Python wrappers (molrs-python/python/molrs/dielectric.py, molrs-python/python/molrs/transport.py)
-- [ ] Repoint dielectric and spectra benches to raw-compute + fit composition (molrs/benches/compute/dielectric.rs, molrs/benches/compute/spectra.rs)
-- [ ] Record breaking SemVer bump and downstream pin-update requirement (Cargo.toml; do not publish)
-- [ ] Rebuild maturin wheel and run full check + test suite (cargo test --all-features, cargo clippy --all-targets --all-features -D warnings, cargo fmt, molpy + bench suites)
+- [x] Write failing tests for raw `ConductivityResult`/`JacfResult` field removal + `EinsteinConductivity`/`GreenKuboConductivity` + `LinearFit`/`RunningIntegral` composition (molrs/src/compute/dielectric.rs, molrs/src/compute/jacf.rs)
+- [x] Remove derived fields / bundled types + inline OLS, trapezoidal, and transform helpers from dielectric.rs and jacf.rs (molrs/src/compute/dielectric.rs, molrs/src/compute/jacf.rs)
+- [x] Write failing tests for OnsagerCorrelation and spectra raw-compute structs returning unwindowed ACFs (molrs/src/compute/onsager.rs, molrs/src/compute/spectra/power_spectrum.rs, molrs/src/compute/spectra/ir_spectrum.rs, molrs/src/compute/spectra/raman_spectrum.rs)
+- [x] Convert onsager_correlation, power_spectrum, ir_spectrum, raman_spectrum free functions to Compute structs and delete window_and_fft/acf_to_spectrum/acf_to_intensities from spectra/mod.rs (molrs/src/compute/onsager.rs, molrs/src/compute/spectra/mod.rs, molrs/src/compute/spectra/power_spectrum.rs, molrs/src/compute/spectra/ir_spectrum.rs, molrs/src/compute/spectra/raman_spectrum.rs)
+- [x] Update compute re-exports for removed symbols and new structs (molrs/src/compute/mod.rs)
+- [x] Remove deprecated PyO3 bindings and converge registration (molrs-python/src/dielectric.rs, molrs-python/src/transport.rs, molrs-python/src/lib.rs)
+- [x] Remove transition shims from molpy and molrs Python wrappers (molrs-python/python/molrs/dielectric.py, molrs-python/python/molrs/transport.py)
+- [x] Repoint dielectric and spectra benches to raw-compute + fit composition (molrs/benches/compute/dielectric.rs, molrs/benches/compute/spectra.rs)
+- [x] Record breaking SemVer bump and downstream pin-update requirement (Cargo.toml; do not publish)
+- [x] Rebuild maturin wheel and run full check + test suite (cargo test --all-features, cargo clippy --all-targets --all-features -D warnings, cargo fmt, molpy + bench suites)
 
 ## Testing strategy
 
@@ -90,6 +90,7 @@ created: 2026-06-18
 
 ## Out of scope
 
+- **DEFERRED this run (descope 2026-06-18):** removing the dielectric ε(ω) spectrum path — `einstein_helfand_spectrum`, `green_kubo_spectrum`, their inline helpers `dielectric::{windowed_acf_spectrum, acf_to_spectrum}`, their PyO3 bindings, and molpy `DielectricSusceptibility`. Reason: phase 01 built VDOS/IR/Raman transforms but **no dielectric ε(ω) raw-compute+fit kernel**, so these are still consumed with no replacement. Removal awaits a future `DielectricSpectrum` (raw ACF) + ε(ω) transform spec. Everything else in this phase (conductivity Einstein/GK result fields + free fns, onsager/power/ir/raman free-fn→struct, spectra dead helpers, version bump) proceeds.
 - Adding new physics, new fit types, or new spectral transforms (those landed in compute-fit-01-module).
 - Touching `gaussian_density` / diffraction Gaussian smear (defined quantities) or `local_density` diameter taper (estimator parameter).
 - Altering `ComputeResult::finalize` normalization (RDF g(r), density volume norm, COM mass-weighting) — that is normalization, not fitting.

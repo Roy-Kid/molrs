@@ -6,11 +6,18 @@
 //! persistence). Each returns a plain ``dict`` of NumPy arrays / scalars,
 //! matching the dielectric binding style.
 
-use molrs::compute::{jacf, onsager, persist};
+use molrs::compute::traits::Compute;
+use molrs::compute::{OnsagerCorrelation, persist};
+use molrs::store::frame::Frame as CoreFrame;
 use numpy::{IntoPyArray, PyReadonlyArray2, PyReadonlyArray3};
 use pyo3::prelude::*;
 
-use crate::helpers::{py_value_err, warn_deprecated};
+use crate::helpers::py_value_err;
+
+/// Empty frame slice for the series-based `OnsagerCorrelation` compute.
+fn no_frames() -> Vec<&'static CoreFrame> {
+    Vec::new()
+}
 
 #[pyfunction]
 #[pyo3(signature = (p_i, p_j, dt, max_correlation_time))]
@@ -23,45 +30,19 @@ pub(crate) fn transport_onsager_correlation<'py>(
 ) -> PyResult<Py<PyAny>> {
     let pi = p_i.as_array().to_owned();
     let pj = p_j.as_array().to_owned();
-    let result =
-        onsager::onsager_correlation(&pi, &pj, dt, max_correlation_time).map_err(py_value_err)?;
+    let result = OnsagerCorrelation
+        .compute(&no_frames(), (&pi, &pj, dt, max_correlation_time))
+        .map_err(py_value_err)?;
     let dict = pyo3::types::PyDict::new(py);
     dict.set_item("lag_times", result.lag_times.into_pyarray(py))?;
     dict.set_item("correlation", result.correlation.into_pyarray(py))?;
     Ok(dict.into())
 }
 
-/// **Deprecated** (phase-02 compute/fit repoint): superseded by the explicit
-/// raw current ACF (:class:`molrs.GreenKuboConductivity`) +
-/// :class:`molrs.RunningIntegral` (+ :class:`molrs.Plateau`) composition. This
-/// binding still works and returns the unchanged dict (``lag_times``/``jacf``/
-/// ``sigma_running``/``sigma``), but emits a ``DeprecationWarning``.
-#[pyfunction]
-#[pyo3(signature = (current, dt, volume, temperature, max_correlation_time))]
-pub(crate) fn transport_green_kubo_conductivity<'py>(
-    py: Python<'py>,
-    current: PyReadonlyArray2<'py, f64>,
-    dt: f64,
-    volume: f64,
-    temperature: f64,
-    max_correlation_time: usize,
-) -> PyResult<Py<PyAny>> {
-    warn_deprecated(
-        py,
-        "transport_green_kubo_conductivity is deprecated; compose \
-         molrs.GreenKuboConductivity (raw current ACF) with \
-         molrs.RunningIntegral instead.",
-    )?;
-    let j = current.as_array().to_owned();
-    let result = jacf::green_kubo_conductivity(&j, dt, volume, temperature, max_correlation_time)
-        .map_err(py_value_err)?;
-    let dict = pyo3::types::PyDict::new(py);
-    dict.set_item("lag_times", result.lag_times.into_pyarray(py))?;
-    dict.set_item("jacf", result.jacf.into_pyarray(py))?;
-    dict.set_item("sigma_running", result.sigma_running.into_pyarray(py))?;
-    dict.set_item("sigma", result.sigma)?;
-    Ok(dict.into())
-}
+// The legacy bundled `transport_green_kubo_conductivity` binding (raw JACF +
+// fitted sigma/sigma_running) was removed in compute-fit-03-cleanup. Compose
+// `molrs.GreenKuboConductivity` (raw current ACF) with `molrs.RunningIntegral`
+// and a caller-applied `1/(3·V·k_B·T)` MD→SI prefactor.
 
 #[pyfunction]
 #[pyo3(signature = (coords_i, coords_j, box_lengths, r0, r1, method, dt, max_correlation_time, exclude_self=false))]
@@ -102,7 +83,6 @@ pub(crate) fn transport_pair_survival_tcf<'py>(
 
 pub fn register_transport(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(transport_onsager_correlation, m)?)?;
-    m.add_function(wrap_pyfunction!(transport_green_kubo_conductivity, m)?)?;
     m.add_function(wrap_pyfunction!(transport_pair_survival_tcf, m)?)?;
     Ok(())
 }

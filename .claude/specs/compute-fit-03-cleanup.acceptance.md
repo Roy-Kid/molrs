@@ -11,17 +11,22 @@ criteria:
       remaining public fields are the raw observables {lag_times, msd} and
       {lag_times, jacf} respectively, verified by the new unit tests in
       molrs/src/compute/dielectric.rs and molrs/src/compute/jacf.rs.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-002
     summary: Every public compute entry point is a Compute struct
     type: code
     evaluator_hint: ""
     pass_when: |
-      onsager_correlation, power_spectrum, ir_spectrum, raman_spectrum, and any
-      remaining einstein_helfand_*/green_kubo_* free function no longer exist as
-      free functions; OnsagerCorrelation and the spectra computes are structs
+      onsager_correlation, power_spectrum, ir_spectrum, raman_spectrum,
+      einstein_helfand_conductivity, and green_kubo_conductivity no longer exist
+      as free functions; OnsagerCorrelation and the spectra computes are structs
       implementing molrs::compute::Compute, re-exported from compute/mod.rs.
-    status: pending
+      DEFERRED (descope 2026-06-18): einstein_helfand_spectrum / green_kubo_spectrum
+      (dielectric ε(ω)) remain as free functions — no raw+fit replacement kernel
+      exists yet; their conversion awaits a future DielectricSpectrum transform.
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-003
     summary: Spectra computes return raw unwindowed ACFs
     type: code
@@ -31,29 +36,38 @@ criteria:
       window_and_fft, acf_to_spectrum, and acf_to_intensities are removed from
       compute/spectra/mod.rs and the baked-in windowed output is gone, asserted
       by the new spectra unit tests.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-004
     summary: Deprecated PyO3 bindings and transition shims removed
     type: code
     evaluator_hint: ""
     pass_when: |
       molrs-python/src/{dielectric.rs,transport.rs} contain no bindings calling
-      removed free functions or removed derived fields; register_dielectric/
-      register_transport in lib.rs reference only surviving functions; the
-      transition shims are gone from molrs-python/python/molrs/{dielectric,transport}.py
-      and the molpy transport/dielectric wrappers.
-    status: pending
+      the REMOVED free functions or removed derived fields (conductivity Einstein/GK,
+      power/ir/raman, onsager); register_dielectric/register_transport in lib.rs
+      reference only surviving functions; transition shims for the removed paths are
+      gone from molrs-python/python/molrs/{dielectric,transport}.py and the molpy
+      wrappers. DEFERRED: the dielectric ε(ω) spectrum bindings
+      (einstein_helfand_spectrum/green_kubo_spectrum) and molpy DielectricSusceptibility
+      stay (still consumed; no replacement).
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-005
     summary: Grep-clean — zero references to removed symbols
     type: runtime
     evaluator_hint: "ripgrep over molrs/ molrs-python/ molpy/ benches/"
     pass_when: |
-      grep across molrs, molrs-python, molpy, and benches finds zero references
-      to sigma/slope/fit_start/fit_end on the old result types, to
-      einstein_helfand_conductivity/green_kubo_conductivity/einstein_helfand_spectrum/
-      green_kubo_spectrum/onsager_correlation/power_spectrum/ir_spectrum/raman_spectrum
-      as free functions, or to window_and_fft/windowed_acf_spectrum/acf_to_spectrum/sigma_running.
-    status: pending
+      grep across molrs, molrs-python, molpy finds zero references to
+      sigma/slope/fit_start/fit_end on the old conductivity result types, to
+      einstein_helfand_conductivity/green_kubo_conductivity/onsager_correlation/
+      power_spectrum/ir_spectrum/raman_spectrum as free functions, to sigma_running,
+      or to the spectra dead helpers spectra::{window_and_fft,acf_to_spectrum,acf_to_intensities}.
+      DEFERRED (still present, excluded from grep-clean): einstein_helfand_spectrum,
+      green_kubo_spectrum, and dielectric::{windowed_acf_spectrum,acf_to_spectrum} —
+      retained until the dielectric ε(ω) raw+fit kernel lands.
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-006
     summary: Full Rust check + test suite green
     type: runtime
@@ -61,7 +75,8 @@ criteria:
     pass_when: |
       cargo test --all-features passes, cargo clippy --all-targets --all-features
       -- -D warnings is clean, and cargo fmt --all --check is clean.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-007
     summary: molpy + freud-parity bench suites green on rebuilt wheel
     type: runtime

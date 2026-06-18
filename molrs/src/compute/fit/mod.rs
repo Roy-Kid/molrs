@@ -7,33 +7,33 @@
 //!
 //! | Fit | Input | Output | Lifted from |
 //! |-----|-------|--------|-------------|
-//! | [`LinearFit`] | `(x, y)` curve | [`LinearFitResult`] (slope/intercept/r²) | `dielectric::einstein_helfand_conductivity` OLS |
-//! | [`RunningIntegral`] | curve + dt | [`RunningIntegralResult`] (cumulative trapezoid) | `jacf::green_kubo_conductivity` trapezoid |
+//! | [`LinearFit`] | `(x, y)` curve | [`LinearFitResult`] (slope/intercept/r²) | Einstein–Helfand conductivity OLS |
+//! | [`RunningIntegral`] | curve + dt | [`RunningIntegralResult`] (cumulative trapezoid) | Green–Kubo conductivity trapezoid |
 //! | [`Plateau`] | curve | [`PlateauResult`] (windowed mean/std) | new |
 //! | [`DebyeFit`] | normalized Φ(t) + dt | [`DebyeFitResult`] (τ, amplitude) | molpy ad-hoc DebyeFit |
-//! | [`PowerSpectrum`] | raw VACF + dt | [`SpectrumResult`](crate::compute::SpectrumResult) | `spectra::window_and_fft` |
-//! | [`IRSpectrum`] | raw flux ACF + dt | [`SpectrumResult`](crate::compute::SpectrumResult) | `spectra::window_and_fft` |
-//! | [`RamanSpectrum`] | raw iso/aniso ACFs + dt | [`RamanSpectrumResult`](crate::compute::RamanSpectrumResult) | `spectra::raman_spectrum` |
+//! | [`PowerSpectrum`] | raw [`VACF`] ACF + dt | [`SpectrumResult`](crate::compute::SpectrumResult) | window + FFT |
+//! | [`IRSpectrum`] | raw [`IRFlux`] ACF + dt | [`SpectrumResult`](crate::compute::SpectrumResult) | window + FFT |
+//! | [`RamanSpectrum`] | raw [`RamanTensor`] iso/aniso ACFs + dt | [`RamanSpectrumResult`](crate::compute::RamanSpectrumResult) | window + FFT + prefactors |
 //!
 //! This module also hosts the raw-only [`Compute`](crate::compute::Compute)
-//! structs ([`VACF`], [`EinsteinDiffusion`], [`GreenKuboDiffusion`],
-//! [`EinsteinConductivity`], [`GreenKuboConductivity`], [`DebyeRelaxation`])
-//! that return only raw curves + scalar metadata, so the fit step is the
-//! analyst's explicit, parameterized choice.
+//! structs ([`VACF`], [`IRFlux`], [`RamanTensor`], [`EinsteinDiffusion`],
+//! [`GreenKuboDiffusion`], [`EinsteinConductivity`], [`GreenKuboConductivity`],
+//! [`DebyeRelaxation`]) that return only raw curves + scalar metadata, so the
+//! fit step is the analyst's explicit, parameterized choice.
 //!
 //! # Shared numerical primitives
 //!
-//! Three private helpers are lifted here so the new fits and the legacy free
-//! functions share one implementation:
+//! Helpers are lifted here so the fits share one implementation:
 //!
-//! - [`ols_slope_intercept_r2`] — ordinary-least-squares line fit (lifted from
-//!   `dielectric::einstein_helfand_conductivity`).
-//! - [`running_trapezoid`] — cumulative trapezoidal integral (lifted from
-//!   `jacf::green_kubo_conductivity`).
+//! - [`ols_slope_intercept_r2`] — ordinary-least-squares line fit (the
+//!   Einstein–Helfand conductivity slope).
+//! - [`running_trapezoid`] — cumulative trapezoidal integral (the Green–Kubo
+//!   conductivity integral).
 //! - [`forward_fft_onesided`] — the genuinely-shared "resize to `n_pad`,
 //!   forward FFT, take `n_pad/2 + 1` bins" complex core. Each caller keeps its
-//!   own scaling/units wrapper: the spectra path scales by `1/n_pad` and emits
-//!   cm⁻¹ frequencies; the dielectric path scales by `·dt` and emits a
+//!   own scaling/units wrapper: the spectral path
+//!   ([`spectral::window_and_fft`]) scales by `1/n_pad` and emits cm⁻¹
+//!   frequencies; the dielectric path scales by `·dt` and emits a
 //!   `(freq_rad, re, im)` triple.
 
 pub mod debye_fit;
@@ -49,7 +49,8 @@ pub use plateau::{Plateau, PlateauResult};
 pub use raw_computes::{
     DebyeRelaxation, DebyeRelaxationResult, EinsteinConductivity, EinsteinConductivityResult,
     EinsteinDiffusion, EinsteinDiffusionArgs, EwaldBoundary, GreenKuboConductivity,
-    GreenKuboConductivityResult, GreenKuboDiffusion, VACF, VacfResult,
+    GreenKuboConductivityResult, GreenKuboDiffusion, IRFlux, IRFluxResult, RamanTensor,
+    RamanTensorResult, VACF, VacfResult,
 };
 pub use running_integral::{RunningIntegral, RunningIntegralResult};
 pub use spectral::{IRSpectrum, PowerSpectrum, RamanSpectrum};
@@ -62,7 +63,7 @@ use rustfft::num_traits::Zero;
 /// index range `[start, end]`.
 ///
 /// Lifted verbatim (slope block) from
-/// `dielectric::einstein_helfand_conductivity`:
+/// the Einstein–Helfand ionic conductivity:
 /// `denom = np·sxx − sx·sx`, `slope = (np·sxy − sx·sy)/denom`, extended with
 /// `intercept = (sy − slope·sx)/np` and the coefficient of determination `r²`.
 ///
@@ -123,7 +124,7 @@ pub(crate) fn ols_slope_intercept_r2(
 
 /// Cumulative trapezoidal integral of `y` on uniform step `dt`.
 ///
-/// Lifted from `jacf::green_kubo_conductivity`:
+/// Lifted from the Green–Kubo ionic conductivity:
 /// `integral += 0.5·(y[k−1] + y[k])·dt; out[k] = integral`. Element `0` is `0`.
 ///
 /// # Returns

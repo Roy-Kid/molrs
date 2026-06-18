@@ -1,14 +1,23 @@
 //! Benchmarks for vibrational spectra computations.
 //!
 //! Covers power spectrum (VDOS), IR spectrum, and Raman spectrum
-//! across trajectory-length and DOF sweeps.
+//! across trajectory-length and DOF sweeps. Each spectrum is the raw-compute +
+//! spectral-fit composition (e.g. `VACF` + `PowerSpectrum`) that replaced the
+//! removed `power_spectrum` / `ir_spectrum` / `raman_spectrum` free functions.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
-use molrs::compute::spectra::{ir_spectrum, power_spectrum, raman_spectrum};
+use molrs::Frame;
+use molrs::compute::traits::{Compute, Fit};
+use molrs::compute::{IRFlux, IRSpectrum, PowerSpectrum, RamanSpectrum, RamanTensor, VACF};
 use ndarray::Array2;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use std::time::Duration;
+
+/// Empty frame slice for the series-based raw computes.
+fn no_frames() -> Vec<&'static Frame> {
+    Vec::new()
+}
 
 // ── Sweep constants ──────────────────────────────────────────────────────────
 
@@ -79,7 +88,8 @@ fn bench_power_spectrum_frames(c: &mut Criterion) {
         group.throughput(Throughput::Elements(nf as u64));
         group.bench_with_input(BenchmarkId::from_parameter(nf), &nf, |b, _| {
             b.iter(|| {
-                std::hint::black_box(power_spectrum(&v, DT_FS, RESOLUTION).unwrap());
+                let raw = VACF.compute(&no_frames(), (&v, DT_FS, RESOLUTION)).unwrap();
+                std::hint::black_box(PowerSpectrum.fit((&raw.acf, DT_FS)).unwrap());
             })
         });
     }
@@ -98,7 +108,8 @@ fn bench_power_spectrum_dofs(c: &mut Criterion) {
         group.throughput(Throughput::Elements((n_frames * nd) as u64));
         group.bench_with_input(BenchmarkId::from_parameter(nd), &nd, |b, _| {
             b.iter(|| {
-                std::hint::black_box(power_spectrum(&v, DT_FS, RESOLUTION).unwrap());
+                let raw = VACF.compute(&no_frames(), (&v, DT_FS, RESOLUTION)).unwrap();
+                std::hint::black_box(PowerSpectrum.fit((&raw.acf, DT_FS)).unwrap());
             })
         });
     }
@@ -117,7 +128,10 @@ fn bench_ir_spectrum(c: &mut Criterion) {
         group.throughput(Throughput::Elements(nf as u64));
         group.bench_with_input(BenchmarkId::from_parameter(nf), &nf, |b, _| {
             b.iter(|| {
-                std::hint::black_box(ir_spectrum(&dm, DT_FS, RESOLUTION).unwrap());
+                let raw = IRFlux
+                    .compute(&no_frames(), (&dm, DT_FS, RESOLUTION))
+                    .unwrap();
+                std::hint::black_box(IRSpectrum.fit((&raw.acf, DT_FS)).unwrap());
             })
         });
     }
@@ -137,9 +151,15 @@ fn bench_raman_spectrum_not_averaged(c: &mut Criterion) {
         group.throughput(Throughput::Elements(nf as u64));
         group.bench_with_input(BenchmarkId::from_parameter(nf), &nf, |b, _| {
             b.iter(|| {
-                std::hint::black_box(
-                    raman_spectrum(&alpha, DT_FS, RESOLUTION, 0.0, 300.0, false).unwrap(),
-                );
+                let raw = RamanTensor
+                    .compute(&no_frames(), (&alpha, DT_FS, RESOLUTION))
+                    .unwrap();
+                let fit = RamanSpectrum {
+                    incident_frequency_cm1: 0.0,
+                    temperature_k: 300.0,
+                    averaged: false,
+                };
+                std::hint::black_box(fit.fit((&raw.acf_iso, &raw.acf_aniso, DT_FS)).unwrap());
             })
         });
     }
@@ -156,9 +176,15 @@ fn bench_raman_spectrum_averaged(c: &mut Criterion) {
         group.throughput(Throughput::Elements(nf as u64));
         group.bench_with_input(BenchmarkId::from_parameter(nf), &nf, |b, _| {
             b.iter(|| {
-                std::hint::black_box(
-                    raman_spectrum(&alpha, DT_FS, RESOLUTION, 10000.0, 300.0, true).unwrap(),
-                );
+                let raw = RamanTensor
+                    .compute(&no_frames(), (&alpha, DT_FS, RESOLUTION))
+                    .unwrap();
+                let fit = RamanSpectrum {
+                    incident_frequency_cm1: 10000.0,
+                    temperature_k: 300.0,
+                    averaged: true,
+                };
+                std::hint::black_box(fit.fit((&raw.acf_iso, &raw.acf_aniso, DT_FS)).unwrap());
             })
         });
     }

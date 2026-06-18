@@ -3,7 +3,7 @@
 //! Consumes a curve `y` sampled on uniform step `dt` and returns the running
 //! integral `∫₀^{k·dt} y(t) dt` at every point. The trapezoid recurrence is the
 //! same one lifted into [`running_trapezoid`](super::running_trapezoid) from
-//! `jacf::green_kubo_conductivity`, so a `RunningIntegral` over the same JACF
+//! the Green–Kubo ionic conductivity, so a `RunningIntegral` over the same JACF
 //! and `dt` reproduces that function's running integral bit-for-bit (before the
 //! Green–Kubo prefactor).
 
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn matches_jacf_running_trapezoid() {
         // ac-004: equals the running trapezoid integral computed inline in
-        // jacf.rs (green_kubo_conductivity) on the same JACF + dt.
+        // the Green–Kubo conductivity running integral on the same JACF + dt.
         let jacf = Array1::from_vec(vec![1.0, 0.8, 0.5, 0.2, 0.05]);
         let dt = 0.5;
         let res = RunningIntegral.fit((&jacf, dt, None)).unwrap();

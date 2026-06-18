@@ -85,7 +85,7 @@ pub trait Compute {
 ///   dimension `d`, …). Identical `input` + identical `&self` ⇒ identical
 ///   [`Output`](Self::Output); no hidden mutable state.
 /// - `Input<'a>` is a [GAT](https://doc.rust-lang.org/reference/items/associated-items.html)
-///   so a fit may borrow its upstream input (`&Array1<f64>`, `&JacfResult`, …)
+///   so a fit may borrow its upstream input (`&Array1<f64>`, a raw ACF, …)
 ///   without cloning.
 /// - `Output: ComputeResult + Clone + Send + Sync + 'static` — same shareable
 ///   bound as [`Compute::Output`], so fit outputs slot into the same
