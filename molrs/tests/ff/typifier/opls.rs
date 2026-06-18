@@ -9,8 +9,12 @@
 
 use std::path::Path;
 
+use molrs::ff::forcefield::Params;
 use molrs::ff::typifier::Typifier;
-use molrs::ff::typifier::opls::{OplsTypeRow, OplsTypifier, OplsTypingMeta, annotate_opls};
+use molrs::ff::typifier::opls::{
+    BondedTerm, CandidateTables, Estimator, NoMatch, OplsTypeRow, OplsTypifier, OplsTypingMeta,
+    annotate_opls, assign_bonded, assign_bonded_with,
+};
 use molrs::{Atom, Atomistic};
 
 use crate::helpers;
@@ -256,4 +260,287 @@ fn recursive_dollar_def_types_a_real_molecule() {
         .filter(|(_, a)| a.get_str("type") == Some("opls_135"))
         .count();
     assert_eq!(n, 2, "recursive $() def types both ethane carbons");
+}
+
+// ===========================================================================
+// Chain 2: bonded-parameter assignment (assign_bonded / build)
+// ===========================================================================
+
+/// Read a numeric prop off a materialized bond/angle/dihedral relation (whose
+/// props are a `HashMap<String, PropValue>`), or `None` if absent/non-numeric.
+fn rel_f64(rel: &molrs::Bond, key: &str) -> Option<f64> {
+    rel.props.get(key).and_then(|v| v.as_f64())
+}
+
+/// Read a required numeric prop, failing the test if absent.
+fn term_param(props_get: Option<f64>, name: &str) -> f64 {
+    props_get.unwrap_or_else(|| panic!("term missing param {name:?}"))
+}
+
+#[test]
+fn ethane_bond_angle_dihedral_match_opls_reference() {
+    // ac-004: a fully-typed real molecule (ethane) gets every bonded term
+    // parametrized with values matching the bundled OPLS-AA reference within
+    // the spec tolerances (bond r0 atol 0.02 Å / angle θ0 atol 3° / force
+    // constants rtol 0.10). Reference (oplsaa.xml, molrs units):
+    //   CT-CT bond:  r0 1.529 Å,  k0 224262.4/418.4 = 536.0 kcal/mol/Å²
+    //   CT-HC bond:  r0 1.09  Å,  k0 284512.0/418.4 = 680.0
+    //   HC-CT-HC ang: θ0 1.88146 rad, k0 276.144/4.184 = 66.0 kcal/mol/rad²
+    //   HC-CT-CT ang: θ0 1.93208 rad, k0 313.8/4.184  = 75.0
+    //   HC-CT-CT-HC dih: f1 0, f2 0, f3 0.3, f4 0 (RB→OPLS of [.,1.8828,0,-2.5104,..])
+    let typifier = OplsTypifier::from_xml_str(&oplsaa_xml()).expect("build OplsTypifier");
+    let mol = load_mol2(&helpers::data_path("mol2/ethane.mol2"));
+    let typed = typifier.typify_full(&mol).expect("typify + assign ethane");
+
+    const FK_RTOL: f64 = 0.10;
+    const R0_ATOL: f64 = 0.02; // Å
+    const THETA_ATOL: f64 = 3.0_f64 * std::f64::consts::PI / 180.0; // 3° in rad
+
+    let class_of = |id: molrs::AtomId| -> String {
+        typed
+            .get_atom(id)
+            .ok()
+            .and_then(|a| a.get_str("class").map(str::to_string))
+            .unwrap_or_default()
+    };
+
+    // --- bonds ---
+    let mut saw_ct_ct = false;
+    let mut saw_ct_hc = false;
+    for (_, b) in typed.bonds() {
+        let (ci, cj) = (class_of(b.nodes[0]), class_of(b.nodes[1]));
+        let mut classes = [ci.as_str(), cj.as_str()];
+        classes.sort_unstable();
+        let r0 = term_param(rel_f64(&b, "r0"), "r0");
+        let k0 = term_param(rel_f64(&b, "k0"), "k0");
+        match classes {
+            ["CT", "CT"] => {
+                saw_ct_ct = true;
+                assert!((r0 - 1.529).abs() < R0_ATOL, "CT-CT r0 {r0}");
+                assert!((k0 - 536.0).abs() / 536.0 < FK_RTOL, "CT-CT k0 {k0}");
+            }
+            ["CT", "HC"] => {
+                saw_ct_hc = true;
+                assert!((r0 - 1.09).abs() < R0_ATOL, "CT-HC r0 {r0}");
+                assert!((k0 - 680.0).abs() / 680.0 < FK_RTOL, "CT-HC k0 {k0}");
+            }
+            other => panic!("unexpected ethane bond classes {other:?}"),
+        }
+    }
+    assert!(saw_ct_ct && saw_ct_hc, "ethane has CT-CT and CT-HC bonds");
+
+    // --- angles (enumerated by assign_bonded) ---
+    let mut saw_hch = false;
+    let mut saw_hcc = false;
+    for (_, a) in typed.angles() {
+        let mut classes = [
+            class_of(a.nodes[0]),
+            class_of(a.nodes[1]),
+            class_of(a.nodes[2]),
+        ];
+        classes.sort_unstable();
+        let theta0 = term_param(rel_f64(&a, "theta0"), "theta0");
+        let k0 = term_param(rel_f64(&a, "k0"), "k0");
+        match [
+            classes[0].as_str(),
+            classes[1].as_str(),
+            classes[2].as_str(),
+        ] {
+            ["CT", "HC", "HC"] => {
+                // central is CT; this is the HC-CT-HC angle.
+                saw_hch = true;
+                assert!(
+                    (theta0 - 1.88146).abs() < THETA_ATOL,
+                    "HC-CT-HC θ0 {theta0}"
+                );
+                assert!((k0 - 66.0).abs() / 66.0 < FK_RTOL, "HC-CT-HC k0 {k0}");
+            }
+            ["CT", "CT", "HC"] => {
+                saw_hcc = true;
+                assert!(
+                    (theta0 - 1.93208).abs() < THETA_ATOL,
+                    "HC-CT-CT θ0 {theta0}"
+                );
+                assert!((k0 - 75.0).abs() / 75.0 < FK_RTOL, "HC-CT-CT k0 {k0}");
+            }
+            other => panic!("unexpected ethane angle classes {other:?}"),
+        }
+    }
+    assert!(
+        saw_hch && saw_hcc,
+        "ethane has HC-CT-HC and HC-CT-CT angles"
+    );
+
+    // --- dihedrals (HC-CT-CT-HC; f3 = 0.3, others 0) ---
+    let mut saw_dih = false;
+    for (_, d) in typed.dihedrals() {
+        saw_dih = true;
+        let f3 = term_param(rel_f64(&d, "f3"), "f3");
+        assert!((f3 - 0.3).abs() / 0.3 < FK_RTOL, "HC-CT-CT-HC f3 {f3}");
+        for k in ["f1", "f2", "f4"] {
+            let v = rel_f64(&d, k).unwrap_or(0.0);
+            assert!(v.abs() < 1e-6, "HC-CT-CT-HC {k} should be ~0, got {v}");
+        }
+    }
+    assert!(saw_dih, "ethane has at least one HC-CT-CT-HC dihedral");
+}
+
+#[test]
+fn assign_bonded_over_every_mol2_only_touches_typed_terms() {
+    // ac-004 (breadth): assign_bonded must never panic over real molecules.
+    // Because chain-1 has a coverage gap (only %def types are SMARTS-typed),
+    // many atoms are untyped — terms touching them are skipped, so non-strict
+    // assignment is always Ok. Bonded parity is only meaningful for the subset
+    // chain-1 actually typed; here we just assert no panic + that ethane (fully
+    // typed) yields fully-parametrized bonds.
+    let typifier = OplsTypifier::from_xml_str(&oplsaa_xml())
+        .expect("build OplsTypifier")
+        .with_strict(false);
+    for path in &helpers::format_files("mol2") {
+        let mol = load_mol2(path);
+        if mol.n_atoms() == 0 {
+            continue;
+        }
+        let typed = typifier
+            .typify_full(&mol)
+            .unwrap_or_else(|e| panic!("assign {:?} failed: {e}", path.file_name().unwrap()));
+        // Any bond whose two endpoints are both typed and that received a `type`
+        // proxy (r0) must carry numeric params (no half-written terms).
+        for (_, b) in typed.bonds() {
+            if rel_f64(&b, "r0").is_some() {
+                assert!(
+                    rel_f64(&b, "k0").is_some(),
+                    "{path:?}: bond has r0 but no k0"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn no_match_seam_strict_errors_lenient_skips() {
+    // ac-005: a typed term with no force-field candidate yields Err under
+    // strict (NoMatch::Error) and a clean unparametrized term under lenient
+    // (NoMatch::Skip) with no estimator attached.
+    //
+    // Construct a 2-atom "molecule" whose atoms are typed to a class the bond
+    // table cannot match: a force field with a single CT-CT bond, atoms typed
+    // to class OH (no OH-OH bond). The bond therefore matches nothing.
+    let mut ff = molrs::ff::forcefield::ForceField::new("mini");
+    ff.def_bondstyle("harmonic")
+        .def_type("CT-CT", &[("k0", 300.0), ("r0", 1.5)]);
+    let mut meta = OplsTypingMeta::new();
+    meta.insert(
+        "opls_oh",
+        OplsTypeRow {
+            class: "OH".into(),
+            def: None,
+            overrides: Vec::new(),
+            priority: None,
+            layer: 0,
+        },
+    );
+    let tables = CandidateTables::build(&ff, &meta);
+
+    let mut mol = Atomistic::new();
+    let a = mol.add_atom(Atom::xyz("O", 0.0, 0.0, 0.0));
+    let b = mol.add_atom(Atom::xyz("O", 1.4, 0.0, 0.0));
+    mol.add_bond(a, b).unwrap();
+    mol.set_atom(a, "type", "opls_oh").unwrap();
+    mol.set_atom(b, "type", "opls_oh").unwrap();
+
+    // strict -> Err naming the term.
+    let err = assign_bonded(&mol, &tables, NoMatch::Error).unwrap_err();
+    assert!(err.contains("opls_oh"), "strict err names the term: {err}");
+
+    // lenient -> Ok, bond left unparametrized (no k0/r0).
+    let typed = assign_bonded(&mol, &tables, NoMatch::Skip).expect("lenient ok");
+    let (_, bond) = typed.bonds().next().expect("the bond survives");
+    assert!(
+        rel_f64(&bond, "k0").is_none(),
+        "unmatched bond stays unparam'd"
+    );
+    assert!(rel_f64(&bond, "r0").is_none());
+}
+
+#[test]
+fn no_match_seam_estimator_fills_params() {
+    // ac-005 (seam shape): an attached Estimator is consulted for unmatched
+    // terms; its returned params are written, overriding the strict policy.
+    struct FixedEstimator;
+    impl Estimator for FixedEstimator {
+        fn estimate(&self, term: &BondedTerm) -> Result<Option<Params>, String> {
+            match term {
+                BondedTerm::Bond(_) => Ok(Some(Params::from_pairs(&[("k0", 111.0), ("r0", 1.2)]))),
+                _ => Ok(None),
+            }
+        }
+    }
+
+    let mut ff = molrs::ff::forcefield::ForceField::new("mini");
+    ff.def_bondstyle("harmonic")
+        .def_type("CT-CT", &[("k0", 300.0), ("r0", 1.5)]);
+    let mut meta = OplsTypingMeta::new();
+    meta.insert(
+        "opls_oh",
+        OplsTypeRow {
+            class: "OH".into(),
+            def: None,
+            overrides: Vec::new(),
+            priority: None,
+            layer: 0,
+        },
+    );
+    let tables = CandidateTables::build(&ff, &meta);
+
+    let mut mol = Atomistic::new();
+    let a = mol.add_atom(Atom::xyz("O", 0.0, 0.0, 0.0));
+    let b = mol.add_atom(Atom::xyz("O", 1.4, 0.0, 0.0));
+    mol.add_bond(a, b).unwrap();
+    mol.set_atom(a, "type", "opls_oh").unwrap();
+    mol.set_atom(b, "type", "opls_oh").unwrap();
+
+    // Even under strict, the estimator fills in and avoids the error.
+    let est = FixedEstimator;
+    let typed = assign_bonded_with(&mol, &tables, NoMatch::Error, Some(&est))
+        .expect("estimator fills the gap");
+    let (_, bond) = typed.bonds().next().expect("bond");
+    assert_eq!(rel_f64(&bond, "k0"), Some(111.0), "estimator k0 written");
+    assert_eq!(rel_f64(&bond, "r0"), Some(1.2), "estimator r0 written");
+}
+
+#[test]
+fn build_closes_to_potentials_with_finite_energy() {
+    // ac-006: build(mol) closes typify -> assign -> to_frame -> to_potentials.
+    // Ethane is fully typed, so all bonded terms resolve under strict; the
+    // compiled Potentials evaluate to a finite energy on the input conformer.
+    // (Numeric parity against molpy's OPLS energy is the bm-molrs-molpy harness;
+    // here we assert the loop closes and is finite/sane — the kernel parity
+    // itself is covered by tests/ff/potential/opls.rs.)
+    let typifier = OplsTypifier::from_xml_str(&oplsaa_xml()).expect("build OplsTypifier");
+    let mol = load_mol2(&helpers::data_path("mol2/ethane.mol2"));
+    let pots = typifier.build(&mol).expect("build potentials for ethane");
+
+    // bond + angle + dihedral + lj/cut + coul/cut kernels should be present.
+    assert!(
+        pots.len() >= 3,
+        "at least bond/angle/dihedral kernels: {}",
+        pots.len()
+    );
+
+    let coords: Vec<f64> = mol
+        .atoms()
+        .flat_map(|(_, a)| {
+            [
+                a.get_f64("x").unwrap_or(0.0),
+                a.get_f64("y").unwrap_or(0.0),
+                a.get_f64("z").unwrap_or(0.0),
+            ]
+        })
+        .collect();
+    let energy = pots.calc_energy(&coords);
+    assert!(
+        energy.is_finite(),
+        "ethane OPLS energy must be finite: {energy}"
+    );
 }

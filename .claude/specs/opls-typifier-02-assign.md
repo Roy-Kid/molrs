@@ -48,14 +48,21 @@ OPLS 二面角用 OPLS 4-cosine（`dihedral:opls`，f1..f4，已由 reader 从 R
 
 ## Tasks
 
-- [ ] Write failing unit tests for _end_score / _sequence_score (3/1/0/None, forward+reversed symmetry) in molrs/src/ff/typifier/opls/assign.rs
-- [ ] Implement _end_score / _sequence_score in molrs/src/ff/typifier/opls/assign.rs
-- [ ] Write failing tests for assign_bonded: exact-vs-wildcard specificity winner + layer tiebreak + params written in target Style shape
-- [ ] Implement candidate-table build (bond/angle/dihedral by class) and assign_bonded with (score, layer) ranking in molrs/src/ff/typifier/opls
-- [ ] Write failing tests for no-match seam (strict=true → Err; strict=false + no estimator → unparam'd term)
-- [ ] Wire the no-match seam to ff-parameter-estimator (optional, opt-in) and add OplsTypifier::build (typify→assign→to_frame→to_potentials)
-- [ ] Add rustdoc; note the B-line reversal of opls-ef-01-kernels-seam
+- [x] Write failing unit tests for _end_score / _sequence_score (3/1/0/None, forward+reversed symmetry) in molrs/src/ff/typifier/opls/assign.rs
+- [x] Implement _end_score / _sequence_score in molrs/src/ff/typifier/opls/assign.rs
+- [x] Write failing tests for assign_bonded: exact-vs-wildcard specificity winner + layer tiebreak + params written in target Style shape
+- [x] Implement candidate-table build (bond/angle/dihedral by class) and assign_bonded with (score, layer) ranking in molrs/src/ff/typifier/opls
+- [x] Write failing tests for no-match seam (strict=true → Err; strict=false + no estimator → unparam'd term)
+- [x] Wire the no-match seam to ff-parameter-estimator (optional, opt-in) and add OplsTypifier::build (typify→assign→to_frame→to_potentials)
+- [x] Add rustdoc; note the B-line reversal of opls-ef-01-kernels-seam
 - [ ] Run cargo fmt --all --check && cargo clippy -- -D warnings && cargo test --all-features
+      (ff-scoped set GREEN: `cargo fmt --all --check`, `cargo clippy --features
+      "io,signal,smiles,ff,conformer" --lib --tests -- -D warnings`, and
+      `cargo test --features "io,signal,smiles,ff,conformer"` all pass — 1157
+      tests, 0 failures. Literal `--all-features` still blocked: the `blas`
+      feature fails to link cblas/LAPACK on this arm64 host — an environment
+      limitation, not a code defect, and unrelated to this chain. ac-007 left
+      pending, same posture as chain 1.)
 
 ## Testing strategy
 
