@@ -44,6 +44,8 @@ pub use assign::{
 pub use meta::{LAYER_PRIORITY_STRIDE, OplsTypeRow, OplsTypingMeta};
 pub use typing::annotate_opls;
 
+use super::ParameterEstimator;
+
 /// OPLS-AA typifier — owns typing metadata and force-field parameters.
 ///
 /// Primary constructor [`from_xml_str`](Self::from_xml_str) parses both the
@@ -56,6 +58,14 @@ pub struct OplsTypifier {
     tables: CandidateTables,
     /// No-match policy for bonded terms with no force-field candidate.
     no_match: NoMatch,
+    /// Optional similarity-based estimator for the bonded no-match seam.
+    ///
+    /// `None` (the default) keeps the assign path byte-identical to the
+    /// estimator-free behaviour. When attached via [`with_estimator`](Self::with_estimator),
+    /// the estimator is consulted for any bonded term the force-field tables do
+    /// not cover (unless `strict` — exact matches always win first; `strict=true`
+    /// still errors). FF-agnostic: GAFF can attach the same estimator.
+    estimator: Option<ParameterEstimator>,
 }
 
 impl OplsTypifier {
@@ -84,6 +94,7 @@ impl OplsTypifier {
             ff,
             tables,
             no_match: NoMatch::Error,
+            estimator: None,
         }
     }
 
@@ -96,6 +107,28 @@ impl OplsTypifier {
             NoMatch::Skip
         };
         self
+    }
+
+    /// Attach a similarity-based [`ParameterEstimator`] to the bonded no-match
+    /// seam (chaining, opt-in).
+    ///
+    /// With an estimator attached, any bonded term the force-field tables do not
+    /// cover is routed to the estimator (which fills in similarity / empirical
+    /// parameters with provenance). Exact / wildcard matches still win first, and
+    /// `strict=true` is **unaffected** — a still-uncovered term errors regardless.
+    /// The default ([`new`](Self::new)) attaches no estimator, leaving behaviour
+    /// byte-identical to the estimator-free path.
+    pub fn with_estimator(mut self, estimator: ParameterEstimator) -> Self {
+        self.estimator = Some(estimator);
+        self
+    }
+
+    /// Build the matching [`ParameterEstimator`] from this typifier's own force
+    /// field + metadata and attach it (convenience over
+    /// [`with_estimator`](Self::with_estimator)).
+    pub fn with_default_estimator(self) -> Self {
+        let est = ParameterEstimator::new(&self.ff, &self.meta);
+        self.with_estimator(est)
     }
 
     /// Access the typing metadata.
@@ -119,7 +152,14 @@ impl OplsTypifier {
     /// Propagates atom-typing and bonded-assignment errors.
     pub fn typify_full(&self, mol: &Atomistic) -> Result<Atomistic, String> {
         let typed = annotate_opls(mol, &self.meta, &self.ff)?;
-        assign_bonded(&typed, &self.tables, self.no_match)
+        // strict=true (NoMatch::Error) is a hard contract: the estimator is NOT
+        // consulted, so a still-uncovered term errors. Only the lenient policy
+        // routes through the attached estimator's no-match seam.
+        let estimator: Option<&dyn Estimator> = match self.no_match {
+            NoMatch::Error => None,
+            NoMatch::Skip => self.estimator.as_ref().map(|e| e as &dyn Estimator),
+        };
+        assign_bonded_with(&typed, &self.tables, self.no_match, estimator)
     }
 
     /// Typify a molecule and compile potentials in one step.

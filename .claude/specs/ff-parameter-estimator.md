@@ -61,16 +61,16 @@ created: 2026-06-18
 
 ## Tasks
 
-- [ ] Write failing unit tests for empirical formulas (Badger bond k, angle θ₀ mean, GAFF Eq.5 K_θ) against transcribed reference values in molrs/tests/ff/typifier/estimate.rs
-- [ ] Transcribe GAFF/parmchk2 constants into molrs/data/*.json and implement _empirical_bond_k / _empirical_angle_theta0 / _empirical_angle_k in molrs/src/ff/typifier/estimate
-- [ ] Write failing tests for analogy cascade + additive penalty (nearest-analog copy, inner-atom ×10, leave-one-out recovery, source fields, penalty tiers)
-- [ ] Implement ParameterEstimator analogy cascade (on _end_score/_sequence_score) + estimate_bond/angle/dihedral with provenance emission
-- [ ] Write failing tests for dihedral generic fallback + near-zero barrier + multi-periodicity group copy
-- [ ] Implement _generic_dihedral fallback, near-zero-barrier-with-high-penalty, multi-periodicity group copy
-- [ ] Wire optional estimator injection into OPLS opls-typifier-02-assign and GAFF gaff-typifier-03-assign no-match seams (opt-in; strict=true unaffected)
-- [ ] Write parmchk2 gold-standard cross-validation test (gated, skips when fixtures absent) in molrs/tests/ff/typifier/estimate_parity.rs
-- [ ] Add rustdoc with units; document the estimate_* provenance convention
-- [ ] Run cargo fmt --all --check && cargo clippy -- -D warnings && cargo test --all-features
+- [x] Write failing unit tests for empirical formulas (Badger bond k, angle θ₀ mean, GAFF Eq.5 K_θ) against transcribed reference values in molrs/tests/ff/typifier/estimate.rs
+- [x] Transcribe GAFF/parmchk2 constants into molrs/data/*.json and implement _empirical_bond_k / _empirical_angle_theta0 / _empirical_angle_k in molrs/src/ff/typifier/estimate
+- [x] Write failing tests for analogy cascade + additive penalty (nearest-analog copy, inner-atom ×10, leave-one-out recovery, source fields, penalty tiers)
+- [x] Implement ParameterEstimator analogy cascade (on _end_score/_sequence_score) + estimate_bond/angle/dihedral with provenance emission
+- [x] Write failing tests for dihedral generic fallback + near-zero barrier + multi-periodicity group copy
+- [x] Implement _generic_dihedral fallback, near-zero-barrier-with-high-penalty, multi-periodicity group copy
+- [x] Wire optional estimator injection into OPLS opls-typifier-02-assign and GAFF gaff-typifier-03-assign no-match seams (opt-in; strict=true unaffected) — OPLS wired (`OplsTypifier::with_estimator`/`with_default_estimator`); GAFF typifier not implemented yet, but the `Estimator` trait is FF-agnostic and `ParameterEstimator::new` takes any `ForceField` so GAFF reuses it as-is.
+- [x] Write parmchk2 gold-standard cross-validation test (gated, skips when fixtures absent) in molrs/tests/ff/typifier/estimate_parity.rs
+- [x] Add rustdoc with units; document the estimate_* provenance convention
+- [~] Run cargo fmt --all --check && cargo clippy -- -D warnings && cargo test --all-features — fmt/clippy clean; `cargo test --features "io,signal,smiles,ff,conformer"` green (1232 passed). Literal `--all-features` blocked by an unrelated `blas` link failure (no system BLAS on this arm64 host) — same posture as chain-1/2.
 
 ## Testing strategy
 

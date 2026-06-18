@@ -456,10 +456,16 @@ fn write_match(out: &mut Atomistic, kind: BondedKind, m: &Match<'_>) -> Result<(
     write_params(out, kind, m.params)
 }
 
-/// Copy every numeric param onto the bonded term (no `type` label; used by the
-/// estimator path, which synthesizes params with no force-field type name).
+/// Copy every param onto the bonded term (no `type` label; used by the estimator
+/// path, which synthesizes params with no force-field type name). Both the
+/// numeric params (`k0`/`r0`/…) and any string params are written — the latter
+/// carries the estimator's provenance convention (`estimate_method` /
+/// `estimate_analog`); see [`ParameterEstimator`](crate::ff::typifier::ParameterEstimator).
 fn write_params(out: &mut Atomistic, kind: BondedKind, params: &Params) -> Result<(), String> {
     for (key, val) in params.iter() {
+        set_term_prop(out, &kind, key, val)?;
+    }
+    for (key, val) in params.iter_strings() {
         set_term_prop(out, &kind, key, val)?;
     }
     Ok(())

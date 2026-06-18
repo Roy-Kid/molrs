@@ -8,9 +8,11 @@
 
 use molrs::Atomistic;
 
+pub mod estimate;
 pub mod mmff;
 pub mod opls;
 
+pub use estimate::ParameterEstimator;
 pub use opls::OplsTypifier;
 
 /// A typifier assigns force-field type IDs to a molecular graph and returns the
