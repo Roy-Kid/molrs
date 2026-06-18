@@ -85,9 +85,8 @@ pub use density::{
     LocalDensity, LocalDensityResult, SphereVoxelization, SphereVoxelizationResult,
 };
 pub use dielectric::{
-    DielectricSpectrum, StaticDielectricResult, compute_current_density, compute_dipole_moment,
-    decompose_current, einstein_helfand_spectrum, green_kubo_spectrum, static_dielectric_constant,
-    static_dielectric_constant_components,
+    StaticDielectricResult, compute_current_density, compute_dipole_moment, decompose_current,
+    static_dielectric_constant, static_dielectric_constant_components,
 };
 pub use diffraction::{
     DiffractionPattern, DiffractionPatternResult, StaticStructureFactorDebye,
@@ -101,11 +100,12 @@ pub use environment::{
 };
 pub use error::ComputeError;
 pub use fit::{
-    DebyeFit, DebyeFitResult, DebyeRelaxation, DebyeRelaxationResult, EinsteinConductivity,
-    EinsteinConductivityResult, EinsteinDiffusion, EinsteinDiffusionArgs, EwaldBoundary,
-    GreenKuboConductivity, GreenKuboConductivityResult, GreenKuboDiffusion, IRFlux, IRFluxResult,
-    IRSpectrum, LinearFit, LinearFitResult, Plateau, PlateauResult, PowerSpectrum, RamanSpectrum,
-    RamanTensor, RamanTensorResult, RunningIntegral, RunningIntegralResult, VACF, VacfResult,
+    DebyeFit, DebyeFitResult, DebyeRelaxation, DebyeRelaxationResult, DielectricSpectrumResult,
+    EinsteinConductivity, EinsteinConductivityResult, EinsteinDiffusion, EinsteinDiffusionArgs,
+    EinsteinHelfandSpectrum, EwaldBoundary, GreenKuboConductivity, GreenKuboConductivityResult,
+    GreenKuboDiffusion, GreenKuboSpectrum, IRFlux, IRFluxResult, IRSpectrum, LinearFit,
+    LinearFitResult, Plateau, PlateauResult, PowerSpectrum, RamanSpectrum, RamanTensor,
+    RamanTensorResult, RunningIntegral, RunningIntegralResult, VACF, VacfResult,
 };
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};

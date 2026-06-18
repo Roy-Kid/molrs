@@ -1,4 +1,4 @@
-"""Dielectric & ionic-conductivity kernels.
+"""Dielectric raw-observable kernels.
 
 All computation is in Rust. The kernels are grouped under a single
 :class:`Dielectric` namespace (a thin set of static methods over the compiled
@@ -6,26 +6,33 @@ All computation is in Rust. The kernels are grouped under a single
 ``molrs.dielectric.Dielectric.static_dielectric_constant(...)`` rather than
 through a flat list of free functions.
 
-The bundled ``einstein_helfand_conductivity`` was removed in
+Only the **raw / defined** dielectric quantities live here: dipole moment,
+current density, current partition, and the Neumann static dielectric constant.
+
+The frequency-dependent ε(ω) spectrum is no longer a bundled free function. It
+is the explicit raw-compute + Fit composition (compute-fit-04-dielectric):
+
+* Einstein–Helfand route — :class:`molrs.DebyeRelaxation` (raw fluctuation
+  dipole ACF + ⟨M²⟩ + V/T/Ewald-BC) → :class:`molrs.EinsteinHelfandSpectrum`.
+* Green–Kubo route — :class:`molrs.GreenKuboConductivity` (raw current ACF) →
+  :class:`molrs.GreenKuboSpectrum`.
+
+The bundled ``einstein_helfand_conductivity`` was likewise removed in
 compute-fit-03-cleanup: compose :class:`molrs.EinsteinConductivity` (raw
 collective-dipole MSD) with :class:`molrs.LinearFit` and a
-``slope/(6·V·k_B·T)`` MD→SI prefactor instead. The frequency-dependent ε(ω)
-spectrum routes (``einstein_helfand_spectrum`` / ``green_kubo_spectrum``)
-remain.
+``slope/(6·V·k_B·T)`` MD→SI prefactor instead.
 """
 
 from .molrs import (
     dielectric_compute_current_density,
     dielectric_compute_dipole_moment,
     dielectric_decompose_current,
-    dielectric_einstein_helfand_spectrum,
-    dielectric_green_kubo_spectrum,
     dielectric_static_dielectric_constant,
 )
 
 
 class Dielectric:
-    """Namespace of dielectric / ionic-conductivity kernels (all static).
+    """Namespace of raw dielectric kernels (all static).
 
     Grouping the kernels under one class keeps the public ``molrs.dielectric``
     surface to a single name instead of a flat list of free functions. Every
@@ -36,8 +43,6 @@ class Dielectric:
     compute_current_density = staticmethod(dielectric_compute_current_density)
     decompose_current = staticmethod(dielectric_decompose_current)
     static_dielectric_constant = staticmethod(dielectric_static_dielectric_constant)
-    einstein_helfand_spectrum = staticmethod(dielectric_einstein_helfand_spectrum)
-    green_kubo_spectrum = staticmethod(dielectric_green_kubo_spectrum)
 
 
 __all__ = ["Dielectric"]

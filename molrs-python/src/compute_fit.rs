@@ -10,7 +10,8 @@
 //! * **Fits / transforms** — consume a raw curve and produce the derived
 //!   quantity (slope/integral/plateau/τ/spectrum): [`PyLinearFit`],
 //!   [`PyRunningIntegral`], [`PyPlateau`], [`PyDebyeFit`], [`PyPowerSpectrum`],
-//!   [`PyIRSpectrum`], [`PyRamanSpectrum`].
+//!   [`PyIRSpectrum`], [`PyRamanSpectrum`], [`PyEinsteinHelfandSpectrum`],
+//!   [`PyGreenKuboSpectrum`].
 //!
 //! Each `compute(...)` / `fit(...)` returns a plain `dict` of NumPy arrays /
 //! scalars, matching the dielectric / transport binding style. The raw computes
@@ -20,8 +21,9 @@
 
 use molrs::compute::fit::{
     DebyeFit, DebyeRelaxation, EinsteinConductivity, EinsteinDiffusion, EinsteinDiffusionArgs,
-    EwaldBoundary, GreenKuboConductivity, GreenKuboDiffusion, IRSpectrum, LinearFit, Plateau,
-    PowerSpectrum, RamanSpectrum, RunningIntegral, VACF,
+    EinsteinHelfandSpectrum, EwaldBoundary, GreenKuboConductivity, GreenKuboDiffusion,
+    GreenKuboSpectrum, IRSpectrum, LinearFit, Plateau, PowerSpectrum, RamanSpectrum,
+    RunningIntegral, VACF,
 };
 use molrs::compute::traits::{Compute, Fit};
 use molrs::store::frame::Frame as CoreFrame;
@@ -605,6 +607,114 @@ impl PyRamanSpectrum {
     }
 }
 
+// ── EinsteinHelfandSpectrum (dielectric ε(ω), dipole route) ───────────────────
+
+fn dielectric_dict<'py>(
+    py: Python<'py>,
+    frequencies: Array1<f64>,
+    eps_real: Array1<f64>,
+    eps_imag: Array1<f64>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("frequencies", frequencies.into_pyarray(py))?;
+    d.set_item("eps_real", eps_real.into_pyarray(py))?;
+    d.set_item("eps_imag", eps_imag.into_pyarray(py))?;
+    Ok(d)
+}
+
+/// Einstein–Helfand ε(ω) transform of a **raw fluctuation dipole ACF** (the
+/// [`DebyeRelaxation`](PyDebyeRelaxation) ACF): one-sided cos² taper +
+/// derivative-FT + the `4π·KAPPA/(3·V·k_B·T)` prefactor. Reproduces the legacy
+/// `einstein_helfand_spectrum` bit-for-bit on the raw ACF that function built
+/// internally.
+#[pyclass(name = "EinsteinHelfandSpectrum")]
+pub struct PyEinsteinHelfandSpectrum {
+    inner: EinsteinHelfandSpectrum,
+}
+
+#[pymethods]
+impl PyEinsteinHelfandSpectrum {
+    /// ``EinsteinHelfandSpectrum(dt, volume, temperature, epsilon_inf,
+    /// zero_lag_variance)`` — ``zero_lag_variance`` is ⟨|δM|²⟩ (the
+    /// ``DebyeRelaxation`` ``zero_lag_variance``), which pins the exact DC bin.
+    #[new]
+    fn new(
+        dt: f64,
+        volume: f64,
+        temperature: f64,
+        epsilon_inf: f64,
+        zero_lag_variance: f64,
+    ) -> Self {
+        Self {
+            inner: EinsteinHelfandSpectrum {
+                dt,
+                volume,
+                temperature,
+                epsilon_inf,
+                zero_lag_variance,
+            },
+        }
+    }
+
+    /// Transform the raw fluctuation dipole ``acf`` into ε(ω).
+    ///
+    /// Returns ``{"frequencies", "eps_real", "eps_imag"}`` (float64 arrays).
+    fn fit<'py>(
+        &self,
+        py: Python<'py>,
+        acf: PyReadonlyArray1<'py, f64>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let a = acf.as_array().to_owned();
+        let r = self.inner.fit(&a).map_err(py_value_err)?;
+        dielectric_dict(py, r.frequencies, r.eps_real, r.eps_imag)
+    }
+}
+
+// ── GreenKuboSpectrum (dielectric ε(ω), current route) ────────────────────────
+
+/// Green–Kubo ε(ω) transform of a **raw current ACF** (the
+/// [`GreenKuboConductivity`](PyGreenKuboConductivity) ACF over the post-NaN
+/// series): window + FFT → σ(ω) → ε(ω). Reproduces the legacy
+/// `green_kubo_spectrum` bit-for-bit on the raw ACF that function built
+/// internally.
+#[pyclass(name = "GreenKuboSpectrum")]
+pub struct PyGreenKuboSpectrum {
+    inner: GreenKuboSpectrum,
+}
+
+#[pymethods]
+impl PyGreenKuboSpectrum {
+    /// ``GreenKuboSpectrum(dt, volume, temperature, epsilon_inf,
+    /// window_type="hann")`` — ``window_type`` is ``"cosine_sq"``, ``"hann"``,
+    /// or ``"blackman"``.
+    #[new]
+    #[pyo3(signature = (dt, volume, temperature, epsilon_inf, window_type="hann"))]
+    fn new(dt: f64, volume: f64, temperature: f64, epsilon_inf: f64, window_type: &str) -> Self {
+        Self {
+            inner: GreenKuboSpectrum {
+                dt,
+                volume,
+                temperature,
+                epsilon_inf,
+                window_type: window_type.to_string(),
+            },
+        }
+    }
+
+    /// Transform the raw current ``acf`` into ε(ω).
+    ///
+    /// Returns ``{"frequencies", "eps_real", "eps_imag"}`` (float64 arrays).
+    fn fit<'py>(
+        &self,
+        py: Python<'py>,
+        acf: PyReadonlyArray1<'py, f64>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let a = acf.as_array().to_owned();
+        let r = self.inner.fit(&a).map_err(py_value_err)?;
+        dielectric_dict(py, r.frequencies, r.eps_real, r.eps_imag)
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Registration
 // ═══════════════════════════════════════════════════════════════════════════
@@ -627,5 +737,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPowerSpectrum>()?;
     m.add_class::<PyIRSpectrum>()?;
     m.add_class::<PyRamanSpectrum>()?;
+    m.add_class::<PyEinsteinHelfandSpectrum>()?;
+    m.add_class::<PyGreenKuboSpectrum>()?;
     Ok(())
 }

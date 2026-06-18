@@ -112,6 +112,8 @@ from .molrs import (
     PowerSpectrum,
     IRSpectrum,
     RamanSpectrum,
+    EinsteinHelfandSpectrum,
+    GreenKuboSpectrum,
 )
 
 # Rich Python Frame/Block layer (pandas-style API; CSV engine in Rust on the
@@ -274,4 +276,6 @@ __all__ = [
     "PowerSpectrum",
     "IRSpectrum",
     "RamanSpectrum",
+    "EinsteinHelfandSpectrum",
+    "GreenKuboSpectrum",
 ]

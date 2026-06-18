@@ -14,6 +14,8 @@
 //! | [`PowerSpectrum`] | raw [`VACF`] ACF + dt | [`SpectrumResult`](crate::compute::SpectrumResult) | window + FFT |
 //! | [`IRSpectrum`] | raw [`IRFlux`] ACF + dt | [`SpectrumResult`](crate::compute::SpectrumResult) | window + FFT |
 //! | [`RamanSpectrum`] | raw [`RamanTensor`] iso/aniso ACFs + dt | [`RamanSpectrumResult`](crate::compute::RamanSpectrumResult) | window + FFT + prefactors |
+//! | [`EinsteinHelfandSpectrum`] | raw [`DebyeRelaxation`] dipole ACF + V/T/ε_∞/⟨M²⟩ | [`DielectricSpectrumResult`] | cos² taper + derivative-FT |
+//! | [`GreenKuboSpectrum`] | raw [`GreenKuboConductivity`] current ACF + V/T/ε_∞ | [`DielectricSpectrumResult`] | window + FFT + σ→ε |
 //!
 //! This module also hosts the raw-only [`Compute`](crate::compute::Compute)
 //! structs ([`VACF`], [`IRFlux`], [`RamanTensor`], [`EinsteinDiffusion`],
@@ -37,6 +39,7 @@
 //!   `(freq_rad, re, im)` triple.
 
 pub mod debye_fit;
+pub mod dielectric_spectrum;
 pub mod linear_fit;
 pub mod plateau;
 pub mod raw_computes;
@@ -44,6 +47,9 @@ pub mod running_integral;
 pub mod spectral;
 
 pub use debye_fit::{DebyeFit, DebyeFitResult};
+pub use dielectric_spectrum::{
+    DielectricSpectrumResult, EinsteinHelfandSpectrum, GreenKuboSpectrum,
+};
 pub use linear_fit::{LinearFit, LinearFitResult};
 pub use plateau::{Plateau, PlateauResult};
 pub use raw_computes::{

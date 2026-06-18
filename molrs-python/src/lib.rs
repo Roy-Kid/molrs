@@ -148,6 +148,10 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<io::PyLAMMPSTrajReader>()?;
     m.add_function(wrap_pyfunction!(io::read_dcd, m)?)?;
     m.add_class::<io::PyDcdTrajReader>()?;
+    m.add_function(wrap_pyfunction!(io::read_trr, m)?)?;
+    m.add_class::<io::PyTrrTrajReader>()?;
+    m.add_function(wrap_pyfunction!(io::read_xtc, m)?)?;
+    m.add_class::<io::PyXtcTrajReader>()?;
     m.add_function(wrap_pyfunction!(io::read_gro, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_chgcar_file, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_cube_file, m)?)?;
@@ -160,6 +164,8 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(io::write_lammps, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_lammps_traj, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_dcd, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_trr, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_xtc, m)?)?;
     // SMILES
     m.add_function(wrap_pyfunction!(io::parse_smiles, m)?)?;
     m.add_class::<io::PySmilesIR>()?;

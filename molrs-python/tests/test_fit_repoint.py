@@ -1,13 +1,15 @@
-"""Parity tests for the phase-02 raw-compute + explicit-fit PyO3 bindings.
+"""Parity tests for the raw-compute + explicit-fit PyO3 bindings.
 
-These lock the non-breaking contract of the compute/fit repoint:
+These lock the contract of the compute/fit repoint:
 
 * the new raw-compute / fit classes import and construct (ac-001);
 * raw computes return ONLY a raw curve, no fitted scalar (ac-002);
-* legacy free-function bindings emit exactly one ``DeprecationWarning`` and
-  return the byte-for-byte unchanged dict (ac-003);
-* the explicit raw->fit pipeline numerically reproduces the legacy bundled
-  sigma / spectrum (ac-004 / ac-005) within the documented float tolerance.
+* the explicit raw->fit pipeline is well-defined and reproduces the manual
+  slope / integral / spectrum (within the documented float tolerance).
+
+The legacy bundled conductivity / ε(ω)-spectrum free-function bindings were
+removed (compute-fit-03 / compute-fit-04); the composition tests below replace
+the former DeprecationWarning parity checks.
 
 The kernels themselves are unit-tested in Rust; these are wiring + parity
 checks against a freshly rebuilt wheel.
@@ -49,6 +51,8 @@ _NEW_NAMES = [
     "PowerSpectrum",
     "IRSpectrum",
     "RamanSpectrum",
+    "EinsteinHelfandSpectrum",
+    "GreenKuboSpectrum",
 ]
 
 
@@ -110,99 +114,79 @@ def test_raw_debye_relaxation_unnormalized_with_metadata():
     assert raw["boundary"] == "tinfoil"
 
 
-# ── ac-003: legacy bindings warn once + unchanged output ──────────────────────
+# ── ε(ω) raw-compute + Fit composition (compute-fit-04) ───────────────────────
 
 
-def test_legacy_einstein_conductivity_warns_and_unchanged():
-    from molrs.molrs import dielectric_einstein_helfand_conductivity as legacy
-
-    dipole = _rng_series(256, 3, 17)
-    args = (dipole, 0.5, 1000.0, 300.0, 80, 0.2, 0.8)
-    with pytest.warns(DeprecationWarning):
-        out = legacy(*args)
-    assert set(out) >= {"lag_times", "msd", "sigma", "slope", "fit_start", "fit_end"}
-    # Stable shape on a second call (output dict identical run-to-run).
-    with pytest.warns(DeprecationWarning):
-        out2 = legacy(*args)
-    np.testing.assert_array_equal(out["msd"], out2["msd"])
-    assert out["sigma"] == out2["sigma"]
-
-
-def test_legacy_green_kubo_conductivity_warns_and_unchanged():
-    from molrs.molrs import transport_green_kubo_conductivity as legacy
-
-    current = _rng_series(256, 3, 19)
-    with pytest.warns(DeprecationWarning):
-        out = legacy(current, 0.5, 1000.0, 300.0, 80)
-    assert set(out) >= {"lag_times", "jacf", "sigma_running", "sigma"}
-
-
-def test_legacy_eh_spectrum_warns():
-    from molrs.molrs import dielectric_einstein_helfand_spectrum as legacy
-
+def test_eh_spectrum_pipeline():
+    # compute-fit-04: the bundled dielectric_einstein_helfand_spectrum binding
+    # was removed. ε(ω) is now DebyeRelaxation (raw fluctuation dipole ACF) +
+    # EinsteinHelfandSpectrum.
     dm = np.ones((100, 3)) * 0.1
-    with pytest.warns(DeprecationWarning):
-        out = legacy(dm, 0.001, 1000.0, 300.0, 1.0, 10, "hann")
+    raw = molrs.DebyeRelaxation(1000.0, 300.0, "tinfoil").compute(dm, 0.001, 10)
+    out = molrs.EinsteinHelfandSpectrum(
+        0.001, 1000.0, 300.0, 1.0, raw["zero_lag_variance"]
+    ).fit(raw["acf"])
     assert "frequencies" in out
+    assert len(out["frequencies"]) == len(out["eps_real"]) == len(out["eps_imag"])
 
 
-def test_legacy_gk_spectrum_warns():
-    from molrs.molrs import dielectric_green_kubo_spectrum as legacy
-
+def test_gk_spectrum_pipeline():
+    # compute-fit-04: the bundled dielectric_green_kubo_spectrum binding was
+    # removed. ε(ω) is now GreenKuboConductivity (raw current ACF) +
+    # GreenKuboSpectrum.
     j = np.ones((100, 3)) * 0.001
-    with pytest.warns(DeprecationWarning):
-        out = legacy(j, 0.001, 1000.0, 300.0, 1.0, 10, "hann")
+    raw = molrs.GreenKuboConductivity().compute(j, 0.001, 10)
+    out = molrs.GreenKuboSpectrum(0.001, 1000.0, 300.0, 1.0, "hann").fit(raw["jacf"])
     assert "frequencies" in out
+    assert len(out["frequencies"]) == len(out["eps_real"]) == len(out["eps_imag"])
 
 
-# ── ac-004: raw->fit reproduces legacy sigma ─────────────────────────────────
+# ── raw->fit conductivity composition is well-defined ─────────────────────────
 
 
-def test_einstein_pipeline_reproduces_legacy_sigma():
-    from molrs.molrs import dielectric_einstein_helfand_conductivity as legacy
-
+def test_einstein_pipeline_sigma_well_defined():
+    # The bundled dielectric_einstein_helfand_conductivity binding was removed in
+    # compute-fit-03; σ is now EinsteinConductivity (raw collective-dipole MSD) +
+    # LinearFit (slope) + the slope/(6·V·k_B·T) MD→SI prefactor.
     n, dt, mct, volume, temperature = 256, 0.5, 80, 1000.0, 300.0
     start_frac, end_frac = 0.2, 0.8
     dipole = _rng_series(n, 3, 17)
 
-    with pytest.warns(DeprecationWarning):
-        leg = legacy(dipole, dt, volume, temperature, mct, start_frac, end_frac)
-
     raw = molrs.EinsteinConductivity().compute(dipole, dt, mct)
     fit = molrs.LinearFit(start_frac, end_frac).fit(raw["lag_times"], raw["msd"])
 
-    # slope + window reproduced bit-for-bit (identical OLS arithmetic).
-    assert fit["slope"] == pytest.approx(leg["slope"], rel=1e-12, abs=0.0)
-    assert fit["fit_start"] == leg["fit_start"]
-    assert fit["fit_end"] == leg["fit_end"]
+    # Manual OLS over the same window reproduces the LinearFit slope.
+    fs, fe = fit["fit_start"], fit["fit_end"]
+    x, y = raw["lag_times"][fs : fe + 1], raw["msd"][fs : fe + 1]
+    manual_slope = np.polyfit(x, y, 1)[0]
+    assert fit["slope"] == pytest.approx(manual_slope, rel=1e-9)
 
     prefactor = (_E_C * _E_C * _ANGSTROM_M * _ANGSTROM_M / _PICOSECOND_S) / (
         6.0 * _ANGSTROM_M**3 * _K_B
     )
     sigma = prefactor * fit["slope"] / (volume * temperature)
-    assert sigma == pytest.approx(leg["sigma"], rel=1e-9)
+    assert np.isfinite(sigma)
 
 
-def test_green_kubo_pipeline_reproduces_legacy_sigma():
-    from molrs.molrs import transport_green_kubo_conductivity as legacy
-
+def test_green_kubo_pipeline_sigma_well_defined():
+    # The bundled transport_green_kubo_conductivity binding was removed in
+    # compute-fit-03; σ is now GreenKuboConductivity (raw current ACF) +
+    # RunningIntegral + the (1/(3·V·k_B·T))·∫⟨JJ⟩ MD→SI prefactor.
     n, dt, mct, volume, temperature = 256, 0.5, 80, 1000.0, 300.0
     current = _rng_series(n, 3, 19)
 
-    with pytest.warns(DeprecationWarning):
-        leg = legacy(current, dt, volume, temperature, mct)
-
     raw = molrs.GreenKuboConductivity().compute(current, dt, mct)
     integ = molrs.RunningIntegral().fit(raw["jacf"], dt)
+
+    # Manual cumulative trapezoid reproduces the RunningIntegral endpoint.
+    manual = float(np.trapezoid(raw["jacf"], dx=dt))
+    assert integ["integral"][-1] == pytest.approx(manual, rel=1e-9)
 
     prefactor = (_E_C * _E_C * _ANGSTROM_M * _ANGSTROM_M / _PICOSECOND_S) / (
         3.0 * _ANGSTROM_M**3 * _K_B
     )
     sigma = prefactor * integ["integral"][-1] / (volume * temperature)
-    assert sigma == pytest.approx(leg["sigma"], rel=1e-9)
-    # The running integral reproduces sigma_running (before the prefactor).
-    scaled_running = prefactor * integ["integral"] / (volume * temperature)
-    np.testing.assert_allclose(scaled_running, leg["sigma_running"], rtol=1e-9)
+    assert np.isfinite(sigma)
 
 
 # ── ac-005: spectral transforms reproduce legacy power/ir spectra ─────────────
@@ -234,9 +218,7 @@ def test_power_spectrum_fit_matches_raw_acf_path():
     np.testing.assert_allclose(raw["acf"], manual_acf, rtol=1e-9, atol=1e-12)
 
     spec_from_raw = molrs.PowerSpectrum().fit(raw["acf"], dt)
-    spec_from_manual = molrs.PowerSpectrum().fit(
-        np.ascontiguousarray(manual_acf), dt
-    )
+    spec_from_manual = molrs.PowerSpectrum().fit(np.ascontiguousarray(manual_acf), dt)
     np.testing.assert_array_equal(
         spec_from_raw["frequencies_cm1"], spec_from_manual["frequencies_cm1"]
     )

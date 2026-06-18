@@ -1,6 +1,6 @@
 [package]
 name = "molcrafts-molrs-ffi"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2024"
 authors = ["MolCrafts"]
 description = "FFI layer for molrs with handle-based abstractions"
