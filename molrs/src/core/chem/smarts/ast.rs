@@ -22,6 +22,14 @@ use crate::system::molgraph::PropValue;
 /// those in a ring whose bonds carry order `1.5`; loaders that already know
 /// the truth (e.g. transplanted from RDKit) may instead set an `is_aromatic`
 /// atom prop, which takes precedence when present.
+///
+/// It optionally carries an **external label map** (`atom → label`) consumed by
+/// the [`AtomPrimitive::HasContextLabel`] predicate. This is a general,
+/// domain-neutral mechanism: a caller (e.g. an iterative typifier) supplies a
+/// "current assignment" map and a `%LABEL` token matches an atom iff that map
+/// assigns it the exact label. [`MolContext::new`] leaves the map empty, so the
+/// legacy [`find_matches`](super::matcher::find_matches) path behaves exactly as
+/// before.
 pub struct MolContext<'m> {
     pub mol: &'m Atomistic,
     pub rings: RingInfo,
@@ -33,11 +41,27 @@ pub struct MolContext<'m> {
     degree: HashMap<AtomId, u32>,
     /// atom → number of incident ring bonds (RDKit `x<n>`).
     ring_bond_count: HashMap<AtomId, u32>,
+    /// External "current label" map for the `%LABEL` context predicate.
+    /// Borrowed from the caller; empty for the legacy match path.
+    labels: &'m HashMap<AtomId, String>,
 }
 
+/// Shared empty label map for the legacy (label-free) match path, so
+/// [`MolContext::new`] can borrow a `&'static HashMap` without allocating.
+static EMPTY_LABELS: std::sync::LazyLock<HashMap<AtomId, String>> =
+    std::sync::LazyLock::new(HashMap::new);
+
 impl<'m> MolContext<'m> {
-    /// Build the context for `mol` (runs ring perception once).
+    /// Build the context for `mol` (runs ring perception once), with **no**
+    /// external label map — `%LABEL` predicates never match. This is the legacy
+    /// path used by [`find_matches`](super::matcher::find_matches).
     pub fn new(mol: &'m Atomistic) -> Self {
+        Self::with_labels(mol, &EMPTY_LABELS)
+    }
+
+    /// Build the context for `mol` with an external label map for `%LABEL`
+    /// context predicates. `labels[atom] == "L"` makes `[...;%L]` match `atom`.
+    pub fn with_labels(mol: &'m Atomistic, labels: &'m HashMap<AtomId, String>) -> Self {
         let rings = find_rings(mol);
         let mut aromatic_atom = HashMap::new();
         let mut h_count = HashMap::new();
@@ -90,11 +114,17 @@ impl<'m> MolContext<'m> {
             h_count,
             degree,
             ring_bond_count,
+            labels,
         }
     }
 
     fn is_aromatic(&self, id: AtomId) -> bool {
         self.aromatic_atom.get(&id).copied().unwrap_or(false)
+    }
+
+    /// Whether the external label map assigns `id` exactly `label`.
+    fn has_label(&self, id: AtomId, label: &str) -> bool {
+        self.labels.get(&id).map(String::as_str) == Some(label)
     }
 
     fn h_count(&self, id: AtomId) -> u32 {
@@ -174,6 +204,12 @@ pub enum AtomPrimitive {
     RingBondCount(u32),
     /// `+`/`-`/`+n`/`-n` — formal charge.
     Charge(i32),
+    /// `%LABEL` — context-label predicate (a general molrs extension, not part
+    /// of standard SMARTS). Matches an atom iff the [`MolContext`]'s external
+    /// label map assigns it exactly this label. Used by iterative typifiers
+    /// (e.g. OPLS layered typing supplies the per-atom assigned-type map);
+    /// the engine is otherwise domain-neutral about what the label means.
+    HasContextLabel(String),
 }
 
 /// An atom query tree (logical combination of primitives).
@@ -227,6 +263,7 @@ impl AtomPrimitive {
             }
             AtomPrimitive::RingBondCount(n) => ctx.ring_bond_count(id) == *n,
             AtomPrimitive::Charge(c) => atom_charge(mol, id) == *c,
+            AtomPrimitive::HasContextLabel(label) => ctx.has_label(id, label),
         }
     }
 }
@@ -325,6 +362,22 @@ impl AtomQuery {
             AtomQuery::Not(inner) => !inner.eval(ctx, id, rec),
             AtomQuery::And(items) => items.iter().all(|q| q.eval(ctx, id, rec)),
             AtomQuery::Or(items) => items.iter().any(|q| q.eval(ctx, id, rec)),
+        }
+    }
+
+    /// Collect every [`AtomPrimitive::HasContextLabel`] label appearing in this
+    /// query tree (does not descend into recursive `$(...)` subpatterns — those
+    /// are handled by the owning [`QueryGraph`]).
+    pub fn collect_context_labels(&self, out: &mut Vec<String>) {
+        match self {
+            AtomQuery::Prim(AtomPrimitive::HasContextLabel(l)) => out.push(l.clone()),
+            AtomQuery::Prim(_) | AtomQuery::Recursive(_) => {}
+            AtomQuery::Not(inner) => inner.collect_context_labels(out),
+            AtomQuery::And(items) | AtomQuery::Or(items) => {
+                for q in items {
+                    q.collect_context_labels(out);
+                }
+            }
         }
     }
 }

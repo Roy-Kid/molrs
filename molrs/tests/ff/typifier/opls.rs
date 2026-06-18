@@ -263,6 +263,115 @@ fn recursive_dollar_def_types_a_real_molecule() {
 }
 
 // ===========================================================================
+// Chain 4: layered %opls_NNN dependency typing
+// ===========================================================================
+//
+// These exercise the previously-skipped %opls_NNN defs end to end through the
+// real bundled oplsaa.xml. Per-atom expectations are the ground truth produced
+// by molpy's own `OplsTypifier` on the same molecule (verified out-of-band):
+// methanol → C opls_157, O opls_154, hydroxyl-H opls_155, methyl-H opls_156.
+// The hydroxyl H (opls_155, def `H[O;%opls_154]`) and methyl H (opls_156, def
+// `HC[O;%opls_154]`) are %opls_154-dependent — exactly the layered defs chain-1
+// could not assign. The molecule is built in code (the `ff` test target cannot
+// read files via the `io` feature); the force field is the real oplsaa.xml.
+
+/// A methanol skeleton CH3-OH with explicit hydrogens.
+/// Returns `(graph, C, O, hydroxyl-H, [methyl-H; 3])`.
+fn methanol() -> (
+    Atomistic,
+    molrs::AtomId,
+    molrs::AtomId,
+    molrs::AtomId,
+    [molrs::AtomId; 3],
+) {
+    let mut g = Atomistic::new();
+    let c = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
+    let o = g.add_atom(Atom::xyz("O", 1.4, 0.0, 0.0));
+    let ho = g.add_atom(Atom::xyz("H", 2.0, 0.0, 0.0));
+    let h1 = g.add_atom(Atom::xyz("H", -0.5, 0.9, 0.0));
+    let h2 = g.add_atom(Atom::xyz("H", -0.5, -0.9, 0.0));
+    let h3 = g.add_atom(Atom::xyz("H", -0.5, 0.0, 0.9));
+    g.add_bond(c, o).unwrap();
+    g.add_bond(o, ho).unwrap();
+    for h in [h1, h2, h3] {
+        g.add_bond(c, h).unwrap();
+    }
+    (g, c, o, ho, [h1, h2, h3])
+}
+
+#[test]
+fn methanol_layered_types_match_molpy() {
+    // ac-005: the alcohol layered chain. O types opls_154 (level 0); the
+    // hydroxyl H types opls_155 (def `H[O;%opls_154]`, level 1) only after the
+    // O is typed; the methyl H types opls_156 (def `HC[O;%opls_154]`, level 1).
+    // Per-atom types equal molpy's OplsTypifier on the same molecule.
+    let typifier = OplsTypifier::from_xml_str(&oplsaa_xml()).expect("build OplsTypifier");
+    let (g, c, o, ho, methyl_h) = methanol();
+    let typed = typifier.typify(&g).expect("typify methanol");
+
+    let ty = |id: molrs::AtomId| {
+        typed
+            .get_atom(id)
+            .unwrap()
+            .get_str("type")
+            .map(str::to_string)
+    };
+    assert_eq!(ty(c).as_deref(), Some("opls_157"), "methanol C");
+    assert_eq!(ty(o).as_deref(), Some("opls_154"), "alcohol O (level 0)");
+    assert_eq!(
+        ty(ho).as_deref(),
+        Some("opls_155"),
+        "hydroxyl H via %opls_154 (level 1)"
+    );
+    for h in methyl_h {
+        assert_eq!(
+            ty(h).as_deref(),
+            Some("opls_156"),
+            "methyl H via %opls_154 (level 1)"
+        );
+    }
+}
+
+#[test]
+fn percent_defs_now_covered() {
+    // ac-005 / ac-006: the previously-skipped %opls_NNN defs are now reachable.
+    // opls_155 (`H[O;%opls_154]`) is a %opls_NNN-dependent type chain-1 could
+    // never assign; its presence after layered typing proves the `%opls_NNN`
+    // defs in the bundled oplsaa.xml are now covered.
+    let typifier = OplsTypifier::from_xml_str(&oplsaa_xml()).expect("build OplsTypifier");
+    let (g, _c, _o, _ho, _mh) = methanol();
+    let typed = typifier.typify(&g).expect("typify methanol");
+    assert!(
+        typed
+            .atoms()
+            .any(|(_, a)| a.get_str("type") == Some("opls_155")),
+        "a %opls_NNN-dependent type (opls_155) is now assigned"
+    );
+}
+
+#[test]
+fn layered_typing_terminates_over_every_mol2() {
+    // ac-005 (breadth): the full layered pipeline (incl. the %opls_NNN defs and
+    // any circular groups in the real oplsaa.xml) must terminate and never panic
+    // over every real mol2 molecule, and assign well-formed types throughout.
+    let typifier = OplsTypifier::from_xml_str(&oplsaa_xml()).expect("build OplsTypifier");
+    for path in &helpers::format_files("mol2") {
+        let mol = load_mol2(path);
+        if mol.n_atoms() == 0 {
+            continue;
+        }
+        let typed = typifier.typify(&mol).unwrap_or_else(|e| {
+            panic!("layered typify {:?} failed: {e}", path.file_name().unwrap())
+        });
+        for (_, a) in typed.atoms() {
+            if let Some(ty) = a.get_str("type") {
+                assert!(ty.starts_with("opls_"), "{path:?}: bad type {ty}");
+            }
+        }
+    }
+}
+
+// ===========================================================================
 // Chain 2: bonded-parameter assignment (assign_bonded / build)
 // ===========================================================================
 

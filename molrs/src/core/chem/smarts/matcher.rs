@@ -269,3 +269,21 @@ pub fn has_match(query: &QueryGraph, mol: &Atomistic) -> bool {
     });
     found
 }
+
+/// Like [`find_matches`], but evaluating `%LABEL` context predicates against an
+/// external `labels` map (`atom → current label`). A `[...;%L]` atom matches
+/// only when `labels[atom] == "L"`. With an empty map this is identical to
+/// [`find_matches`].
+pub fn find_matches_with_labels(
+    query: &QueryGraph,
+    mol: &Atomistic,
+    labels: &std::collections::HashMap<AtomId, String>,
+) -> Vec<Vec<AtomId>> {
+    let ctx = MolContext::with_labels(mol, labels);
+    let mut out = Vec::new();
+    enumerate_matches(query, &ctx, None, &mut |assign| {
+        out.push(assign.to_vec());
+        true
+    });
+    out
+}

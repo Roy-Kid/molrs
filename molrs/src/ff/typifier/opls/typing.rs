@@ -1,22 +1,27 @@
-//! OPLS-AA SMARTS atom typing.
+//! OPLS-AA SMARTS atom typing (dependency-aware, layered).
 //!
-//! [`annotate_opls`] runs each type's compiled SMARTS `def` over a molecule,
-//! collects the candidate `opls_NNN` types per atom, and picks the
-//! highest-priority one (priority computed by
-//! [`OplsTypingMeta::priorities`](super::meta::OplsTypingMeta::priorities)).
-//! The chosen type's `type` / `class` / `charge` are written onto a labeled
-//! copy of the input [`Atomistic`].
+//! [`annotate_opls`] drives the [`LayeredTypingEngine`]: it processes the type
+//! defs level by level so that a def referencing a
+//! previously-assigned type via `%opls_NNN` (e.g. benzene's aromatic-H type
+//! `opls_146` = `[H][C;%opls_145]`) is matched only after its dependency is
+//! resolved. The engine returns the per-atom `opls_NNN` assignment, which this
+//! function writes — together with each type's `class` and `charge` — onto a
+//! labeled copy of the input [`Atomistic`].
 //!
 //! # SMARTS reuse
 //!
 //! Matching uses the always-compiled molrs SMARTS engine
-//! ([`SmartsPattern`](molrs::SmartsPattern)). Each `def` is the SMARTS for the
-//! type's *target* atom: by RDKit convention the engine roots a match at query
-//! atom 0, so the typed atom of every match is `match[0]`.
+//! ([`SmartsPattern`](molrs::SmartsPattern)) with the context-label extension
+//! ([`find_matches_with_labels`](molrs::SmartsPattern::find_matches_with_labels)):
+//! the engine feeds back the current assignment map as the label context so
+//! `%opls_NNN` predicates can read it. Each `def` is the SMARTS for the type's
+//! *target* atom: by RDKit convention the engine roots a match at query atom 0,
+//! so the typed atom of every match is `match[0]`.
 //!
 //! # Conflict resolution
 //!
-//! When several defs match the same atom, the winner is chosen by, in order:
+//! When several defs match the same atom *within a level*, the winner is chosen
+//! by, in order:
 //! 1. higher priority (overrides / explicit / layer — see [`OplsTypingMeta`]);
 //! 2. more specific pattern (more query atoms);
 //! 3. earlier definition order (stable tie-break, by sorted `opls_NNN` name).
@@ -25,118 +30,32 @@
 //! definition_order)` tie-break (which also counts query *edges*) is a chain-3
 //! per-atom-parity refinement, not required here.
 //!
+//! # Levels
+//!
+//! Standalone (no-`%opls_NNN`) defs are level 0 — the chain-1 single-pass case.
+//! `%opls_NNN`-referencing defs resolve in dependency order; mutually-dependent
+//! defs form a circular group resolved by fixed-point iteration (see
+//! [`layered`](super::layered)).
+//!
 //! # Out of scope
 //!
 //! - Legacy rows with no `def` are skipped (cannot be SMARTS-matched).
-//! - Defs using molpy's `%opls_NNN` previously-typed-atom reference (a layered
-//!   dependency extension, not standard SMARTS) are skipped as unsupported —
-//!   they belong to the chain-3 layered-typing parity work, not chain 1. They
-//!   are NOT treated as malformed.
 //! - Bonded-term (bond / angle / dihedral) labeling is chain 2.
 
-use std::collections::HashMap;
-
-use molrs::{AtomId, Atomistic, SmartsPattern};
+use molrs::Atomistic;
 
 use crate::ff::forcefield::ForceField;
 
-use super::meta::{OplsTypeRow, OplsTypingMeta};
-
-/// A type's compiled SMARTS pattern plus its ranking inputs.
-struct CompiledDef {
-    name: String,
-    pattern: SmartsPattern,
-    priority: i64,
-    /// Specificity proxy: number of query atoms in the pattern.
-    specificity: usize,
-    /// Stable definition order (index after sorting type names).
-    order: usize,
-}
-
-/// Compile every SMARTS `def` in `meta` into a ranked pattern list.
-///
-/// Types with no `def` are skipped. A `def` that uses the `%opls_NNN`
-/// previously-typed reference (molpy layered-typing extension) is skipped as
-/// unsupported. Any other unparseable `def` is a broken force-field definition
-/// and returns `Err` (fail-fast — never silently dropped).
-fn compile_defs(meta: &OplsTypingMeta) -> Result<Vec<CompiledDef>, String> {
-    let priorities = meta.priorities();
-
-    // Deterministic order: sort by type name so `order` is stable run-to-run.
-    let mut named: Vec<(&String, &OplsTypeRow)> = meta.iter().collect();
-    named.sort_by(|a, b| a.0.cmp(b.0));
-
-    let mut compiled = Vec::new();
-    for (order, (name, row)) in named.into_iter().enumerate() {
-        let Some(def) = row.def.as_deref() else {
-            continue; // legacy / no-def row
-        };
-        if uses_typed_atom_ref(def) {
-            continue; // molpy %opls_NNN extension — unsupported here (chain 3)
-        }
-        let pattern = compile_def(def)
-            .map_err(|e| format!("OPLS type {name:?}: failed to parse SMARTS def {def:?}: {e}"))?;
-        let specificity = pattern.num_query_atoms();
-        compiled.push(CompiledDef {
-            name: name.clone(),
-            pattern,
-            priority: *priorities.get(name).unwrap_or(&0),
-            specificity,
-            order,
-        });
-    }
-    Ok(compiled)
-}
-
-/// Compile a single SMARTS `def`, with a targeted fix-up for OPLS monatomic-ion
-/// types written as a bare multi-letter element (e.g. `Li`, `Na`, `Cl`): the
-/// molrs engine only accepts organic-subset elements unbracketed, so a def that
-/// is exactly one element symbol is retried bracketed (`[Li]`). Any *other*
-/// parse failure (e.g. an unbalanced `[C`) is genuinely malformed and propagates
-/// as an `Err` (ac-005 fail-fast).
-fn compile_def(def: &str) -> Result<SmartsPattern, molrs::MolRsError> {
-    match SmartsPattern::parse(def) {
-        Ok(p) => Ok(p),
-        Err(e) => {
-            if is_bare_element_symbol(def) {
-                SmartsPattern::parse(&format!("[{def}]"))
-            } else {
-                Err(e)
-            }
-        }
-    }
-}
-
-/// Whether `def` is exactly one element symbol: an uppercase letter optionally
-/// followed by a single lowercase letter (`Li`, `Na`, `Br`, `C`). Used only to
-/// bracket bare monatomic-ion defs; never matches multi-atom SMARTS.
-fn is_bare_element_symbol(def: &str) -> bool {
-    let b = def.as_bytes();
-    match b.len() {
-        1 => b[0].is_ascii_uppercase(),
-        2 => b[0].is_ascii_uppercase() && b[1].is_ascii_lowercase(),
-        _ => false,
-    }
-}
-
-/// Whether a SMARTS `def` uses molpy's `%opls_NNN` previously-typed-atom
-/// reference: a `%` followed by a non-digit (standard SMARTS only allows
-/// `%nn` two-digit ring closures, so `%` + letter/underscore is the extension).
-fn uses_typed_atom_ref(def: &str) -> bool {
-    let bytes = def.as_bytes();
-    bytes
-        .iter()
-        .enumerate()
-        .any(|(i, &b)| b == b'%' && bytes.get(i + 1).is_some_and(|n| !n.is_ascii_digit()))
-}
+use super::layered::LayeredTypingEngine;
+use super::meta::OplsTypingMeta;
 
 /// Annotate `mol` with OPLS-AA atom types, returning a labeled copy.
 ///
-/// Each atom matched by one or more SMARTS `def`s is assigned the
-/// highest-priority type; that type's `type` (`opls_NNN`), `class`, and `charge`
-/// (`e`, from the potential `ForceField`'s `("atom","full")` style) are written
-/// onto the returned [`Atomistic`]. Atoms matched by no def are left untyped
-/// (no `type` prop) — strict-mode failure is the consumer's policy.
+/// Drives the [`LayeredTypingEngine`] over `meta`: every atom assigned a type
+/// gets that type's `type` (`opls_NNN`), `class`, and `charge` (`e`, from the
+/// potential `ForceField`'s `("atom","full")` style) written onto the returned
+/// [`Atomistic`]. Atoms typed by no def are left untyped (no `type` prop) —
+/// strict-mode failure is the consumer's policy.
 ///
 /// `ff` supplies per-type charges; a type absent from the atom style simply
 /// yields no `charge` prop. Bonded-term labeling is out of scope (chain 2).
@@ -150,40 +69,8 @@ pub fn annotate_opls(
     meta: &OplsTypingMeta,
     ff: &ForceField,
 ) -> Result<Atomistic, String> {
-    let compiled = compile_defs(meta)?;
-
-    // Best candidate per atom: keep the ranking key alongside the chosen type.
-    // Key ordering (all "higher wins"): (priority, specificity, −order).
-    #[derive(Clone, Copy)]
-    struct Rank {
-        priority: i64,
-        specificity: usize,
-        order: usize,
-    }
-    let better = |new: &Rank, cur: &Rank| -> bool {
-        // Higher priority, then higher specificity, then EARLIER definition order.
-        (new.priority, new.specificity, std::cmp::Reverse(new.order))
-            > (cur.priority, cur.specificity, std::cmp::Reverse(cur.order))
-    };
-
-    let mut best: HashMap<AtomId, (String, Rank)> = HashMap::new();
-    for cd in &compiled {
-        let rank = Rank {
-            priority: cd.priority,
-            specificity: cd.specificity,
-            order: cd.order,
-        };
-        for m in cd.pattern.find_matches(mol) {
-            // Target atom is the root (query atom 0).
-            let Some(&target) = m.first() else { continue };
-            match best.get(&target) {
-                Some((_, cur)) if !better(&rank, cur) => {}
-                _ => {
-                    best.insert(target, (cd.name.clone(), rank));
-                }
-            }
-        }
-    }
+    let engine = LayeredTypingEngine::build(meta)?;
+    let assignments = engine.typify(mol);
 
     // Per-type charge from the potential ForceField's atom style.
     let charge_of = |type_name: &str| -> Option<f64> {
@@ -194,7 +81,7 @@ pub fn annotate_opls(
     };
 
     let mut out = mol.clone();
-    for (atom_id, (type_name, _)) in &best {
+    for (atom_id, type_name) in &assignments {
         out.set_atom(*atom_id, "type", type_name.clone())
             .map_err(|e| e.to_string())?;
         if let Some(row) = meta.get(type_name) {
@@ -213,6 +100,7 @@ pub fn annotate_opls(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ff::typifier::opls::meta::OplsTypeRow;
     use molrs::Atom;
 
     /// Build a tiny ethane-like skeleton C-C with explicit H neighbours so the
@@ -335,12 +223,56 @@ mod tests {
     }
 
     #[test]
-    fn typed_atom_ref_def_is_skipped_not_error() {
-        // A %opls_NNN def is the molpy layered extension — skipped, not an error.
+    fn typed_atom_ref_def_without_dependency_types_nothing() {
+        // A %opls_NNN def is now supported (layered), not skipped. With no
+        // matching dependency present (nothing is ever typed opls_145), the
+        // `%opls_145` predicate never holds, so the def matches nothing — and
+        // it is NOT an error. (Real layered typing is covered in
+        // src/ff/typifier/opls/layered.rs and tests/ff/typifier/opls.rs.)
         let m = meta_with(&[("opls_ref", row("HA", Some("[H][C;%opls_145]"), &[]))]);
         let ff = ForceField::new("OPLS-AA");
         let typed = annotate_opls(&ethane(), &m, &ff).unwrap();
-        // Nothing typed (the only def was skipped), but no error.
         assert!(typed.atoms().all(|(_, a)| a.get_str("type").is_none()));
+    }
+
+    #[test]
+    fn layered_dependency_def_types_after_its_dependency() {
+        // opls_154 (alcohol O) then opls_155 (H[O;%opls_154]): the hydroxyl H
+        // is typed only after the O is typed opls_154 — exercising the full
+        // annotate_opls layered path end to end on a constructed ethanol.
+        let mut g = Atomistic::new();
+        let cm = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
+        let ch = g.add_atom(Atom::xyz("C", 1.5, 0.0, 0.0));
+        let o = g.add_atom(Atom::xyz("O", 2.5, 0.0, 0.0));
+        let ho = g.add_atom(Atom::xyz("H", 3.3, 0.0, 0.0));
+        g.add_bond(cm, ch).unwrap();
+        g.add_bond(ch, o).unwrap();
+        g.add_bond(o, ho).unwrap();
+        for k in 0..3 {
+            let h = g.add_atom(Atom::xyz("H", 0.3 * (k as f64 + 1.0), 0.9, 0.0));
+            g.add_bond(cm, h).unwrap();
+        }
+        for k in 0..2 {
+            let h = g.add_atom(Atom::xyz("H", 1.5 + 0.3 * (k as f64), 0.9, 0.0));
+            g.add_bond(ch, h).unwrap();
+        }
+
+        let m = meta_with(&[
+            ("opls_154", row("OH", Some("[O;X2](H)([!H])"), &[])),
+            ("opls_155", row("HO", Some("H[O;%opls_154]"), &[])),
+        ]);
+        let ff = ForceField::new("OPLS-AA");
+        let typed = annotate_opls(&g, &m, &ff).unwrap();
+
+        assert_eq!(
+            typed.get_atom(o).unwrap().get_str("type"),
+            Some("opls_154"),
+            "alcohol O typed opls_154"
+        );
+        assert_eq!(
+            typed.get_atom(ho).unwrap().get_str("type"),
+            Some("opls_155"),
+            "hydroxyl H typed opls_155 via the %opls_154 dependency"
+        );
     }
 }

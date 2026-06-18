@@ -89,6 +89,29 @@ impl SmartsPattern {
         matcher::has_match(&self.graph, mol)
     }
 
+    /// Like [`find_matches`](Self::find_matches), but resolving `%LABEL`
+    /// context-label predicates against an external `labels` map
+    /// (`atom → current label`).
+    ///
+    /// A `%LABEL` token inside a bracket atom (a molrs extension over standard
+    /// SMARTS) matches an atom iff `labels[atom] == "LABEL"`. This is a general,
+    /// domain-neutral mechanism for iterative / dependency-aware matching: a
+    /// caller supplies a "current assignment" map and patterns can require a
+    /// neighbour to already carry a specific label. OPLS-AA layered typing, for
+    /// example, passes the per-atom assigned `opls_NNN` type map so that a def
+    /// like `[H][O;%opls_154]` matches only after the oxygen was typed
+    /// `opls_154` in a prior pass.
+    ///
+    /// Passing an empty map is identical to [`find_matches`](Self::find_matches);
+    /// that legacy entry point is unaffected by this method.
+    pub fn find_matches_with_labels(
+        &self,
+        mol: &Atomistic,
+        labels: &std::collections::HashMap<AtomId, String>,
+    ) -> Vec<Vec<AtomId>> {
+        matcher::find_matches_with_labels(&self.graph, mol, labels)
+    }
+
     /// The SMARTS atom-map label (`:1` etc.) of query atom `query_atom`, or
     /// `None` if unlabelled / out of range.
     pub fn map_label(&self, query_atom: usize) -> Option<u32> {
@@ -98,5 +121,15 @@ impl SmartsPattern {
     /// Number of query atoms.
     pub fn num_query_atoms(&self) -> usize {
         self.graph.atoms.len()
+    }
+
+    /// Every `%LABEL` context-label referenced by this pattern (including those
+    /// inside recursive `$(...)` subpatterns), in traversal order with
+    /// duplicates kept.
+    ///
+    /// Iterative typifiers use this to discover a def's dependencies on
+    /// previously-assigned labels (e.g. OPLS `%opls_NNN` references).
+    pub fn context_labels(&self) -> Vec<String> {
+        self.graph.context_labels()
     }
 }

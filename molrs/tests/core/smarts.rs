@@ -232,6 +232,175 @@ fn test_invalid_smarts_returns_err() {
     }
 }
 
+// ── context-label predicate (%LABEL) ────────────────────────────────────────
+//
+// A general, domain-neutral SMARTS extension: a `%LABEL` token inside a bracket
+// atom expression matches an atom iff an external "current label map"
+// (`HashMap<AtomId, String>`) assigns that atom the exact label `LABEL`. OPLS
+// layered typing supplies the per-atom assigned-type map as the label context;
+// the engine itself knows nothing about OPLS. The legacy `find_matches` entry
+// uses an empty label map and is unaffected.
+
+/// Build a minimal ethanol skeleton C-C-O with explicit Hs and return the
+/// graph plus the (C_methyl, C_hydroxyl, O, H_on_O) atom ids.
+fn ethanol() -> (Atomistic, AtomId, AtomId, AtomId, AtomId) {
+    let mut g = Atomistic::new();
+    let cm = g.add_atom(Atom::xyz("C", 0.0, 0.0, 0.0));
+    let ch = g.add_atom(Atom::xyz("C", 1.5, 0.0, 0.0));
+    let o = g.add_atom(Atom::xyz("O", 2.5, 0.0, 0.0));
+    let ho = g.add_atom(Atom::xyz("H", 3.3, 0.0, 0.0));
+    g.add_bond(cm, ch).unwrap();
+    g.add_bond(ch, o).unwrap();
+    g.add_bond(o, ho).unwrap();
+    // Hydrogens on the carbons so X4/H counts are realistic.
+    for c in [cm, ch] {
+        let n = if c == cm { 3 } else { 2 };
+        for k in 0..n {
+            let h = g.add_atom(Atom::xyz("H", 0.3 * (k as f64 + 1.0), 0.9, 0.0));
+            g.add_bond(c, h).unwrap();
+        }
+    }
+    (g, cm, ch, o, ho)
+}
+
+#[test]
+fn test_bracket_h_leading_is_element() {
+    // RDKit / molpy semantics: a *leading* bare `[H]` is the hydrogen element
+    // (matches an H atom), while `H<n>` after another primitive is the total-H
+    // count. Benzene H types depend on `[H][C;...]` meaning "an H atom bonded
+    // to a carbon", so this disambiguation is load-bearing.
+    let (g, _cm, _ch, _o, ho) = ethanol();
+
+    // `[H]` alone matches every hydrogen atom (the hydroxyl H included).
+    let h_elem = SmartsPattern::parse("[H]").unwrap();
+    let h_matches = h_elem.find_matches(&g);
+    assert!(
+        h_matches.iter().any(|m| m[0] == ho),
+        "[H] (leading) matches the hydroxyl H atom"
+    );
+    // ethanol has 1 (OH) + 3 (CH3) + 2 (CH2) = 6 hydrogens.
+    assert_eq!(h_matches.len(), 6, "[H] matches all six H atoms");
+
+    // `[CH3]` is carbon-with-3-H (a count), NOT an H atom: matches the methyl C.
+    let ch3 = SmartsPattern::parse("[CH3]").unwrap();
+    let ch3_matches = ch3.find_matches(&g);
+    assert_eq!(ch3_matches.len(), 1, "[CH3] matches the one methyl carbon");
+
+    // `[C;H1]` (H after another primitive) is the H-count form: the CH2 carbon
+    // has 2 H, so it does NOT match H1; nothing in ethanol is a C with exactly
+    // one H, so zero matches.
+    let ch1 = SmartsPattern::parse("[C;H1]").unwrap();
+    assert!(
+        ch1.find_matches(&g).is_empty(),
+        "[C;H1] is a count form (no ethanol C has exactly 1 H)"
+    );
+
+    // `[!H]` is "not the hydrogen element": matches every non-H atom.
+    let not_h = SmartsPattern::parse("[!H]").unwrap();
+    let non_h = not_h.find_matches(&g).len();
+    assert_eq!(
+        non_h,
+        g.n_atoms() - 6,
+        "[!H] matches the non-hydrogen atoms"
+    );
+}
+
+#[test]
+fn test_context_label_parses() {
+    // ac-001: a def carrying `%LABEL` parses without error; one without `%`
+    // parses unchanged. (Parse-only — matching is exercised below.)
+    assert!(
+        SmartsPattern::parse("H[O;%opls_154]").is_ok(),
+        "a %LABEL def must parse"
+    );
+    assert!(
+        SmartsPattern::parse("[C;X4]([C;%opls_145])(H)(H)H").is_ok(),
+        "a %LABEL inside a branch must parse"
+    );
+    // Plain SMARTS still parses (no regression).
+    assert!(SmartsPattern::parse("[C;X4]").is_ok());
+}
+
+#[test]
+fn test_context_label_matches_only_when_assigned() {
+    // ac-002: `H[O;%opls_154]` matches the hydroxyl H iff its oxygen carries the
+    // assigned label `opls_154` in the supplied context map. (Unbracketed `H`
+    // is the element hydrogen, mirroring the real oplsaa.xml opls_155 def;
+    // bracketed `[H]` would instead be the total-H-count primitive.)
+    use std::collections::HashMap;
+    let (g, _cm, _ch, o, ho) = ethanol();
+    let pat = SmartsPattern::parse("H[O;%opls_154]").unwrap();
+
+    // Empty context: nothing has the label, so no match.
+    let empty: HashMap<AtomId, String> = HashMap::new();
+    assert!(
+        pat.find_matches_with_labels(&g, &empty).is_empty(),
+        "no label assigned -> no match"
+    );
+
+    // Assign opls_154 to the oxygen: the H[O] match now succeeds and roots on H.
+    let mut labels: HashMap<AtomId, String> = HashMap::new();
+    labels.insert(o, "opls_154".to_string());
+    let matches = pat.find_matches_with_labels(&g, &labels);
+    assert_eq!(matches.len(), 1, "exactly the hydroxyl H matches");
+    assert_eq!(
+        matches[0][0], ho,
+        "match roots on the hydroxyl H (query atom 0)"
+    );
+
+    // A different label on the oxygen must NOT satisfy `%opls_154`.
+    let mut wrong: HashMap<AtomId, String> = HashMap::new();
+    wrong.insert(o, "opls_155".to_string());
+    assert!(
+        pat.find_matches_with_labels(&g, &wrong).is_empty(),
+        "wrong label -> no match"
+    );
+}
+
+#[test]
+fn test_context_label_legacy_find_matches_unaffected() {
+    // ac-002: the legacy find_matches (no label context) is byte-for-byte
+    // unaffected on non-%-patterns; a %-pattern simply never matches under it
+    // (empty label context), never panics.
+    let (g, _cm, _ch, _o, _ho) = ethanol();
+
+    // Non-% pattern: identical result via both entries (empty labels).
+    use std::collections::HashMap;
+    let empty: HashMap<AtomId, String> = HashMap::new();
+    let plain = SmartsPattern::parse("[O;X2]").unwrap();
+    let legacy = plain.find_matches(&g);
+    let with_empty = plain.find_matches_with_labels(&g, &empty);
+    assert_eq!(legacy, with_empty, "empty-label path == legacy path");
+    assert_eq!(legacy.len(), 1, "one hydroxyl oxygen");
+
+    // A %-pattern under the legacy entry: empty context, so no match, no panic.
+    let labeled = SmartsPattern::parse("[H][O;%opls_154]").unwrap();
+    assert!(
+        labeled.find_matches(&g).is_empty(),
+        "legacy entry sees empty label context"
+    );
+}
+
+#[test]
+fn test_context_label_composes_with_other_primitives() {
+    // ac-002: `%LABEL` composes inside an implicit/`;` AND chain — `[O;X2;%lbl]`
+    // requires BOTH the degree-2 oxygen AND the label.
+    use std::collections::HashMap;
+    let (g, _cm, _ch, o, _ho) = ethanol();
+    let pat = SmartsPattern::parse("[O;X2;%mylabel]").unwrap();
+
+    let mut labels: HashMap<AtomId, String> = HashMap::new();
+    labels.insert(o, "mylabel".to_string());
+    let m = pat.find_matches_with_labels(&g, &labels);
+    assert_eq!(m.len(), 1, "the labeled degree-2 O matches");
+    assert_eq!(m[0][0], o);
+
+    // Label present but on a wrong-degree atom would not match; here only O has
+    // it, and O is X2, so the single match is correct. Remove the label -> none.
+    let empty: HashMap<AtomId, String> = HashMap::new();
+    assert!(pat.find_matches_with_labels(&g, &empty).is_empty());
+}
+
 // ── has_match consistent with find_matches ──────────────────────────────────
 
 #[test]
