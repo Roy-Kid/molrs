@@ -10,7 +10,7 @@ use molrs::signal as sig;
 use ndarray::Array1;
 use rustfft::FftPlanner;
 
-use super::{RamanSpectrum, acf_to_intensities, acf_to_spectrum, cosine_sq_window};
+use super::{RamanSpectrumResult, acf_to_intensities, acf_to_spectrum, cosine_sq_window};
 use crate::compute::error::ComputeError;
 
 /// Weight for diagonal anisotropy components in the Raman ACF.
@@ -44,7 +44,7 @@ const PERPENDICULAR_DENOM: f64 = 15.0;
 ///   polarization-resolved spectra.
 ///
 /// # Returns
-/// [`RamanSpectrum`] with `isotropic` and `anisotropic` components.
+/// [`RamanSpectrumResult`] with `isotropic` and `anisotropic` components.
 /// When `averaged = true`, `parallel` and `perpendicular` are `Some`.
 ///
 /// # Errors
@@ -58,7 +58,7 @@ pub fn raman_spectrum(
     incident_frequency_cm1: f64,
     temperature_k: f64,
     averaged: bool,
-) -> Result<RamanSpectrum, ComputeError> {
+) -> Result<RamanSpectrumResult, ComputeError> {
     let shape = polarizabilities.shape();
     let n_frames = shape[0];
     if shape[1] != 6 {
@@ -187,7 +187,7 @@ pub fn raman_spectrum(
         (None, None)
     };
 
-    Ok(RamanSpectrum {
+    Ok(RamanSpectrumResult {
         frequencies_cm1,
         isotropic: iso_int,
         anisotropic: aniso_int,

@@ -9,7 +9,7 @@ use molrs::signal as sig;
 use ndarray::{Array1, Array2};
 use rustfft::FftPlanner;
 
-use super::{Spectrum, window_and_fft};
+use super::{SpectrumResult, window_and_fft};
 use crate::compute::error::ComputeError;
 
 /// Compute the IR absorption spectrum from the total dipole trajectory.
@@ -36,7 +36,7 @@ pub fn ir_spectrum(
     dipole_moments: &Array2<f64>,
     dt_fs: f64,
     resolution: usize,
-) -> Result<Spectrum, ComputeError> {
+) -> Result<SpectrumResult, ComputeError> {
     let shape = dipole_moments.shape();
     let n_frames = shape[0];
     if shape[1] != 3 {
@@ -81,7 +81,7 @@ pub fn ir_spectrum(
 
     let (frequencies_cm1, intensities) = window_and_fft(&mut planner, &acf_sum, dt_fs)?;
 
-    Ok(Spectrum {
+    Ok(SpectrumResult {
         frequencies_cm1,
         intensities,
         resolution: max_lag,

@@ -1,6 +1,6 @@
 ---
 title: 计算与拟合分离 — compute::fit 模块 + 原始输出 (Phase 01)
-status: approved
+status: code-complete
 created: 2026-06-18
 ---
 
@@ -109,17 +109,17 @@ pub trait Fit {
 
 ## Tasks
 
-- [ ] Write failing tests for `Fit` trait + a trivial in-test impl (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/traits.rs`)
-- [ ] Implement `Fit` trait alongside `Compute` (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/traits.rs`)
-- [ ] Write failing tests for numeric fits `LinearFit`/`RunningIntegral`/`Plateau`/`DebyeFit` against known synthetic curves (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/{linear_fit,running_integral,plateau,debye_fit}.rs`)
-- [ ] Implement `LinearFit`/`RunningIntegral`/`Plateau`/`DebyeFit` reusing OLS from dielectric.rs and trapezoid from jacf.rs (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/{linear_fit,running_integral,plateau,debye_fit}.rs`)
-- [ ] Write failing regression tests for spectral `Fit` impls reproducing old `power_spectrum`/`ir_spectrum`/`raman_spectrum` + `dielectric` spectrum output bit-for-bit on a shared ACF (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/spectral.rs`)
-- [ ] Implement `PowerSpectrum`/`IRSpectrum`/`RamanSpectrum` `Fit` composing molrs::signal window/acf/grid via shared helper in `/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/spectral.rs` and refactor `spectra/mod.rs` + `dielectric.rs` to call it
-- [ ] Write failing tests asserting raw computes equal the raw portion of today's bundled results (EinsteinConductivity.msd == ConductivityResult.msd, GreenKuboConductivity.jacf == JacfResult.jacf, VACF == power_spectrum acf_sum) and invariants (a)/(b)/(c) (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/raw_computes.rs`)
-- [ ] Implement `VACF`/`EinsteinDiffusion`/`GreenKuboDiffusion`/`EinsteinConductivity`/`GreenKuboConductivity`/`DebyeRelaxation` returning raw-only curves + metadata (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/raw_computes.rs`)
-- [ ] Wire `pub mod fit;` + re-exports in `/Users/roykid/work/molcrafts/molrs/molrs/src/compute/mod.rs` and `compute/fit/mod.rs`
-- [ ] Add rustdoc per doc.style with units on every new `Fit`/`Compute`/result type (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/*.rs`, `traits.rs`)
-- [ ] Run full check + test suite (`cargo fmt --all --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --all-features`)
+- [x] Write failing tests for `Fit` trait + a trivial in-test impl (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/traits.rs`)
+- [x] Implement `Fit` trait alongside `Compute` (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/traits.rs`)
+- [x] Write failing tests for numeric fits `LinearFit`/`RunningIntegral`/`Plateau`/`DebyeFit` against known synthetic curves (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/{linear_fit,running_integral,plateau,debye_fit}.rs`)
+- [x] Implement `LinearFit`/`RunningIntegral`/`Plateau`/`DebyeFit` reusing OLS from dielectric.rs and trapezoid from jacf.rs (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/{linear_fit,running_integral,plateau,debye_fit}.rs`)
+- [x] Write failing regression tests for spectral `Fit` impls reproducing old `power_spectrum`/`ir_spectrum`/`raman_spectrum` + `dielectric` spectrum output bit-for-bit on a shared ACF (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/spectral.rs`)
+- [x] Implement `PowerSpectrum`/`IRSpectrum`/`RamanSpectrum` `Fit` composing molrs::signal window/acf/grid via shared helper in `/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/spectral.rs` and refactor `spectra/mod.rs` + `dielectric.rs` to call it
+- [x] Write failing tests asserting raw computes equal the raw portion of today's bundled results (EinsteinConductivity.msd == ConductivityResult.msd, GreenKuboConductivity.jacf == JacfResult.jacf, VACF == power_spectrum acf_sum) and invariants (a)/(b)/(c) (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/raw_computes.rs`)
+- [x] Implement `VACF`/`EinsteinDiffusion`/`GreenKuboDiffusion`/`EinsteinConductivity`/`GreenKuboConductivity`/`DebyeRelaxation` returning raw-only curves + metadata (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/raw_computes.rs`)
+- [x] Wire `pub mod fit;` + re-exports in `/Users/roykid/work/molcrafts/molrs/molrs/src/compute/mod.rs` and `compute/fit/mod.rs`
+- [x] Add rustdoc per doc.style with units on every new `Fit`/`Compute`/result type (`/Users/roykid/work/molcrafts/molrs/molrs/src/compute/fit/*.rs`, `traits.rs`)
+- [x] Run full check + test suite (`cargo fmt --all --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --all-features`)
 
 ## Testing strategy
 

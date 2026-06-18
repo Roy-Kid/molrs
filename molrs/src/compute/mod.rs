@@ -57,6 +57,7 @@ pub mod dielectric;
 pub mod diffraction;
 pub mod environment;
 pub mod error;
+pub mod fit;
 pub mod gyration_tensor;
 pub mod inertia_tensor;
 pub mod jacf;
@@ -100,6 +101,13 @@ pub use environment::{
     LocalBondProjectionResult, LocalDescriptors, LocalDescriptorsResult, MatchEnv, MatchEnvResult,
 };
 pub use error::ComputeError;
+pub use fit::{
+    DebyeFit, DebyeFitResult, DebyeRelaxation, DebyeRelaxationResult, EinsteinConductivity,
+    EinsteinConductivityResult, EinsteinDiffusion, EinsteinDiffusionArgs, EwaldBoundary,
+    GreenKuboConductivity, GreenKuboConductivityResult, GreenKuboDiffusion, IRSpectrum, LinearFit,
+    LinearFitResult, Plateau, PlateauResult, PowerSpectrum, RamanSpectrum, RunningIntegral,
+    RunningIntegralResult, VACF, VacfResult,
+};
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
 pub use jacf::{JacfResult, green_kubo_conductivity};
@@ -120,5 +128,7 @@ pub use pmft::{
 pub use radius_of_gyration::{RadiusOfGyration, RgResult};
 pub use rdf::{RDF, RDFResult};
 pub use result::{ComputeResult, DescriptorRow};
-pub use spectra::{RamanSpectrum, Spectrum, ir_spectrum, power_spectrum, raman_spectrum};
-pub use traits::Compute;
+pub use spectra::{
+    RamanSpectrumResult, SpectrumResult, ir_spectrum, power_spectrum, raman_spectrum,
+};
+pub use traits::{Compute, Fit};

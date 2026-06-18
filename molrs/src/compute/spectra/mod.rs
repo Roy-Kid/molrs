@@ -31,10 +31,10 @@ pub use raman_spectrum::raman_spectrum;
 use molrs::signal as sig;
 use ndarray::{Array1, ArrayD};
 use rustfft::FftPlanner;
-use rustfft::num_complex::Complex64;
-use rustfft::num_traits::Zero;
 
 use crate::compute::error::ComputeError;
+use crate::compute::fit::forward_fft_onesided;
+use crate::compute::result::ComputeResult;
 
 // ── Physical constants ───────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ const MAX_EXP_ARG: f64 = 700.0;
 
 /// Single-spectrum result (VDOS, IR).
 #[derive(Debug, Clone)]
-pub struct Spectrum {
+pub struct SpectrumResult {
     /// Frequency grid in cm⁻¹, length `n_pad / 2 + 1`.
     pub frequencies_cm1: Array1<f64>,
     /// Spectral intensities (arbitrary units).
@@ -72,7 +72,7 @@ pub struct Spectrum {
 
 /// Raman spectrum result with isotropic / anisotropic decomposition.
 #[derive(Debug, Clone)]
-pub struct RamanSpectrum {
+pub struct RamanSpectrumResult {
     /// Frequency grid in cm⁻¹.
     pub frequencies_cm1: Array1<f64>,
     /// Isotropic (trace) contribution.
@@ -90,6 +90,9 @@ pub struct RamanSpectrum {
     /// Number of input frames.
     pub n_frames: usize,
 }
+
+impl ComputeResult for SpectrumResult {}
+impl ComputeResult for RamanSpectrumResult {}
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -116,8 +119,14 @@ pub(crate) fn validate_input(
 /// Apply CosineSq window to an ACF array, zero-pad, and FFT.
 ///
 /// Wraps the `Array1` → `ArrayD` → window → `Array1` → FFT pipeline
-/// that is shared by all three spectrum types.
-fn window_and_fft(
+/// that is shared by all three spectrum types. The window routes through
+/// [`sig::apply_window`] and the FFT through the shared
+/// [`forward_fft_onesided`](crate::compute::fit::forward_fft_onesided) core.
+///
+/// `pub(crate)` so the [`PowerSpectrum`](crate::compute::fit::PowerSpectrum) /
+/// [`IRSpectrum`](crate::compute::fit::IRSpectrum) `Fit` impls can compose the
+/// identical pipeline and reproduce the legacy output bit-for-bit.
+pub(crate) fn window_and_fft(
     planner: &mut FftPlanner<f64>,
     acf: &Array1<f64>,
     dt_fs: f64,
@@ -144,8 +153,8 @@ fn window_and_fft(
 ///
 /// Returns `(frequencies_cm1, intensities_raw)`. The caller is
 /// responsible for applying physical prefactors (cross-section + Bose
-/// for Raman).
-fn acf_to_spectrum(
+/// for Raman). Intensities use the spectra-flavoured `1/n_pad` scaling.
+pub(crate) fn acf_to_spectrum(
     planner: &mut FftPlanner<f64>,
     acf: &Array1<f64>,
     dt_fs: f64,
@@ -164,21 +173,27 @@ fn acf_to_spectrum(
 /// FFT a windowed ACF and return only the intensity spectrum (no
 /// frequency grid). Used for the second Raman component so we don't
 /// allocate a second identical frequency array.
-fn acf_to_intensities(
+///
+/// Delegates the pad+forward-FFT step to the shared
+/// [`forward_fft_onesided`](crate::compute::fit::forward_fft_onesided) core,
+/// then applies the spectra-flavoured `1/n_pad` real-part scaling.
+pub(crate) fn acf_to_intensities(
     planner: &mut FftPlanner<f64>,
     acf: &Array1<f64>,
     n_pad: usize,
 ) -> Array1<f64> {
-    let fwd = planner.plan_fft_forward(n_pad);
-
-    let mut complex_data: Vec<Complex64> = acf.iter().map(|&x| Complex64::new(x, 0.0)).collect();
-    complex_data.resize(n_pad, Complex64::zero());
-    fwd.process(&mut complex_data);
-
-    let n_freq = n_pad / 2 + 1;
-    let mut intensities = Array1::zeros(n_freq);
-    for j in 0..n_freq {
-        intensities[j] = complex_data[j].re / n_pad as f64;
+    let acf_vec;
+    let acf_slice = match acf.as_slice() {
+        Some(s) => s,
+        None => {
+            acf_vec = acf.to_vec();
+            &acf_vec
+        }
+    };
+    let bins = forward_fft_onesided(planner, acf_slice, n_pad);
+    let mut intensities = Array1::zeros(bins.len());
+    for (j, b) in bins.iter().enumerate() {
+        intensities[j] = b.re / n_pad as f64;
     }
     intensities
 }

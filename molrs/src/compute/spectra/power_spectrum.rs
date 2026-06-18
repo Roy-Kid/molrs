@@ -8,7 +8,7 @@ use molrs::signal as sig;
 use ndarray::{Array1, Array2};
 use rustfft::FftPlanner;
 
-use super::{Spectrum, validate_input, window_and_fft};
+use super::{SpectrumResult, validate_input, window_and_fft};
 use crate::compute::error::ComputeError;
 
 /// Compute the vibrational power spectrum (VDOS) from velocity time series.
@@ -31,7 +31,7 @@ pub fn power_spectrum(
     velocities: &Array2<f64>,
     dt_fs: f64,
     resolution: usize,
-) -> Result<Spectrum, ComputeError> {
+) -> Result<SpectrumResult, ComputeError> {
     let n_frames = velocities.shape()[0];
     let n_dof = velocities.shape()[1];
     let max_lag = validate_input(n_frames, dt_fs, resolution)?;
@@ -64,7 +64,7 @@ pub fn power_spectrum(
 
     let (frequencies_cm1, intensities) = window_and_fft(&mut planner, &acf_sum, dt_fs)?;
 
-    Ok(Spectrum {
+    Ok(SpectrumResult {
         frequencies_cm1,
         intensities,
         resolution: max_lag,

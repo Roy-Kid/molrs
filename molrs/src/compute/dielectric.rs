@@ -38,10 +38,9 @@
 use molrs::signal as sig;
 use ndarray::{Array1, Array2, Array3};
 use rustfft::FftPlanner;
-use rustfft::num_complex::Complex64;
-use rustfft::num_traits::Zero;
 
 use crate::compute::error::ComputeError;
+use crate::compute::fit::forward_fft_onesided;
 
 /// Result of a dielectric spectrum computation.
 ///
@@ -525,11 +524,17 @@ fn acf_to_spectrum(
     dt: f64,
     n_pad: usize,
 ) -> RawSpectrum {
-    let fwd = planner.plan_fft_forward(n_pad);
-
-    let mut complex_data: Vec<Complex64> = acf.iter().map(|&x| Complex64::new(x, 0.0)).collect();
-    complex_data.resize(n_pad, Complex64::zero());
-    fwd.process(&mut complex_data);
+    // Shared pad+forward-FFT core; the dielectric wrapper keeps its own
+    // rad·(time)⁻¹ frequency grid and `·dt` (rectangle-rule) 3-tuple scaling.
+    let acf_vec;
+    let acf_slice = match acf.as_slice() {
+        Some(s) => s,
+        None => {
+            acf_vec = acf.to_vec();
+            &acf_vec
+        }
+    };
+    let bins = forward_fft_onesided(planner, acf_slice, n_pad);
 
     let frequencies = sig::frequency_grid(n_pad, dt);
     let n_freq = frequencies.len();
@@ -537,7 +542,7 @@ fn acf_to_spectrum(
     let mut spec_im = Array1::zeros(n_freq);
 
     for j in 0..n_freq {
-        let z = complex_data[j];
+        let z = bins[j];
         spec_re[j] = z.re * dt;
         spec_im[j] = z.im * dt;
     }

@@ -10,7 +10,8 @@ criteria:
       `Input<'a>`, an associated `Output: ComputeResult + Clone + Send + Sync + 'static`,
       and a method `fit(&self, input: Self::Input<'a>) -> Result<Self::Output, ComputeError>`.
       An in-crate trivial impl over `&Array1<f64>` compiles and `cargo check --all-features` passes.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-002
     summary: LinearFit recovers known slope/intercept/r2 on synthetic linear data
     type: code
@@ -19,7 +20,8 @@ criteria:
       For y[i] = 3.0*x[i] + 2.0 sampled on a uniform grid, LinearFit { window: (0.0, 1.0) }.fit
       returns slope within 1e-12 of 3.0, intercept within 1e-12 of 2.0, r2 within 1e-12 of 1.0,
       and fit_start == 0, fit_end == last index.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-003
     summary: LinearFit OLS matches the existing dielectric inline fit
     type: code
@@ -28,7 +30,8 @@ criteria:
       On the same lag_times/msd array and (fit_start_frac, fit_end_frac) used by
       einstein_helfand_conductivity, LinearFit returns a slope equal to that function's
       reported slope to within 1e-12 (same OLS, lifted not reimplemented).
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-004
     summary: RunningIntegral (trapezoid) recovers a known integral
     type: code
@@ -37,7 +40,8 @@ criteria:
       For a constant curve c on step dt, RunningIntegral.fit returns a curve whose k-th element
       equals c*k*dt within 1e-12; and its output equals the running trapezoid integral computed
       inline in jacf.rs (green_kubo_conductivity) on the same JACF + dt to within 1e-12.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-005
     summary: Plateau returns windowed mean over a curve
     type: code
@@ -46,7 +50,8 @@ criteria:
       For a curve that is constant value P over the fractional window (a, b), Plateau { window: (a, b) }.fit
       returns a plateau value equal to P within 1e-12 and a sample count equal to the number of points
       inside [round(a*(n-1)), round(b*(n-1))].
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-006
     summary: PowerSpectrum Fit reproduces old power_spectrum output bit-for-bit
     type: code
@@ -55,7 +60,8 @@ criteria:
       Given the raw velocity ACF that power_spectrum computes internally, the PowerSpectrum Fit applied
       to that ACF with the same dt and window/FFT params returns frequencies_cm1 and intensities arrays
       bitwise-equal (==) to the legacy power_spectrum output on the same velocity input.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-007
     summary: IRSpectrum and RamanSpectrum Fits reproduce old spectra output bit-for-bit
     type: code
@@ -64,7 +70,8 @@ criteria:
       For matched raw ACFs and identical window/FFT/temperature/incident-frequency params, the IRSpectrum
       Fit equals legacy ir_spectrum output and the RamanSpectrum Fit equals legacy raman_spectrum output
       (isotropic, anisotropic, parallel, perpendicular) bitwise-equal (==) on the same inputs.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-008
     summary: Spectral Fits compose molrs::signal window primitives, not reimplemented windows
     type: code
@@ -73,7 +80,8 @@ criteria:
       compute/fit/spectral.rs contains no local cosine/Hann/Blackman window coefficient computation;
       windowing routes through molrs::signal::apply_window (or the shared helper that calls it), and the
       legacy spectra::window_and_fft / dielectric::windowed_acf_spectrum now delegate to the shared helper.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-009
     summary: EinsteinConductivity raw MSD equals ConductivityResult.msd
     type: code
@@ -82,7 +90,8 @@ criteria:
       For the same translational dipole series, dt, and max_correlation_time, EinsteinConductivity.compute
       returns lag_times and a raw msd curve element-wise equal to einstein_helfand_conductivity's
       ConductivityResult.lag_times and .msd to within 1e-12, and carries no fitted sigma/slope field.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-010
     summary: GreenKuboConductivity raw current ACF equals JacfResult.jacf
     type: code
@@ -91,7 +100,8 @@ criteria:
       For the same current series, dt, and max_correlation_time, GreenKuboConductivity.compute returns
       lag_times and a raw jacf curve element-wise equal to green_kubo_conductivity's JacfResult.lag_times
       and .jacf to within 1e-12, and carries no fitted sigma field.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-011
     summary: VACF raw curve equals the internal acf_sum of power_spectrum
     type: code
@@ -99,7 +109,8 @@ criteria:
     pass_when: |
       For the same velocity series, dt, and resolution, VACF.compute returns an unnormalized velocity ACF
       element-wise equal (within 1e-12) to the acf_sum that power_spectrum builds before windowing.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-012
     summary: EinsteinDiffusion delegates to the existing MSD primitive
     type: code
@@ -107,7 +118,8 @@ criteria:
     pass_when: |
       EinsteinDiffusion.compute over a frame slice returns an MSD curve element-wise equal (within 1e-12)
       to MSD::windowed().compute over the same frames; no MSD math is re-derived in raw_computes.rs.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-013
     summary: DebyeRelaxation carries unnormalized ACF plus zero-lag variance and V/T/BC metadata
     type: code
@@ -116,7 +128,8 @@ criteria:
       DebyeRelaxation's result type exposes a non-normalized dipole ACF, a zero-lag variance field
       <M(0)^2> equal to the ACF value at lag 0, plus scalar fields for volume, temperature, and the
       Ewald boundary condition; constructing the result without these fields fails to compile.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-014
     summary: Raw max_lag sufficiency is enforced (invariant a)
     type: code
@@ -125,7 +138,8 @@ criteria:
       A Fit/transform asked to consume a lag range exceeding the raw curve's length returns
       Err(ComputeError::OutOfRange) (or EmptyInput for empty/too-short curves) rather than silently
       truncating.
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-015
     summary: Einstein and Green-Kubo conductivity reconstruct legacy sigma from raw + Fit
     type: scientific
@@ -144,7 +158,8 @@ criteria:
       LinearFit with window (a, b) where a >= b, or where all x in the window are equal, returns
       Err(ComputeError::OutOfRange); a spectral Fit given a non-1D ACF or Raman given a non-6-component
       input returns Err(ComputeError::DimensionMismatch).
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
   - id: ac-017
     summary: Full check + test suite passes
     type: runtime
@@ -153,7 +168,8 @@ criteria:
       cargo fmt --all --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --all-features
       all succeed with the new compute::fit module and raw computes compiled in (BLAS env per project notes
       for --all-features).
-    status: pending
+    status: verified
+    last_checked: 2026-06-18
 ---
 
 # Acceptance criteria
