@@ -9,12 +9,17 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! use molrs::ff::typifier::mmff::MMFFTypifier;
-//!
-//! let typifier = MMFFTypifier::mmff94()?;
-//! let potentials = typifier.build(&mol)?;       // typify → to_frame → to_potentials
-//! let (energy, forces) = potentials.calc_energy_forces(&coords);
+//! use molrs::Atomistic;
+//! # fn main() -> Result<(), String> {
+//! let mol = Atomistic::new();                            // build or load your molecule
+//! let potentials = MMFFTypifier::mmff94()?.build(&mol)?; // typify → to_frame → to_potentials
+//! let coords: Vec<f64> = Vec::new();                     // flat [x,y,z, ...]
+//! let (energy, _forces) = potentials.calc_energy_forces(&coords);
+//! println!("MMFF94 energy = {energy} kcal/mol");
+//! # Ok(())
+//! # }
 //! ```
 
 #![allow(clippy::type_complexity)]

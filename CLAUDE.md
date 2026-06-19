@@ -182,6 +182,10 @@ repo's docs for the Packmol-alignment workflow and associated conventions.
 
 CXX bridge to Atomiverse C++. Zero-copy I/O via `FrameView` (borrowed) into existing `write_xyz_frame`; owned `Frame` only built when persisting to MolRec (Zarr). Bridge generated from `#[cxx::bridge]` in `bridge.rs`. No raw pointers cross the boundary.
 
+### Consuming molrs from other projects
+
+See `docs/interop.md` for the two as-built paths — **native Rust** (depend on `molcrafts-molrs`, use `molrs::Frame` / `molrs::ff::ForceField` directly; what molpack does) and **Python/WASM** (the `molrs-ffi` handle API: `FrameRef` / `BlockRef` / `ForceFieldRef` / `SharedStore`) — plus the shared data contract: **uint** atom indices, the `atomi/atomj/is_14` pairs-block schema, `special_bonds` weights on `ForceField`, and the consumer-built `intramolecular_pairs` neighbour list.
+
 ## Critical Conventions
 
 - **Coordinate format**: Potentials use flat `[x0,y0,z0, x1,y1,z1, ...]` vectors (3N elements), not Nx3 matrices.
