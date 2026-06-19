@@ -15,7 +15,6 @@ One row per spec produced by `/mol:spec`. Newest on top.
 | 2026-06-08 | [molgraph-ecs-01-core](molgraph-ecs-01-core.md) | draft | molrs-core | MolGraph→ECS：图实例即 world(纯数据,无全局/scheduler/手创)；system 即吃 world 的自由函数(perceive_aromaticity(mol)…)；component=共享行序对齐稠密列+null 掩码(零拷贝/对齐/O(1)/句柄稳定)；零硬编码字段=引用内置 key 约定+直接访问+错即报错。chain molgraph-ecs 1/3(inversion 量级,breaking molrs) |
 | 2026-06-08 | [molgraph-ecs-02-pybind](molgraph-ecs-02-pybind.md) | draft | molrs-python | 暴露 ECS world 到 Python：entity 稳定句柄(int)+component 列零拷贝 numpy view(写穿)+system 模块自由函数(molrs.perceive_aromaticity(mol))+叶子可子类化+零拷贝 adopt(chain molgraph-ecs 2/3,依赖 01) |
 | 2026-06-08 | [molgraph-abstract-02-pybind](molgraph-abstract-02-pybind.md) | approved | molrs-python | Python 暴露反转层级：PyGraph 仅通用关系 API + 无字段 add_node，领域方法移到 PyAtomistic/PyCoarseGrain 叶子；向后兼容 molpy to_molrs/embed 不回归（chain molgraph-abstract 2/2，依赖 01） |
-| 2026-06-01 | [mmff94-etkdg-04-embed](mmff94-etkdg-04-embed.md) | code-complete | molrs-embed | 4D 嵌入 + ET 最小化 + MMFF 清理 + 重试,重写 generate_3d；删除/reshape 推迟（chain mmff94-etkdg 4/4） |
 | Date | Slug | Status | Owner crate(s) | Summary |
 |---|---|---|---|---|
 
