@@ -67,49 +67,6 @@ impl Default for ConformerOptions {
 }
 
 impl ConformerOptions {
-    /// Effective optimization step budget.
-    pub(crate) fn effective_max_steps(&self) -> usize {
-        if self.max_steps > 0 {
-            return self.max_steps;
-        }
-        match self.speed {
-            ConformerSpeed::Fast => 120,
-            ConformerSpeed::Medium => 260,
-            ConformerSpeed::Better => 520,
-        }
-    }
-
-    /// Coarse minimization steps.
-    pub(crate) fn coarse_steps(&self) -> usize {
-        (self.effective_max_steps() * 35 / 100).max(20)
-    }
-
-    /// Final minimization steps.
-    pub(crate) fn final_steps(&self) -> usize {
-        (self.effective_max_steps() * 50 / 100).max(20)
-    }
-
-    /// Rotor search attempts.
-    pub(crate) fn rotor_attempts(&self, n_rot_bonds: usize) -> usize {
-        if n_rot_bonds == 0 {
-            return 0;
-        }
-        match self.speed {
-            ConformerSpeed::Fast => (n_rot_bonds * 4).max(8),
-            ConformerSpeed::Medium => (n_rot_bonds * 8).max(20),
-            ConformerSpeed::Better => (n_rot_bonds * 16).max(40),
-        }
-    }
-
-    /// Maximum per-step rotor perturbation (radians).
-    pub(crate) fn rotor_max_delta(&self) -> f64 {
-        match self.speed {
-            ConformerSpeed::Fast => std::f64::consts::PI / 5.0,
-            ConformerSpeed::Medium => std::f64::consts::PI / 3.0,
-            ConformerSpeed::Better => std::f64::consts::PI / 2.0,
-        }
-    }
-
     // --- ETKDG-internal knobs ------------------------------------------------
     //
     // The public `ConformerOptions` shape is intentionally frozen (constructed by

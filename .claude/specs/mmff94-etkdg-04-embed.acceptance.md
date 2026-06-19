@@ -47,7 +47,7 @@ criteria:
     evaluator_hint: ""
     pass_when: |
       cargo build succeeds with no references to builder.rs/optimizer.rs/distance_geometry.rs/rotor_search.rs/fragment_data.rs (the files are deleted); molrs_embed::EmbedAlgorithm and EmbedSpeed are no longer part of the public API; generate_3d retains its (&Atomistic, &EmbedOptions) -> Result<(Atomistic, EmbedReport), MolRsError> signature.
-    status: pending
+    status: verified
     last_checked: ""
   - id: ac-007
     summary: Degenerate inputs behave like RDKit

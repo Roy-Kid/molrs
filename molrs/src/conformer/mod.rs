@@ -15,32 +15,10 @@
 //! # }
 //! ```
 
-// Retired FragmentRules pipeline modules. `Conformer::generate` no longer
-// routes through these (it uses the ETKDG pipeline in `etkdg`), but they are
-// kept on disk because a concurrent work-stream has uncommitted changes here.
-// They are `#[allow(dead_code)]` at the module level so clippy stays quiet
-// without removing any code. See spec mmff94-etkdg-04-embed for the migration
-// plan.
-#[allow(dead_code)]
-mod builder;
-#[allow(dead_code)]
-mod distance_geometry;
 pub mod distgeom;
-#[allow(dead_code)]
-mod fragment_data;
-#[allow(dead_code)]
-mod geom;
 mod graph;
-#[allow(dead_code)]
-mod optimizer;
 mod options;
-#[allow(dead_code)]
-mod pipeline;
 mod report;
-#[allow(dead_code)]
-mod rotor_search;
-#[allow(dead_code)]
-mod stereo_guard;
 
 /// ETKDGv3 conformer-embedding pipeline (the active [`Conformer`] backend).
 pub mod etkdg;
