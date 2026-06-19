@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use molrs::system::molgraph::PropValue;
 use molrs::{AtomId, Atomistic};
 
+use crate::ff::mmff::energy::params as eparams;
 use crate::ff::mmff::{MmffMolProperties, MmffVariant};
 
 use super::classify::{
@@ -120,6 +121,37 @@ pub(crate) fn annotate_mmff(mol: &Atomistic, params: &MMFFParams) -> Result<Atom
             .map_err(|e| e.to_string())?;
         out.set_angle_prop(id, "stbn_type", label)
             .map_err(|e| e.to_string())?;
+        // Bake per-instance numeric params (table → equivalence → empirical),
+        // resolved exactly as the RDKit-validated energy path does. `theta0`
+        // comes back in degrees; the angle/stretch-bend kernels consume radians.
+        let (ka, theta0) = eparams::angle_params(&topo, &types_u8, ia, ib, ic)
+            .map(|p| (p.ka, p.theta0.to_radians()))
+            .unwrap_or((0.0, 0.0));
+        out.set_angle_prop(id, "ka", ka)
+            .map_err(|e| e.to_string())?;
+        out.set_angle_prop(id, "theta0", theta0)
+            .map_err(|e| e.to_string())?;
+        // Stretch-bend force constants — `stretch_bend_params` carries the
+        // `dfsb` period-row default fallback that the shared-table path lacked
+        // (the benzene `mmff_stbn: unknown` blocker). The two reference bond
+        // lengths are per-bond r0, taken straight from the bond resolver.
+        let (kba_ijk, kba_kji) = eparams::stretch_bend_params(&topo, &types_u8, ia, ib, ic)
+            .map(|(s, _, _, _)| (s.kba_ijk, s.kba_kji))
+            .unwrap_or((0.0, 0.0));
+        let r0_ij = eparams::bond_params(&topo, &types_u8, ia, ib)
+            .map(|b| b.r0)
+            .unwrap_or(0.0);
+        let r0_kj = eparams::bond_params(&topo, &types_u8, ic, ib)
+            .map(|b| b.r0)
+            .unwrap_or(0.0);
+        out.set_angle_prop(id, "kba_ijk", kba_ijk)
+            .map_err(|e| e.to_string())?;
+        out.set_angle_prop(id, "kba_kji", kba_kji)
+            .map_err(|e| e.to_string())?;
+        out.set_angle_prop(id, "r0_ij", r0_ij)
+            .map_err(|e| e.to_string())?;
+        out.set_angle_prop(id, "r0_kj", r0_kj)
+            .map_err(|e| e.to_string())?;
     }
 
     // 5. Dihedrals: classify + label.
@@ -139,6 +171,18 @@ pub(crate) fn annotate_mmff(mol: &Atomistic, params: &MMFFParams) -> Result<Atom
             type_of(d)
         );
         out.set_dihedral_prop(id, "type", label)
+            .map_err(|e| e.to_string())?;
+        // Bake per-instance Fourier coefficients (table → empirical), resolved
+        // via the RDKit-validated energy path; kernel reads the columns.
+        let (v1, v2, v3) =
+            eparams::torsion_params(MmffVariant::Mmff94, &topo, &types_u8, ia, ib, ic, il)
+                .map(|t| (t.v1, t.v2, t.v3))
+                .unwrap_or((0.0, 0.0, 0.0));
+        out.set_dihedral_prop(id, "v1", v1)
+            .map_err(|e| e.to_string())?;
+        out.set_dihedral_prop(id, "v2", v2)
+            .map_err(|e| e.to_string())?;
+        out.set_dihedral_prop(id, "v3", v3)
             .map_err(|e| e.to_string())?;
     }
 
@@ -175,12 +219,19 @@ pub(crate) fn annotate_mmff(mol: &Atomistic, params: &MMFFParams) -> Result<Atom
         ) else {
             continue;
         };
+        // Per-centre out-of-plane force constant (shared by all three Wilson
+        // permutations — the OOP lookup is symmetric in the peripheral atoms),
+        // resolved via the RDKit-validated energy path; kernel reads the column.
+        let koop =
+            eparams::oop_koop(MmffVariant::Mmff94, &types_u8, a, center, b, c).unwrap_or(0.0);
         // Three Wilson permutations (i, k, l) with the centre fixed in atomj.
         for &(i, k, l) in &[(a, b, c), (a, c, b), (b, c, a)] {
             let id = out
                 .add_improper(atom_ids[i], center_id, atom_ids[k], atom_ids[l])
                 .map_err(|e| e.to_string())?;
             out.set_improper_prop(id, "type", label.clone())
+                .map_err(|e| e.to_string())?;
+            out.set_improper_prop(id, "koop", koop)
                 .map_err(|e| e.to_string())?;
         }
     }

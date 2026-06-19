@@ -1,7 +1,5 @@
 //! MMFF94 torsional rotation: E = 0.5*(V1*(1+cos phi) + V2*(1-cos 2phi) + V3*(1+cos 3phi))
 
-use std::collections::HashMap;
-
 use crate::ff::forcefield::Params;
 use crate::ff::potential::Potential;
 use crate::ff::potential::geometry::{
@@ -54,10 +52,12 @@ impl Potential for MMFFTorsion {
 
 pub fn mmff_torsion_ctor(
     _sp: &Params,
-    tp: &[(&str, &Params)],
+    _tp: &[(&str, &Params)],
     frame: &Frame,
 ) -> Result<Box<dyn Potential>, String> {
-    let type_map: HashMap<&str, &Params> = tp.iter().copied().collect();
+    // Per-instance parameters: the MMFF typifier baked v1/v2/v3 onto each
+    // dihedral (table → empirical). This kernel only reads the columns and
+    // evaluates — no force-field-specific resolution lives here.
     let block = frame
         .get("dihedrals")
         .ok_or("mmff_torsion: missing \"dihedrals\"")?;
@@ -65,7 +65,15 @@ pub fn mmff_torsion_ctor(
     let jc = block.get_uint("atomj").ok_or("missing atomj")?;
     let kc = block.get_uint("atomk").ok_or("missing atomk")?;
     let lc = block.get_uint("atoml").ok_or("missing atoml")?;
-    let tc = block.get_string("type").ok_or("missing type")?;
+    let v1c = block
+        .get_float("v1")
+        .ok_or("mmff_torsion: missing \"v1\" column (typifier did not bake torsion params)")?;
+    let v2c = block
+        .get_float("v2")
+        .ok_or("mmff_torsion: missing \"v2\" column (typifier did not bake torsion params)")?;
+    let v3c = block
+        .get_float("v3")
+        .ok_or("mmff_torsion: missing \"v3\" column (typifier did not bake torsion params)")?;
 
     let n = ic.len();
     let (mut ai, mut aj, mut ak, mut al) = (
@@ -81,16 +89,13 @@ pub fn mmff_torsion_ctor(
     );
 
     for idx in 0..n {
-        let p = type_map
-            .get(tc[idx].as_str())
-            .ok_or_else(|| format!("mmff_torsion: unknown '{}'", tc[idx]))?;
         ai.push(ic[idx] as usize);
         aj.push(jc[idx] as usize);
         ak.push(kc[idx] as usize);
         al.push(lc[idx] as usize);
-        v1.push(p.get("v1").ok_or("missing v1")? as F);
-        v2.push(p.get("v2").ok_or("missing v2")? as F);
-        v3.push(p.get("v3").ok_or("missing v3")? as F);
+        v1.push(v1c[idx] as F);
+        v2.push(v2c[idx] as F);
+        v3.push(v3c[idx] as F);
     }
     Ok(Box::new(MMFFTorsion {
         atom_i: ai,
