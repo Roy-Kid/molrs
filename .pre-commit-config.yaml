@@ -37,32 +37,32 @@ repos:
 
       # ─── ci-rust.yml::clippy ──────────────────────────────────────────────
       # CI runs:
-      #   cargo clippy --workspace --all-targets --locked -- -D warnings
-      #   cargo clippy -p molcrafts-molrs --all-targets --features full --locked -- -D warnings
+      #   cargo clippy --workspace --all-targets -- -D warnings
+      #   cargo clippy -p molcrafts-molrs --all-targets --features full -- -D warnings
       - id: cargo-clippy-workspace
         name: cargo clippy --workspace --all-targets (-D warnings)
-        entry: cargo clippy --workspace --all-targets --locked -- -D warnings
+        entry: cargo clippy --workspace --all-targets -- -D warnings
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: cargo-clippy-facade-full
         name: cargo clippy facade --features full (-D warnings)
-        entry: cargo clippy -p molcrafts-molrs --all-targets --features full --locked -- -D warnings
+        entry: cargo clippy -p molcrafts-molrs --all-targets --features full -- -D warnings
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: cargo-clippy-python
         name: cargo clippy (molrs-python)
-        entry: bash -c 'cd molrs-python && cargo clippy --locked -- -D warnings'
+        entry: bash -c 'cd molrs-python && cargo clippy -- -D warnings'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: cargo-clippy-wasm
         name: cargo clippy (molrs-wasm)
-        entry: bash -c 'cd molrs-wasm && cargo clippy --locked -- -D warnings'
+        entry: bash -c 'cd molrs-wasm && cargo clippy -- -D warnings'
         language: system
         pass_filenames: false
         types: [rust]
@@ -81,8 +81,8 @@ repos:
         stages: [pre-push]
 
       - id: cargo-test-workspace
-        name: cargo test --workspace --lib --tests --examples --locked
-        entry: cargo test --workspace --lib --tests --examples --locked
+        name: cargo test --workspace --lib --tests --examples
+        entry: cargo test --workspace --lib --tests --examples
         language: system
         pass_filenames: false
         types: [rust]
@@ -90,7 +90,7 @@ repos:
 
       - id: cargo-test-facade-full
         name: cargo test facade --features "full filesystem"
-        entry: cargo test -p molcrafts-molrs --lib --tests --features "full filesystem" --locked
+        entry: cargo test -p molcrafts-molrs --lib --tests --features "full filesystem"
         language: system
         pass_filenames: false
         types: [rust]
@@ -98,7 +98,7 @@ repos:
 
       - id: cargo-bench-build
         name: cargo bench --no-run (core_benchmarks)
-        entry: cargo bench -p molcrafts-molrs --bench core_benchmarks --no-run --locked
+        entry: cargo bench -p molcrafts-molrs --bench core_benchmarks --no-run
         language: system
         pass_filenames: false
         types: [rust]
@@ -116,7 +116,7 @@ repos:
       # ─── ci-capi.yml ──────────────────────────────────────────────────────
       - id: capi-cargo-build
         name: cargo build (molrs-capi, generates header via cbindgen)
-        entry: cargo build --manifest-path molrs-capi/Cargo.toml --locked
+        entry: cargo build --manifest-path molrs-capi/Cargo.toml
         language: system
         pass_filenames: false
         types: [rust]

@@ -47,8 +47,12 @@ AGENTS.md
 !molrs-python/tests/data/*.xyz
 !molrs-python/tests/data/*.pdb
 
-# WASM lock file (library crate)
-molrs-wasm/Cargo.lock
+# Lock files are not version-controlled (library crates; CI resolves fresh,
+# no --locked). Keeps dependency pins from drifting against the manifests.
+Cargo.lock
+**/Cargo.lock
+uv.lock
+**/uv.lock
 
 # Generated bindings and packaging artifacts
 site/
