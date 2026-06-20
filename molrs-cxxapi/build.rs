@@ -75,6 +75,10 @@ pub mod ffi {
         );
         fn molrec_write_zarr(path: &str, rec: &AtvMolRec);
         fn molrec_read_zarr_first_frame(path: &str) -> Box<FrameRef>;
+        // Read the first frame of an (ext)XYZ file into a materialize-ready
+        // FrameRef (atoms.{x,y,z,type} + simbox). `type` is derived from the
+        // species/element symbol column (Z). All XYZ parsing lives in molrs.
+        fn xyz_read_first_frame(path: &str) -> Box<FrameRef>;
         fn molrec_print_summary(rec: &AtvMolRec);
 
         // Mulliken stays in C++ — depends on electronic structure context (basis
