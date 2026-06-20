@@ -309,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "flate2",
  "libm",
@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "molcrafts-molrs-ffi"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "molcrafts-molrs",
  "slotmap",
