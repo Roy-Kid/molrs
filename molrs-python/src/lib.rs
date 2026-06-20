@@ -16,6 +16,7 @@
 //! | `NeighborList`       | [`PyNeighborList`]| Query result with pair indices + distances |
 //! | `Atomistic`          | [`PyAtomistic`]   | All-atom molecular graph                   |
 //! | `MMFFTypifier`       | [`PyMMFFTypifier`]| MMFF94 atom-type assignment                |
+//! | `OplsTypifier`       | [`PyOplsTypifier`]| OPLS-AA atom-type + bonded assignment      |
 //! | `Potentials`         | [`PyPotentials`]  | Compiled energy/force evaluator            |
 //! | `RDF` / `MSD` / `Cluster` |              | Structural analysis                        |
 //!
@@ -61,7 +62,9 @@ mod conformer;
 use conformer::{PyConformer, PyConformerReport, PyConformerStageReport};
 
 mod forcefield;
-use forcefield::{PyForceField, PyLBFGS, PyMMFFTypifier, PyOptReport, PyPotentials};
+use forcefield::{
+    PyForceField, PyLBFGS, PyMMFFTypifier, PyOplsTypifier, PyOptReport, PyPotentials,
+};
 
 mod compute;
 use compute::{
@@ -208,6 +211,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Force field
     m.add_class::<PyForceField>()?;
     m.add_class::<PyMMFFTypifier>()?;
+    m.add_class::<PyOplsTypifier>()?;
     m.add_class::<PyPotentials>()?;
     m.add_class::<PyOptReport>()?;
     m.add_class::<PyLBFGS>()?;
