@@ -182,9 +182,14 @@ repo's docs for the Packmol-alignment workflow and associated conventions.
 
 CXX bridge to Atomiverse C++. Zero-copy I/O via `FrameView` (borrowed) into existing `write_xyz_frame`; owned `Frame` only built when persisting to MolRec (Zarr). Bridge generated from `#[cxx::bridge]` in `bridge.rs`. No raw pointers cross the boundary.
 
+### Consuming molrs from other projects
+
+See `docs/interop.md` for the two as-built paths — **native Rust** (depend on `molcrafts-molrs`, use `molrs::Frame` / `molrs::ff::ForceField` directly; what molpack does) and **Python/WASM** (the `molrs-ffi` handle API: `FrameRef` / `BlockRef` / `ForceFieldRef` / `SharedStore`) — plus the shared data contract: **uint** atom indices, the `atomi/atomj/is_14` pairs-block schema, `special_bonds` weights on `ForceField`, and the consumer-built `intramolecular_pairs` neighbour list.
+
 ## Critical Conventions
 
 - **Coordinate format**: Potentials use flat `[x0,y0,z0, x1,y1,z1, ...]` vectors (3N elements), not Nx3 matrices.
+- **Angles are radians internally**: every angle-valued force-field parameter — angle `theta0`, dihedral/improper phase `d`/`phi`/`chi0` — is stored and consumed in **radians**. Kernel constructors do **no** angle-unit conversion; each *reader* normalizes user-facing degree inputs to radians at its boundary (`.to_radians()`), exactly as length/energy are normalized there (LAMMPS `*.ff` deg→rad, MMFF94 XML deg→rad; the OPLS/GROMACS reader is already radians). The molrs-native `<ForceField>` XML is an internal serialization and is therefore already radians.
 - **`Cell<f64>` is NOT Sync**: Use `AtomicU64` with `f64::to_bits()`/`f64::from_bits()` for interior mutability in Sync contexts.
 
 Packmol-port specific conventions (gradient sign, two-scale contract, LEFT

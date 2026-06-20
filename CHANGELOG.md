@@ -5,6 +5,25 @@ All notable changes to molrs are recorded here. This project follows
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- **Force-field angles are now radians internally.** Angle `theta0`, dihedral/
+  improper phase `d`/`phi`/`chi0` are stored and consumed in radians; kernel
+  constructors no longer call `.to_radians()`, and each reader normalizes
+  user-facing degree input at its boundary (LAMMPS `*.ff` deg→rad, MMFF94 XML
+  deg→rad; the OPLS/GROMACS reader was already radians). Fixes a double-conversion
+  that produced ~100+ kcal/mol of spurious angle energy on OPLS-typified
+  structures at their reference angle.
+
+### Release notes (single-crate merge)
+
+- The merge of the former seven member crates into the single `molcrafts-molrs`
+  crate is a **breaking** change and takes a coordinated minor/major version bump
+  when released. The six former sub-crate crates.io names are **not** yanked, so
+  molpack's `0.1.0` exact pin keeps resolving; the molpack migration to the merged
+  crate is tracked as an out-of-tree follow-up. Do not publish/tag from the
+  current working state.
+
 ## [0.1.4] - 2026-06-18
 
 ### Added

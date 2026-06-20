@@ -83,6 +83,7 @@ from .molrs import (
     ConformerStageReport,
     # Force field
     MMFFTypifier,
+    OplsTypifier,
     ForceField,
     Potentials,
     OptReport,
@@ -243,6 +244,7 @@ __all__ = [
     "ConformerReport",
     "ConformerStageReport",
     "MMFFTypifier",
+    "OplsTypifier",
     "ForceField",
     "Style",
     "AtomStyle",

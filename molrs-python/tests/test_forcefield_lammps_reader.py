@@ -6,6 +6,8 @@ these tests only assert the PyO3 surface — that ``read_lammps_forcefield`` /
 FFI capsule a consumer like molpack resolves) and that errors map to ``ValueError``.
 """
 
+import math
+
 import pytest
 
 import molrs
@@ -43,10 +45,11 @@ def test_lammps_units_pass_through_binding():
     bt = bond.get_type_by_name("c3-c3")
     assert bt.params["k"] == pytest.approx(457.78)
     assert bt.params["r0"] == pytest.approx(1.5354)
-    # angle theta0 stays in degrees; pair ε/σ pass through.
+    # angle theta0 is normalized deg→rad at the reader boundary (commit 6aa9e51,
+    # "angles internal-radians"); pair ε/σ pass through.
     angle = ff.get_style("angle", "harmonic")
     at = angle.get_type_by_name("c3-c3-oh")
-    assert at.params["theta0"] == pytest.approx(109.66)
+    assert at.params["theta0"] == pytest.approx(math.radians(109.66))
     lj = ff.get_style("pair", "lj/cut")
     assert lj.get_type_by_name("c3").params["epsilon"] == pytest.approx(0.1078)
 

@@ -1,6 +1,8 @@
 //! MMFF94 angle bending and stretch-bend coupling kernels.
-
-use std::collections::HashMap;
+//!
+//! `theta0` is consumed in radians; the MMFF typifier normalizes the XML's
+//! degree reference angles to radians at the reader boundary
+//! (`forcefield::xml::read_mmff_params_xml_str`).
 
 use crate::ff::forcefield::Params;
 use crate::ff::potential::Potential;
@@ -49,17 +51,24 @@ impl Potential for MMFFAngleBend {
 
 pub fn mmff_angle_ctor(
     _sp: &Params,
-    tp: &[(&str, &Params)],
+    _tp: &[(&str, &Params)],
     frame: &Frame,
 ) -> Result<Box<dyn Potential>, String> {
-    let type_map: HashMap<&str, &Params> = tp.iter().copied().collect();
+    // Per-instance parameters: the MMFF typifier baked ka and theta0 (radians)
+    // onto each angle (table → equivalence → empirical). This kernel only reads
+    // the columns and evaluates — no force-field-specific resolution lives here.
     let block = frame
         .get("angles")
         .ok_or("mmff_angle: missing \"angles\" block")?;
     let ic = block.get_uint("atomi").ok_or("missing atomi")?;
     let jc = block.get_uint("atomj").ok_or("missing atomj")?;
     let kc = block.get_uint("atomk").ok_or("missing atomk")?;
-    let tc = block.get_string("type").ok_or("missing type")?;
+    let kac = block
+        .get_float("ka")
+        .ok_or("mmff_angle: missing \"ka\" column (typifier did not bake angle params)")?;
+    let th0c = block
+        .get_float("theta0")
+        .ok_or("mmff_angle: missing \"theta0\" column (typifier did not bake angle params)")?;
 
     let n = ic.len();
     let (mut ai, mut aj, mut ak, mut ka, mut th0) = (
@@ -71,14 +80,11 @@ pub fn mmff_angle_ctor(
     );
 
     for idx in 0..n {
-        let p = type_map
-            .get(tc[idx].as_str())
-            .ok_or_else(|| format!("mmff_angle: unknown '{}'", tc[idx]))?;
         ai.push(ic[idx] as usize);
         aj.push(jc[idx] as usize);
         ak.push(kc[idx] as usize);
-        ka.push(p.get("ka").ok_or("missing 'ka'")? as F);
-        th0.push((p.get("theta0").ok_or("missing 'theta0'")? as F).to_radians());
+        ka.push(kac[idx] as F);
+        th0.push(th0c[idx] as F); // radians
     }
     Ok(Box::new(MMFFAngleBend {
         atom_i: ai,
@@ -150,26 +156,32 @@ impl Potential for MMFFStretchBend {
 
 pub fn mmff_stbn_ctor(
     _sp: &Params,
-    tp: &[(&str, &Params)],
+    _tp: &[(&str, &Params)],
     frame: &Frame,
 ) -> Result<Box<dyn Potential>, String> {
-    let type_map: HashMap<&str, &Params> = tp.iter().copied().collect();
+    // Per-instance parameters: the MMFF typifier baked the stretch-bend force
+    // constants (kba_ijk/kba_kji, via the dfsb period-row default-row fallback
+    // that the shared-table path lacked) plus the two reference bond lengths and
+    // theta0 (radians) onto each angle. This kernel only reads the columns.
     let block = frame.get("angles").ok_or("mmff_stbn: missing \"angles\"")?;
     let ic = block.get_uint("atomi").ok_or("missing atomi")?;
     let jc = block.get_uint("atomj").ok_or("missing atomj")?;
     let kc = block.get_uint("atomk").ok_or("missing atomk")?;
-    let tc = block.get_string("stbn_type").ok_or("missing stbn_type")?;
-    // Per-angle reference bond lengths, merged onto the angles block by the
-    // typifier (`merge_stbn_r0`) — they are per-bond params, not per-stbn-type.
+    let kba_ijk_c = block.get_float("kba_ijk").ok_or(
+        "mmff_stbn: missing \"kba_ijk\" column (typifier did not bake stretch-bend params)",
+    )?;
+    let kba_kji_c = block.get_float("kba_kji").ok_or(
+        "mmff_stbn: missing \"kba_kji\" column (typifier did not bake stretch-bend params)",
+    )?;
     let r0ij = block
         .get_float("r0_ij")
-        .ok_or("mmff_stbn: missing \"r0_ij\" column (merge_stbn_r0 not run)")?;
+        .ok_or("mmff_stbn: missing \"r0_ij\" column (typifier did not bake stretch-bend params)")?;
     let r0kj = block
         .get_float("r0_kj")
-        .ok_or("mmff_stbn: missing \"r0_kj\" column (merge_stbn_r0 not run)")?;
-    let th0 = block
-        .get_float("theta0")
-        .ok_or("mmff_stbn: missing \"theta0\" column (merge_stbn_r0 not run)")?;
+        .ok_or("mmff_stbn: missing \"r0_kj\" column (typifier did not bake stretch-bend params)")?;
+    let th0 = block.get_float("theta0").ok_or(
+        "mmff_stbn: missing \"theta0\" column (typifier did not bake stretch-bend params)",
+    )?;
 
     let n = ic.len();
     let mut pot = MMFFStretchBend {
@@ -183,19 +195,14 @@ pub fn mmff_stbn_ctor(
         theta0: Vec::with_capacity(n),
     };
     for idx in 0..n {
-        let p = type_map
-            .get(tc[idx].as_str())
-            .ok_or_else(|| format!("mmff_stbn: unknown '{}'", tc[idx]))?;
         pot.atom_i.push(ic[idx] as usize);
         pot.atom_j.push(jc[idx] as usize);
         pot.atom_k.push(kc[idx] as usize);
-        pot.kba_ijk
-            .push(p.get("kba_ijk").ok_or("missing kba_ijk")? as F);
-        pot.kba_kji
-            .push(p.get("kba_kji").ok_or("missing kba_kji")? as F);
+        pot.kba_ijk.push(kba_ijk_c[idx] as F);
+        pot.kba_kji.push(kba_kji_c[idx] as F);
         pot.r0_ij.push(r0ij[idx] as F);
         pot.r0_kj.push(r0kj[idx] as F);
-        pot.theta0.push((th0[idx] as F).to_radians());
+        pot.theta0.push(th0[idx] as F); // radians
     }
     Ok(Box::new(pot))
 }

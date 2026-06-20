@@ -3,7 +3,8 @@
 //! E(φ) = K·[1 + cos(n·φ − d)]
 //!
 //! `K` is the force constant (kcal/mol), `n` the integer multiplicity, and `d`
-//! the phase in degrees (LAMMPS `dihedral_style charmm` convention). The 1-4
+//! the phase in radians (readers normalize at their boundary; the LAMMPS
+//! `dihedral_style charmm` degree value is converted at read). The 1-4
 //! pair weight `w` is a non-bonded scaling factor handled by the pair term, not
 //! the torsion energy, so it is read but does not enter this kernel.
 
@@ -54,7 +55,7 @@ impl Potential for DihedralCharmm {
     }
 }
 
-/// Construct a [`DihedralCharmm`] from per-type params (`k`, `n`, `d` degrees)
+/// Construct a [`DihedralCharmm`] from per-type params (`k`, `n`, `d` radians)
 /// and a Frame's `"dihedrals"` block (`atomi/atomj/atomk/atoml/type`).
 pub fn dihedral_charmm_ctor(
     _sp: &Params,
@@ -94,7 +95,7 @@ pub fn dihedral_charmm_ctor(
         al.push(lc[idx] as usize);
         kk.push(p.get("k").ok_or("dihedral_charmm: missing k")? as F);
         nn.push(p.get("n").ok_or("dihedral_charmm: missing n")? as F);
-        dd.push((p.get("d").unwrap_or(0.0) as F).to_radians());
+        dd.push(p.get("d").unwrap_or(0.0) as F); // radians (normalized at read)
     }
     Ok(Box::new(DihedralCharmm {
         atom_i: ai,

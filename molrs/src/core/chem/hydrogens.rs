@@ -129,7 +129,15 @@ pub fn implicit_h_count(mol: &Atomistic, atom_id: AtomId) -> Option<u32> {
     //   [BH4-]  Z 5−(−1)=6 (C), valences [4], demand 0 → 4 H
     //   [OH-]   Z 8−(−1)=9 (F), valences [1], demand 0 → 1 H
     //   [NH2-]  Z 7−(−1)=8 (O), valences [2], demand 0 → 2 H
-    let formal_charge = atom.get_f64("formal_charge").unwrap_or(0.0).round() as i32;
+    // `formal_charge` is stored as an i32-typed column, so read it through the
+    // coercing `as_f64` (matching `bond_order_sum`'s order read); the strict
+    // `get_f64` only matches `PropValue::F64` and would silently miss the Int
+    // variant, treating every charged atom as neutral (e.g. protonating [N-]).
+    let formal_charge = atom
+        .get("formal_charge")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0)
+        .round() as i32;
 
     // Fold the charge into the element identity, then read that element's
     // valence list. An out-of-range shift (or an element with no valence
@@ -372,6 +380,49 @@ mod tests {
         assert_eq!(charged_atom_h("C", 0.0), 4, "methane C -> 4 H");
         assert_eq!(charged_atom_h("O", 0.0), 2, "water O -> 2 H");
         assert_eq!(charged_atom_h("N", 0.0), 3, "ammonia N -> 3 H");
+    }
+
+    /// Like `charged_atom_h` but stores `formal_charge` as the canonical
+    /// **integer** column (`PropValue::Int`) — what the parsers and the i32-typed
+    /// graph schema actually emit. Guards the regression where `implicit_h_count`
+    /// read the charge via the strict `get_f64` (F64-only) and silently treated
+    /// every charged atom as neutral — e.g. protonating the sulfonimide [N-] in
+    /// TFSI/ANI and breaking antechamber's charge balance.
+    fn charged_atom_h_int(sym: &str, fc: i32) -> u32 {
+        let mut g = Atomistic::new();
+        let mut a = Atom::new();
+        a.set("element", sym);
+        a.set("formal_charge", fc); // i32 == type alias `I` → PropValue::Int
+        let id = g.add_atom(a);
+        implicit_h_count(&g, id).unwrap_or(0)
+    }
+
+    #[test]
+    fn test_int_formal_charge_parity() {
+        // Same expectations as `test_rdkit_charged_valence_parity`, but the
+        // charge is an Int prop (the real on-graph representation), not f64.
+        assert_eq!(charged_atom_h_int("N", -1), 2, "[NH2-] (int fc) -> 2 H");
+        assert_eq!(charged_atom_h_int("N", 1), 4, "[NH4+] (int fc) -> 4 H");
+        assert_eq!(charged_atom_h_int("O", -1), 1, "[OH-] (int fc) -> 1 H");
+        assert_eq!(charged_atom_h_int("C", 1), 3, "[CH3+] (int fc) -> 3 H");
+        assert_eq!(charged_atom_h_int("N", 0), 3, "neutral N -> 3 H");
+    }
+
+    #[test]
+    fn test_sulfonimide_anion_not_protonated() {
+        // The exact TFSI/ANI failure: a deprotonated sulfonimide N (two single
+        // bonds, int formal_charge -1) must add NO hydrogen. Before the fix the
+        // Int charge was missed → N read as neutral (valence 3, demand 2) → 1 H.
+        let mut g = Atomistic::new();
+        let mut n_atom = Atom::new();
+        n_atom.set("element", "N");
+        n_atom.set("formal_charge", -1_i32);
+        let n = g.add_atom(n_atom);
+        let s1 = g.add_atom(atom("S"));
+        let s2 = g.add_atom(atom("S"));
+        bond_with_order(&mut g, n, s1, 1.0);
+        bond_with_order(&mut g, n, s2, 1.0);
+        assert_eq!(h_at(&g, n), 0, "sulfonimide [N-] with two bonds -> 0 H");
     }
 
     /// Helper: implicit-H on `atom_id` of a built graph.

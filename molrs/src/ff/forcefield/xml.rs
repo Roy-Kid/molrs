@@ -377,7 +377,10 @@ fn parse_mmff_angles(ff: &mut ForceField, node: &roxmltree::Node) -> Result<(), 
         let t2 = attr_f64(&angle, "type2")?;
         let t3 = attr_f64(&angle, "type3")?;
         let ka = attr_f64(&angle, "ka")?;
-        let theta0 = attr_f64(&angle, "theta0")?;
+        // MMFF94 XML stores reference angles in degrees; normalize to radians at
+        // this reader boundary so the `mmff_angle` / `mmff_stbn` kernels consume
+        // radians directly (molrs internal-radians convention).
+        let theta0 = attr_f64(&angle, "theta0")?.to_radians();
 
         types.push(AngleType {
             name: format!("{}_{}_{}_{}", at as u32, t1 as u32, t2 as u32, t3 as u32),
@@ -622,7 +625,11 @@ mod tests {
         let types = ff.get_angletypes();
         assert_eq!(types.len(), 1);
         assert_eq!(types[0].params.get("ka"), Some(0.608));
-        assert_eq!(types[0].params.get("theta0"), Some(109.608));
+        // theta0 is normalized to radians at the reader boundary.
+        assert_eq!(
+            types[0].params.get("theta0"),
+            Some(109.608_f64.to_radians())
+        );
     }
 
     #[test]

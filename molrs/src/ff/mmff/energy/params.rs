@@ -50,21 +50,21 @@ pub(crate) struct BondParams {
 
 /// MMFF resolved angle parameters.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct AngleParams {
+pub(crate) struct AngleParams {
     pub theta0: f64,
     pub ka: f64,
 }
 
 /// MMFF resolved stretch-bend force constants (`kba_ijk`, `kba_kji`).
 #[derive(Clone, Copy, Debug)]
-pub(super) struct StbnParams {
+pub(crate) struct StbnParams {
     pub kba_ijk: f64,
     pub kba_kji: f64,
 }
 
 /// MMFF resolved torsion Fourier coefficients.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct TorParams {
+pub(crate) struct TorParams {
     pub v1: f64,
     pub v2: f64,
     pub v3: f64,
@@ -390,7 +390,7 @@ fn bond_empirical(topo: &Topo, i: usize, j: usize) -> Option<BondParams> {
 // --- angle bend (explicit + empirical) -----------------------------------
 
 /// RDKit `getMMFFAngleBendParams`.
-pub(super) fn angle_params(
+pub(crate) fn angle_params(
     topo: &Topo,
     types: &[u8],
     i: usize,
@@ -488,7 +488,7 @@ fn angle_empirical(
 
 /// RDKit `getMMFFStretchBendParams`. Returns the resolved params plus the
 /// two bond rest lengths and the angle theta0 (needed by the energy term).
-pub(super) fn stretch_bend_params(
+pub(crate) fn stretch_bend_params(
     topo: &Topo,
     types: &[u8],
     i: usize,
@@ -580,7 +580,7 @@ fn dfsb_lookup(an_i: u8, an_j: u8, an_k: u8) -> (bool, Option<(f64, f64)>) {
 // --- out-of-plane --------------------------------------------------------
 
 /// RDKit `getMMFFOopBendParams` (no empirical fallback; term excluded if absent).
-pub(super) fn oop_koop(
+pub(crate) fn oop_koop(
     variant: MmffVariant,
     types: &[u8],
     i: usize,
@@ -594,7 +594,7 @@ pub(super) fn oop_koop(
 // --- torsion (explicit + empirical) --------------------------------------
 
 /// RDKit `getMMFFTorsionParams`. Returns `None` when all coefficients vanish.
-pub(super) fn torsion_params(
+pub(crate) fn torsion_params(
     variant: MmffVariant,
     topo: &Topo,
     types: &[u8],

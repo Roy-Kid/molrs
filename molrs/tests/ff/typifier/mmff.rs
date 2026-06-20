@@ -146,3 +146,43 @@ fn methane_typifies_then_build_fails_on_stretch_bend() {
     assert!(e.is_finite(), "energy not finite: {e}");
     assert!(forces.iter().all(|f| f.is_finite()), "non-finite force");
 }
+
+/// Planar benzene: 6 aromatic carbons (type 37) + 6 hydrogens (type 5).
+fn benzene() -> Atomistic {
+    let mut mol = Atomistic::new();
+    let r_c = 1.39;
+    let r_h = 2.47;
+    let (mut cs, mut hs) = (Vec::new(), Vec::new());
+    for i in 0..6 {
+        let ang = std::f64::consts::PI / 3.0 * i as f64;
+        cs.push(mol.add_atom_xyz("C", r_c * ang.cos(), r_c * ang.sin(), 0.0));
+        hs.push(mol.add_atom_xyz("H", r_h * ang.cos(), r_h * ang.sin(), 0.0));
+    }
+    for i in 0..6 {
+        bond(&mut mol, cs[i], cs[(i + 1) % 6], 1.5); // aromatic ring bond
+        bond(&mut mol, cs[i], hs[i], 1.0);
+    }
+    mol
+}
+
+/// RED before per-instance migration: benzene's stretch-bend type `1_37_37_37`
+/// has no explicit STBN row, so the shared-table kernel path errored with
+/// `mmff_stbn: unknown '1_37_37_37'`. After the typifier bakes per-instance
+/// stretch-bend params via the RDKit-validated `energy::params` resolver (which
+/// has the dfsb default-row fallback), build() must resolve every MMFF term.
+#[test]
+fn benzene_build_resolves_stretch_bend() {
+    let t = typifier();
+    let mol = benzene();
+    let pots = t
+        .build(&mol)
+        .expect("benzene build should resolve all MMFF terms (incl. stretch-bend)");
+    let frame = t.typify(&mol).expect("typify").to_frame();
+    let coords = molrs::ff::potential::extract_coords(&frame).expect("coords");
+    let (e, forces) = pots.calc_energy_forces(&coords);
+    assert!(e.is_finite(), "benzene energy not finite: {e}");
+    assert!(
+        forces.iter().all(|f| f.is_finite()),
+        "non-finite benzene force"
+    );
+}
