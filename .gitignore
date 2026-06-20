@@ -68,3 +68,5 @@ molrs-python/python/molrs/*.dylib.dSYM/
 molrs-cxxapi/src/bridge.rs
 
 .claude/worktrees/
+Cargo.lock
+uv.lock
