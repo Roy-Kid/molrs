@@ -5,6 +5,22 @@ All notable changes to molrs are recorded here. This project follows
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-21
+
+No library changes — tooling/CI only (no Rust, Python, or WASM API surface change).
+
+### Removed
+
+- Stop version-controlling lockfiles (`Cargo.lock`, `uv.lock`); CI and the git
+  hooks resolve dependencies fresh (dropped `cargo --locked`).
+
+### Changed
+
+- CI: the benchmark workflow publishes perf history only on the canonical
+  `MolCrafts/molrs` repo (forks lack the gh-pages branch).
+
+## [0.1.5] - 2026-06-20
+
 ### Changed (breaking)
 
 - **Force-field angles are now radians internally.** Angle `theta0`, dihedral/
@@ -14,15 +30,6 @@ All notable changes to molrs are recorded here. This project follows
   deg→rad; the OPLS/GROMACS reader was already radians). Fixes a double-conversion
   that produced ~100+ kcal/mol of spurious angle energy on OPLS-typified
   structures at their reference angle.
-
-### Release notes (single-crate merge)
-
-- The merge of the former seven member crates into the single `molcrafts-molrs`
-  crate is a **breaking** change and takes a coordinated minor/major version bump
-  when released. The six former sub-crate crates.io names are **not** yanked, so
-  molpack's `0.1.0` exact pin keeps resolving; the molpack migration to the merged
-  crate is tracked as an out-of-tree follow-up. Do not publish/tag from the
-  current working state.
 
 ## [0.1.4] - 2026-06-18
 
