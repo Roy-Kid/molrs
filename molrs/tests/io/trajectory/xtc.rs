@@ -5,7 +5,7 @@
 //! checks use the `1/precision` tolerance. Cross-format checks against the GRO
 //! structure and the TRR trajectory anchor decoded coordinates to ground truth.
 
-use molrs::io::reader::TrajReader;
+use molrs::io::reader::{FrameReader, TrajReader};
 use molrs::io::trajectory::trr::read_trr;
 use molrs::io::trajectory::xtc::{open_xtc, read_xtc, write_xtc};
 use molrs::store::frame::Frame;
@@ -126,6 +126,38 @@ fn test_xtc_random_access_matches_sequential() {
             for (a, b) in xs_a.iter().zip(xs_b.iter()) {
                 assert!((a - b).abs() < 1e-9, "{}: frame {} x mismatch", name, n);
             }
+        }
+    }
+}
+
+/// Index-free streaming (`FrameReader::read_frame`) matches the full read, and
+/// `rewind_stream` replays — the path that scales to TB-size XTC.
+#[test]
+fn test_xtc_streaming_iter_and_rewind() {
+    for path in all_xtc_files() {
+        let name = file_name(&path).to_owned();
+        let full = read_xtc(&path).expect("full read");
+        let mut reader = open_xtc(&path).expect("open");
+
+        let mut count = 0usize;
+        while let Some(frame) = reader.read_frame().expect("stream frame") {
+            let xs = col(&frame, "x");
+            let xs_ref = col(&full[count], "x");
+            assert_eq!(xs.len(), xs_ref.len(), "{}: frame {} length", name, count);
+            for (a, b) in xs.iter().zip(xs_ref.iter()) {
+                assert!((a - b).abs() < 1e-9, "{}: frame {} x mismatch", name, count);
+            }
+            count += 1;
+        }
+        assert_eq!(count, full.len(), "{}: streamed frame count", name);
+
+        reader.rewind_stream().expect("rewind");
+        let again = reader.read_frame().expect("post-rewind frame");
+        assert!(again.is_some(), "{}: rewind yielded no frame", name);
+        let xs0 = col(&again.unwrap(), "x");
+        let xs0_ref = col(&full[0], "x");
+        for (a, b) in xs0.iter().zip(xs0_ref.iter()) {
+            assert!((a - b).abs() < 1e-9, "{}: rewound frame 0 mismatch", name);
         }
     }
 }

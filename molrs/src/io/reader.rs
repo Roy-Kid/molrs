@@ -176,6 +176,34 @@ pub fn open_seekable<P: AsRef<Path>>(path: P) -> Result<Box<dyn ReadSeek>> {
     }
 }
 
+/// Read-buffer capacity for sequential streaming of large trajectories.
+///
+/// A frame of a few-thousand-atom system is tens of KB; the XDR parser pulls it
+/// out in many tiny `read_exact` calls. With the default 8 KB buffer that is
+/// several `read()` syscalls *per frame*, and across the ~10⁷ frames of a
+/// TB-scale GROMACS `prod.trr` the per-syscall latency on a striped/networked
+/// filesystem (Lustre) dominates wall-clock. A multi-MB buffer collapses that to
+/// a handful of large sequential reads per refill.
+pub const STREAM_BUF_CAP: usize = 4 * 1024 * 1024;
+
+/// Like [`open_seekable`] but with a large read buffer ([`STREAM_BUF_CAP`]) tuned
+/// for reading multi-GB/TB trajectories **sequentially** (the streaming
+/// `read_frame` path). Gzip inputs are decompressed into memory exactly as
+/// [`open_seekable`] does, so they already avoid per-syscall cost.
+pub fn open_seekable_streaming<P: AsRef<Path>>(path: P) -> Result<Box<dyn ReadSeek>> {
+    let path = path.as_ref();
+    if path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("gz"))
+        .unwrap_or(false)
+    {
+        return open_seekable(path);
+    }
+    let file = File::open(path)?;
+    Ok(Box::new(BufReader::with_capacity(STREAM_BUF_CAP, file)))
+}
+
 /// Open a streaming file reader with automatic gzip detection based on extension.
 ///
 /// Files with `.gz` extension are decompressed on the fly and are not seekable.

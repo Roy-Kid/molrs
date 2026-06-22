@@ -21,7 +21,7 @@ use molrs::io::data::gro::{read_gro as read_gro_rs, write_gro as write_gro_rs};
 use molrs::io::data::lammps_data::{read_lammps_data, write_lammps_data};
 use molrs::io::data::pdb::{read_pdb_frame, read_pdb_traj, write_pdb_frame, write_pdb_traj};
 use molrs::io::data::xyz::{XYZReader, read_xyz_frame, read_xyz_traj, write_xyz_frame};
-use molrs::io::reader::{ReadSeek, TrajReader, open_seekable};
+use molrs::io::reader::{FrameReader, ReadSeek, TrajReader, open_seekable};
 use molrs::io::trajectory::dcd::{
     DcdReader, open_dcd, read_dcd as read_dcd_rs, write_dcd as write_dcd_rs,
 };
@@ -1210,12 +1210,20 @@ impl PyTrrTrajReader {
     }
 
     fn __next__(&mut self) -> PyResult<Option<PyFrame>> {
-        let cursor = self.cursor;
-        let frame = traj_read_step(self.reader()?, cursor)?;
-        if frame.is_some() {
-            self.cursor += 1;
+        // Sequential streaming: a single forward pass, no whole-file offset
+        // index and no per-frame seek — the only tractable way to iterate the
+        // TB-scale GROMACS prod.trr files. `__iter__` resets cursor to 0; the
+        // first `__next__` of each pass rewinds the stream so re-iteration works.
+        if self.cursor == 0 {
+            self.reader()?.rewind_stream().map_err(io_error_to_pyerr)?;
         }
-        Ok(frame)
+        match self.reader()?.read_frame().map_err(io_error_to_pyerr)? {
+            Some(f) => {
+                self.cursor += 1;
+                Ok(Some(PyFrame::from_core_frame(f)?))
+            }
+            None => Ok(None),
+        }
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -1331,12 +1339,18 @@ impl PyXtcTrajReader {
     }
 
     fn __next__(&mut self) -> PyResult<Option<PyFrame>> {
-        let cursor = self.cursor;
-        let frame = traj_read_step(self.reader()?, cursor)?;
-        if frame.is_some() {
-            self.cursor += 1;
+        // Sequential streaming (index-free, no per-frame seek) — scalable to
+        // TB-size XTC. First `__next__` of each pass rewinds the stream.
+        if self.cursor == 0 {
+            self.reader()?.rewind_stream().map_err(io_error_to_pyerr)?;
         }
-        Ok(frame)
+        match self.reader()?.read_frame().map_err(io_error_to_pyerr)? {
+            Some(f) => {
+                self.cursor += 1;
+                Ok(Some(PyFrame::from_core_frame(f)?))
+            }
+            None => Ok(None),
+        }
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {

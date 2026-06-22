@@ -771,8 +771,10 @@ fn build_simbox(boxv: &[f32; 9]) -> Option<Result<SimBox>> {
     Some(SimBox::new(h, origin, [true; 3]).map_err(|e| invalid(format!("XTC box: {e:?}"))))
 }
 
-fn parse_frame_at<R: BufRead + Seek>(r: &mut R, offset: u64) -> Result<Frame> {
-    r.seek(SeekFrom::Start(offset))?;
+/// Parse one frame from the reader's **current** position (sitting at a frame
+/// header). Strictly forward — no seeks — so it streams out of a `BufRead`
+/// without an offset index, the path that scales to TB trajectories.
+fn parse_frame_body<R: BufRead>(r: &mut R) -> Result<Frame> {
     let hdr = read_header(r)?;
     let natoms = hdr.natoms;
     let (coords, precision) = read_coords(r, natoms, hdr.wide_nbytes)?;
@@ -806,6 +808,12 @@ fn parse_frame_at<R: BufRead + Seek>(r: &mut R, offset: u64) -> Result<Frame> {
         frame.meta.insert("precision".into(), precision.to_string());
     }
     Ok(frame)
+}
+
+/// Read the frame whose header starts at byte `offset` (random access).
+fn parse_frame_at<R: BufRead + Seek>(r: &mut R, offset: u64) -> Result<Frame> {
+    r.seek(SeekFrom::Start(offset))?;
+    parse_frame_body(r)
 }
 
 /// Scan the file, recording each frame's start byte offset.
@@ -876,6 +884,14 @@ impl<R: BufRead + Seek> XtcReader<R> {
             .map_err(|_| std::io::Error::other("failed to set XTC index"))?;
         Ok(())
     }
+
+    /// Rewind the stream to the first frame so a fresh sequential pass
+    /// (`read_frame`) restarts from the beginning. Index-free single `seek(0)`.
+    pub fn rewind_stream(&mut self) -> Result<()> {
+        self.reader.seek(SeekFrom::Start(0))?;
+        self.cursor = 0;
+        Ok(())
+    }
 }
 
 impl<R: BufRead + Seek> Reader for XtcReader<R> {
@@ -887,14 +903,15 @@ impl<R: BufRead + Seek> Reader for XtcReader<R> {
 }
 
 impl<R: BufRead + Seek> FrameReader for XtcReader<R> {
+    /// Read the next frame **sequentially** from the current position — index-free
+    /// and seek-free, so a full pass is one forward read with O(1) memory (the
+    /// scalable path for TB-scale files). Clean EOF yields `None`; random access
+    /// (`read_step`) still builds the offset index on demand.
     fn read_frame(&mut self) -> Result<Option<Frame>> {
-        self.ensure_index()?;
-        let cursor = self.cursor;
-        let off = match self.offsets.get().and_then(|o| o.get(cursor).copied()) {
-            Some(o) => o,
-            None => return Ok(None),
-        };
-        let frame = parse_frame_at(&mut self.reader, off)?;
+        if self.reader.fill_buf()?.is_empty() {
+            return Ok(None); // clean EOF at a frame boundary
+        }
+        let frame = parse_frame_body(&mut self.reader)?;
         self.cursor += 1;
         Ok(Some(frame))
     }
@@ -1038,9 +1055,15 @@ pub fn read_xtc<P: AsRef<Path>>(path: P) -> Result<Vec<Frame>> {
     XtcReader::new(reader).read_all()
 }
 
-/// Open an XTC file for trajectory-style random access.
+/// Open an XTC file for trajectory iteration / random access.
+///
+/// Uses a large streaming read buffer so a sequential pass with
+/// [`XtcReader::read_frame`] over a TB-scale file is I/O-efficient; random
+/// access (`read_step`) still builds the offset index on first use.
 pub fn open_xtc<P: AsRef<Path>>(path: P) -> Result<XtcReader<Box<dyn ReadSeek>>> {
-    Ok(XtcReader::new(crate::io::reader::open_seekable(path)?))
+    Ok(XtcReader::new(crate::io::reader::open_seekable_streaming(
+        path,
+    )?))
 }
 
 /// Write a slice of frames to an XTC file.

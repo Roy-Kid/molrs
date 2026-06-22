@@ -278,9 +278,11 @@ fn insert_rvec_cols(
     insert_float_col(block, kz, z)
 }
 
-/// Read the frame whose header starts at byte `offset`.
-fn parse_frame_at<R: BufRead + Seek>(r: &mut R, offset: u64) -> Result<Frame> {
-    r.seek(SeekFrom::Start(offset))?;
+/// Parse one frame from the reader's **current** position (which must sit at a
+/// frame header). Reads strictly forward — no seeks — so it only needs `BufRead`
+/// and preserves the buffer's read-ahead. This is the primitive the streaming
+/// (index-free) iterator is built on, the path that scales to TB trajectories.
+fn parse_frame_body<R: BufRead>(r: &mut R) -> Result<Frame> {
     let hdr = read_header(r)?;
     let natoms = hdr.natoms;
 
@@ -336,6 +338,12 @@ fn parse_frame_at<R: BufRead + Seek>(r: &mut R, offset: u64) -> Result<Frame> {
     Ok(frame)
 }
 
+/// Read the frame whose header starts at byte `offset` (random access).
+fn parse_frame_at<R: BufRead + Seek>(r: &mut R, offset: u64) -> Result<Frame> {
+    r.seek(SeekFrom::Start(offset))?;
+    parse_frame_body(r)
+}
+
 /// Scan the whole file, recording the byte offset of each frame header.
 fn scan_offsets<R: BufRead + Seek>(r: &mut R) -> Result<Vec<u64>> {
     let end = r.seek(SeekFrom::End(0))?;
@@ -389,6 +397,15 @@ impl<R: BufRead + Seek> TrrReader<R> {
             .map_err(|_| std::io::Error::other("failed to set TRR index"))?;
         Ok(())
     }
+
+    /// Rewind the underlying stream to the first frame so a fresh sequential
+    /// pass (`read_frame`) starts from the beginning again. Index-free: a single
+    /// `seek(0)`, no whole-file scan.
+    pub fn rewind_stream(&mut self) -> Result<()> {
+        self.reader.seek(SeekFrom::Start(0))?;
+        self.cursor = 0;
+        Ok(())
+    }
 }
 
 impl<R: BufRead + Seek> Reader for TrrReader<R> {
@@ -400,14 +417,18 @@ impl<R: BufRead + Seek> Reader for TrrReader<R> {
 }
 
 impl<R: BufRead + Seek> FrameReader for TrrReader<R> {
+    /// Read the next frame **sequentially** from the current stream position.
+    ///
+    /// Index-free and seek-free on the hot path: it parses straight out of the
+    /// buffered stream, so iterating a whole trajectory is a single forward pass
+    /// with O(1) memory — the only way the TB-scale GROMACS `prod.trr` files are
+    /// tractable. Clean EOF (an empty buffer at a frame boundary) yields `None`.
+    /// Random access (`read_step`) still builds the offset index on demand.
     fn read_frame(&mut self) -> Result<Option<Frame>> {
-        self.ensure_index()?;
-        let cursor = self.cursor;
-        let off = match self.offsets.get().and_then(|o| o.get(cursor).copied()) {
-            Some(o) => o,
-            None => return Ok(None),
-        };
-        let frame = parse_frame_at(&mut self.reader, off)?;
+        if self.reader.fill_buf()?.is_empty() {
+            return Ok(None); // clean EOF at a frame boundary
+        }
+        let frame = parse_frame_body(&mut self.reader)?;
         self.cursor += 1;
         Ok(Some(frame))
     }
@@ -570,9 +591,16 @@ pub fn read_trr<P: AsRef<Path>>(path: P) -> Result<Vec<Frame>> {
     TrrReader::new(reader).read_all()
 }
 
-/// Open a TRR file for trajectory-style random access.
+/// Open a TRR file for trajectory iteration / random access.
+///
+/// Uses a large streaming read buffer ([`crate::io::reader::open_seekable_streaming`])
+/// so a sequential pass with [`TrrReader::read_frame`] over a TB-scale file is
+/// I/O-efficient. Random access (`read_step`) still works (it builds the offset
+/// index on first use).
 pub fn open_trr<P: AsRef<Path>>(path: P) -> Result<TrrReader<Box<dyn ReadSeek>>> {
-    Ok(TrrReader::new(crate::io::reader::open_seekable(path)?))
+    Ok(TrrReader::new(crate::io::reader::open_seekable_streaming(
+        path,
+    )?))
 }
 
 /// Write a slice of frames to a TRR file (single precision).

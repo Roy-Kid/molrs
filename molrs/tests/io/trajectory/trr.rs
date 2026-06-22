@@ -4,7 +4,7 @@
 //! IO testing rule in `molrs/CLAUDE.md`. Cross-format and single-vs-double
 //! consistency checks anchor the decoded coordinates to ground truth.
 
-use molrs::io::reader::TrajReader;
+use molrs::io::reader::{FrameReader, TrajReader};
 use molrs::io::trajectory::trr::{open_trr, read_trr, write_trr};
 use molrs::store::frame::Frame;
 use std::path::{Path, PathBuf};
@@ -99,6 +99,42 @@ fn test_trr_random_access_matches_sequential() {
             for (a, b) in xs_a.iter().zip(xs_b.iter()) {
                 assert!((a - b).abs() < 1e-9, "{}: frame {} x mismatch", name, n);
             }
+        }
+    }
+}
+
+/// The index-free streaming pass (`FrameReader::read_frame`) yields exactly the
+/// frames `read_trr` does, and `rewind_stream` replays them — the contract the
+/// Python iterator relies on to walk TB-scale `prod.trr` without a full-file
+/// offset scan.
+#[test]
+fn test_trr_streaming_iter_and_rewind() {
+    for path in all_trr_files() {
+        let name = file_name(&path).to_owned();
+        let full = read_trr(&path).expect("full read");
+        let mut reader = open_trr(&path).expect("open");
+
+        // Pass 1: stream sequentially — never builds the offset index.
+        let mut count = 0usize;
+        while let Some(frame) = reader.read_frame().expect("stream frame") {
+            let xs = col(&frame, "x");
+            let xs_ref = col(&full[count], "x");
+            assert_eq!(xs.len(), xs_ref.len(), "{}: frame {} length", name, count);
+            for (a, b) in xs.iter().zip(xs_ref.iter()) {
+                assert!((a - b).abs() < 1e-9, "{}: frame {} x mismatch", name, count);
+            }
+            count += 1;
+        }
+        assert_eq!(count, full.len(), "{}: streamed frame count", name);
+
+        // Pass 2: rewind and replay frame 0.
+        reader.rewind_stream().expect("rewind");
+        let again = reader.read_frame().expect("post-rewind frame");
+        assert!(again.is_some(), "{}: rewind yielded no frame", name);
+        let xs0 = col(&again.unwrap(), "x");
+        let xs0_ref = col(&full[0], "x");
+        for (a, b) in xs0.iter().zip(xs0_ref.iter()) {
+            assert!((a - b).abs() < 1e-9, "{}: rewound frame 0 mismatch", name);
         }
     }
 }
