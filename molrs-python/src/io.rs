@@ -1122,16 +1122,25 @@ pub fn read_xtc(path: &str) -> PyResult<Vec<PyFrame>> {
     frames.into_iter().map(PyFrame::from_core_frame).collect()
 }
 
-/// Lazy, indexed reader for GROMACS TRR trajectory files.
+/// Reader for GROMACS TRR trajectory files.
 ///
-/// Builds a per-frame byte-offset index on first random access (or eagerly via
-/// ``build_index()``); subsequent ``reader[i]`` / ``read_step(i)`` is an O(1)
-/// seek plus one frame parse. Exposes the same surface as
-/// :class:`DCDTrajReader`.
+/// Iteration mode is selected at construction with ``index``:
+///
+/// * ``index=False`` (default) — **streaming**: each ``__next__`` reads the next
+///   frame sequentially with no whole-file offset index and no per-frame seek.
+///   ``open()`` is instant and memory is O(1), so this is the only tractable way
+///   to iterate TB-scale ``prod.trr`` files. Random access (``reader[i]``,
+///   ``read_frame(i)``, ``read_range``) still works — it builds the offset index
+///   lazily on first use.
+/// * ``index=True`` — **indexed**: build the per-frame byte-offset index up front
+///   (a whole-file scan) and iterate via O(1) seeks. Use when you will random-
+///   access the same reader heavily, or want ``len()`` known before iterating.
+///   Avoid on TB-scale files: the scan reads the whole trajectory.
 #[pyclass(name = "TRRTrajReader", unsendable)]
 pub struct PyTrrTrajReader {
     inner: Option<TrrReader<Box<dyn ReadSeek>>>,
     cursor: usize,
+    index: bool,
 }
 
 impl PyTrrTrajReader {
@@ -1145,11 +1154,16 @@ impl PyTrrTrajReader {
 #[pymethods]
 impl PyTrrTrajReader {
     #[new]
-    fn py_new(path: &str) -> PyResult<Self> {
-        let inner = open_trr(path).map_err(io_error_to_pyerr)?;
+    #[pyo3(signature = (path, index=false))]
+    fn py_new(path: &str, index: bool) -> PyResult<Self> {
+        let mut inner = open_trr(path).map_err(io_error_to_pyerr)?;
+        if index {
+            inner.build_index().map_err(io_error_to_pyerr)?;
+        }
         Ok(Self {
             inner: Some(inner),
             cursor: 0,
+            index,
         })
     }
 
@@ -1210,10 +1224,19 @@ impl PyTrrTrajReader {
     }
 
     fn __next__(&mut self) -> PyResult<Option<PyFrame>> {
-        // Sequential streaming: a single forward pass, no whole-file offset
-        // index and no per-frame seek — the only tractable way to iterate the
-        // TB-scale GROMACS prod.trr files. `__iter__` resets cursor to 0; the
-        // first `__next__` of each pass rewinds the stream so re-iteration works.
+        if self.index {
+            // Indexed: O(1) seek per frame via the offset index (built up front).
+            let cursor = self.cursor;
+            let frame = traj_read_step(self.reader()?, cursor)?;
+            if frame.is_some() {
+                self.cursor += 1;
+            }
+            return Ok(frame);
+        }
+        // Streaming (default): a single forward pass, no whole-file offset index
+        // and no per-frame seek — the only tractable way to iterate the TB-scale
+        // GROMACS prod.trr files. `__iter__` resets cursor to 0; the first
+        // `__next__` of each pass rewinds the stream so re-iteration works.
         if self.cursor == 0 {
             self.reader()?.rewind_stream().map_err(io_error_to_pyerr)?;
         }
@@ -1252,15 +1275,18 @@ impl PyTrrTrajReader {
     }
 }
 
-/// Lazy, indexed reader for GROMACS XTC trajectory files.
+/// Reader for GROMACS XTC trajectory files (compressed).
 ///
-/// Like :class:`TRRTrajReader` but for the compressed XTC format. Frame sizes
-/// vary (compression), so the byte-offset index is built by a single scan;
-/// random access is O(1) thereafter.
+/// Like :class:`TRRTrajReader`, iteration mode is chosen with ``index``:
+/// ``index=False`` (default) streams sequentially with no offset index (instant
+/// open, O(1) memory — required for TB-scale files); ``index=True`` builds the
+/// per-frame offset index up front (a whole-file scan) and iterates via O(1)
+/// seeks. Random access always works (lazy index build on first use).
 #[pyclass(name = "XTCTrajReader", unsendable)]
 pub struct PyXtcTrajReader {
     inner: Option<XtcReader<Box<dyn ReadSeek>>>,
     cursor: usize,
+    index: bool,
 }
 
 impl PyXtcTrajReader {
@@ -1274,11 +1300,16 @@ impl PyXtcTrajReader {
 #[pymethods]
 impl PyXtcTrajReader {
     #[new]
-    fn py_new(path: &str) -> PyResult<Self> {
-        let inner = open_xtc(path).map_err(io_error_to_pyerr)?;
+    #[pyo3(signature = (path, index=false))]
+    fn py_new(path: &str, index: bool) -> PyResult<Self> {
+        let mut inner = open_xtc(path).map_err(io_error_to_pyerr)?;
+        if index {
+            inner.build_index().map_err(io_error_to_pyerr)?;
+        }
         Ok(Self {
             inner: Some(inner),
             cursor: 0,
+            index,
         })
     }
 
@@ -1339,7 +1370,16 @@ impl PyXtcTrajReader {
     }
 
     fn __next__(&mut self) -> PyResult<Option<PyFrame>> {
-        // Sequential streaming (index-free, no per-frame seek) — scalable to
+        if self.index {
+            // Indexed: O(1) seek per frame via the offset index (built up front).
+            let cursor = self.cursor;
+            let frame = traj_read_step(self.reader()?, cursor)?;
+            if frame.is_some() {
+                self.cursor += 1;
+            }
+            return Ok(frame);
+        }
+        // Streaming (default): index-free, no per-frame seek — scalable to
         // TB-size XTC. First `__next__` of each pass rewinds the stream.
         if self.cursor == 0 {
             self.reader()?.rewind_stream().map_err(io_error_to_pyerr)?;

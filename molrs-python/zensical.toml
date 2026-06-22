@@ -26,6 +26,7 @@ nav = [
     { "I/O Formats" = "guides/io-formats.md" },
     { "Trajectory Analysis" = "guides/trajectory-analysis.md" },
     { "Transport Kernels" = "guides/transport.md" },
+    { "Dielectric Spectroscopy" = "guides/dielectric.md" },
   ] },
   { "Reference" = [
     { "Rust" = "reference/rust.md" },

@@ -77,6 +77,30 @@ Use `read_lammps_traj` when the file is small and a list of frames is more
 convenient. Use `LAMMPSTrajReader` when you want random access or streaming
 behavior.
 
+## Streaming GROMACS TRR / XTC (TB-scale trajectories)
+
+`TRRTrajReader` and `XTCTrajReader` choose their iteration mode at construction:
+
+```python
+# Default: streaming. open() is instant, memory is O(1), and iteration is a
+# single forward pass with no whole-file offset index — the only tractable way
+# to walk a TB-scale prod.trr.
+for frame in molrs.TRRTrajReader("prod.trr"):
+    pos = frame["atoms"]["x"]            # ... process one frame, discard it
+
+# index=True: build the per-frame offset index up front (a whole-file scan),
+# then iterate via O(1) seeks. Use for heavy random access or when you need
+# len() before iterating. Avoid on TB files — the scan reads the whole file.
+reader = molrs.TRRTrajReader("traj.trr", index=True)
+print("frames:", len(reader))
+middle = reader[len(reader) // 2]
+```
+
+Random access (`reader[i]`, `read_frame(i)`, `read_range(...)`) works in either
+mode — in the default streaming mode it builds the index lazily on first use.
+Streaming is index-free precisely so that opening and iterating a multi-hundred-GB
+file does not stall on a full-file offset scan first.
+
 ## Why Tests Use Real Files
 
 Format readers fail in the details: optional records, whitespace, indexing
