@@ -148,5 +148,6 @@ pub use traits::{Compute, Fit};
 pub use van_hove::{VanHove, VanHoveResult};
 #[cfg(feature = "voronoi")]
 pub use voronoi::{
-    DomainAnalysis, DomainResult, Face, RadicalVoronoi, VoidAnalysis, VoidResult, VoronoiCells,
+    DensityGrid, DomainAnalysis, DomainResult, Face, MolecularMoments, RadicalVoronoi,
+    VoidAnalysis, VoidResult, VoronoiCells, VoronoiIntegration, polarizability_finite_field,
 };

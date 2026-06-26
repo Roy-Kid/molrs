@@ -1,6 +1,6 @@
 ---
 title: Voronoi electron-density integration → molecular electromagnetic moments
-status: approved
+status: code-complete
 created: 2026-06-26
 ---
 
@@ -93,12 +93,12 @@ comes from an external AIMD code; molrs only reads + integrates).
 - `tests-data/cube_traj/` (new) — real multi-frame cube fixtures (added to the tests-data repo per the IO rule).
 
 ## Tasks
-- [ ] Add real multi-frame cube fixtures to the tests-data repo under `cube_traj/`; write the failing trajectory-reader tests iterating every file (per the IO testing rule).
-- [ ] Implement `CubeTrajectory` (multi-frame, Bohr→Å normalization) reusing the single-cube parser.
-- [ ] Write failing integration tests: total integrated electronic charge over all cells equals the grid's total (∫ρ dV) within grid tolerance; a neutral atom's cell integrates to ≈ −Z electrons.
-- [ ] Write failing dipole test: a constructed point/charge distribution on the grid integrates to the analytic dipole; a symmetric (e.g. centrosymmetric) molecule gives ≈ 0 dipole.
-- [ ] Implement `VoronoiIntegration` (voxel→cell assignment + per-cell/per-molecule accumulation) and the finite-field polarizability.
-- [ ] Rustdoc with the charge/dipole/α equations + unit conversion + citations; run fmt/clippy/test under `--features voronoi`.
+- [x] Add real multi-frame cube fixtures to the tests-data repo under `cube_traj/`; write the failing trajectory-reader tests iterating every file (per the IO testing rule).
+- [x] Implement `CubeTrajectory` (multi-frame, Bohr→Å normalization) reusing the single-cube parser.
+- [x] Write failing integration tests: total integrated electronic charge over all cells equals the grid's total (∫ρ dV) within grid tolerance; a neutral atom's cell integrates to ≈ −Z electrons.
+- [x] Write failing dipole test: a constructed point/charge distribution on the grid integrates to the analytic dipole; a symmetric (e.g. centrosymmetric) molecule gives ≈ 0 dipole.
+- [x] Implement `VoronoiIntegration` (voxel→cell assignment + per-cell/per-molecule accumulation) and the finite-field polarizability.
+- [x] Rustdoc with the charge/dipole/α equations + unit conversion + citations; run fmt/clippy/test under `--features voronoi`.
 
 ## Testing strategy
 - **Charge conservation** (`scientific`): `Σ_cell ∫ρ = ∫_grid ρ` within grid

@@ -28,3 +28,6 @@ mod van_hove;
 #[cfg(feature = "voronoi")]
 #[path = "compute/voronoi.rs"]
 mod voronoi;
+#[cfg(feature = "voronoi")]
+#[path = "compute/voronoi_integration.rs"]
+mod voronoi_integration;

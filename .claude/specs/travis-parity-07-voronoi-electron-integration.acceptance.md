@@ -9,7 +9,8 @@ criteria:
       iterating every file (never synthetic), yielding the correct frame count and a
       consistent grid shape + atom list per frame, with Bohr→Å normalization applied
       at the boundary.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-002
     summary: integrated electronic charge is conserved
     type: scientific
@@ -33,7 +34,8 @@ criteria:
     pass_when: |
       Bohr→Å and e/Bohr³→e conversions are applied so that a hand-computed reference
       moment in molrs units (Å, e) is reproduced within 1e-9.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-005
     summary: finite-field polarizability recovers a linear-response input
     type: scientific
@@ -49,7 +51,8 @@ criteria:
       Voxels on a cell boundary are assigned deterministically; a molecule split
       across the periodic boundary is integrated via min-image; cargo fmt --check +
       clippy -D warnings + cargo test --features voronoi pass.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
 ---
 
 # Acceptance criteria

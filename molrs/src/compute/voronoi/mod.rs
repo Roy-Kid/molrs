@@ -12,11 +12,15 @@
 
 mod cell;
 mod domain;
+mod integrate;
+mod polarizability;
 mod radical;
 mod void;
 
 pub use cell::{BOUNDARY, Face, VoronoiCells};
 pub use domain::{DomainAnalysis, DomainResult};
+pub use integrate::{BOHR_TO_ANG, DensityGrid, MolecularMoments, VoronoiIntegration};
+pub use polarizability::polarizability_finite_field;
 pub use radical::RadicalVoronoi;
 pub use void::{VoidAnalysis, VoidResult};
 
