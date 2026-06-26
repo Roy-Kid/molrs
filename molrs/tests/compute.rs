@@ -9,6 +9,8 @@
 
 #[path = "compute/center_of_mass.rs"]
 mod center_of_mass;
+#[path = "compute/combined_distribution.rs"]
+mod combined_distribution;
 #[path = "compute/distribution.rs"]
 mod distribution;
 #[path = "compute/msd.rs"]

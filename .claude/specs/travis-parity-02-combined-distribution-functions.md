@@ -1,6 +1,6 @@
 ---
 title: Combined Distribution Functions (CDF) — joint 2-D/3-D observable histograms
-status: approved
+status: code-complete
 created: 2026-06-26
 ---
 
@@ -84,12 +84,12 @@ Layer discipline: `compute` → `core` only; WASM-clean.
 - `molrs/tests/compute/combined_distribution.rs` (new) — marginal-consistency + correlation tests.
 
 ## Tasks
-- [ ] Write failing test: a 2-D distance×angle CDF whose marginals (∫ over each axis) equal the link-01 1-D distance DF and ADF within 1e-6.
-- [ ] Write failing test: a constructed correlated dataset (angle determined by distance) shows density only on the diagonal band; an independent dataset shows a separable product `p(x,y)=p(x)p(y)`.
-- [ ] Write failing test: mismatched observable sample counts → typed ComputeError (no silent truncation).
-- [ ] Implement `CombinedDistribution` (2-D + 3-D) over an N-D ndarray histogram reusing link-01 axis math.
-- [ ] Implement `marginal()` and `free_energy(T)` with documented empty-bin floor.
-- [ ] Rustdoc with the joint-density definition + marginal-consistency contract + citations; run fmt/clippy/test.
+- [x] Write failing test: a 2-D distance×angle CDF whose marginals (∫ over each axis) equal the link-01 1-D distance DF and ADF within 1e-6.
+- [x] Write failing test: a constructed correlated dataset (angle determined by distance) shows density only on the diagonal band; an independent dataset shows a separable product `p(x,y)=p(x)p(y)`.
+- [x] Write failing test: mismatched observable sample counts → typed ComputeError (no silent truncation).
+- [x] Implement `CombinedDistribution` (2-D + 3-D) over an N-D ndarray histogram reusing link-01 axis math.
+- [x] Implement `marginal()` and `free_energy(T)` with documented empty-bin floor.
+- [x] Rustdoc with the joint-density definition + marginal-consistency contract + citations; run fmt/clippy/test.
 
 ## Testing strategy
 - **Marginal consistency** (`scientific`): the headline contract — summing the joint

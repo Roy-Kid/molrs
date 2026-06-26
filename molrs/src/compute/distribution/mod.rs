@@ -16,12 +16,16 @@
 //! - Brehm, Thomas, Gehrke, Kirchner, *J. Chem. Phys.* **2020**, 152, 164105.
 
 mod angle;
+mod combined;
 mod dihedral;
 mod distance;
 mod histogram1d;
 mod observable;
 
 pub use angle::AngleObservable;
+pub use combined::{
+    AnyObservable, AxisSpec, CombinedDistribution, CombinedDistributionResult, KB_KCAL_PER_MOL_K,
+};
 pub use dihedral::DihedralObservable;
 pub use distance::DistanceObservable;
 pub use histogram1d::{Histogram1d, renormalize_density};

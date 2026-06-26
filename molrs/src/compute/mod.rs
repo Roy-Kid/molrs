@@ -49,6 +49,7 @@
 //! | [`pca`] | `&Vec<T: DescriptorRow>` | [`PcaResult`] |
 //! | [`kmeans`] | `&PcaResult` | [`KMeansResult`] |
 //! | [`distribution`] | `&AtomGroups` | [`DistributionResult`](distribution::DistributionResult) |
+//! | [`distribution::CombinedDistribution`] | `&[AtomGroups]` | [`CombinedDistributionResult`](distribution::CombinedDistributionResult) |
 
 pub mod center_of_mass;
 pub mod cluster;
@@ -95,6 +96,7 @@ pub use diffraction::{
     StaticStructureFactorDebyeResult, StaticStructureFactorDirect,
     StaticStructureFactorDirectResult,
 };
+pub use distribution::{AxisSpec, CombinedDistribution, CombinedDistributionResult};
 pub use environment::{
     AngularSeparationGlobal, AngularSeparationGlobalResult, AngularSeparationNeighbor,
     AngularSeparationNeighborResult, BondOrder, BondOrderResult, LocalBondProjection,

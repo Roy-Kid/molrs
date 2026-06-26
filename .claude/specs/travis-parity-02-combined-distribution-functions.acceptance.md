@@ -18,14 +18,16 @@ criteria:
       joint density confined to a diagonal band (off-band bins ≈ 0); a synthetic
       independent dataset yields density equal to the outer product of its marginals
       within 1e-6.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-003
     summary: joint density is normalized
     type: code
     pass_when: |
       The discrete integral of the normalized joint density over all axes equals 1
       within 1e-6 for both the 2-D and 3-D cases.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-004
     summary: mismatched observable sample counts are rejected
     type: code
@@ -33,14 +35,16 @@ criteria:
       Constructing a CombinedDistribution whose observables emit different numbers
       of per-frame samples returns a typed ComputeError on compute rather than
       zipping to the shorter length.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-005
     summary: free_energy is finite and floored
     type: code
     pass_when: |
       free_energy(T) returns −kT·ln p (kB = 1.987204e-3 kcal/(mol·K)) that is finite
       on populated bins and equals the documented floor (not −inf/NaN) on empty bins.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-006
     summary: full check green, WASM-clean
     type: runtime
@@ -48,7 +52,8 @@ criteria:
       compute/distribution/combined compiles under the `compute` feature with no new
       crate/BLAS/FFI, and cargo fmt --check + clippy -D warnings +
       cargo test --features compute pass.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
 ---
 
 # Acceptance criteria
