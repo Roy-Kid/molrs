@@ -1012,13 +1012,16 @@ class ClusterResult:
     def cluster_idx(self) -> ArrayI64: ...
     @property
     def cluster_sizes(self) -> list[int]: ...
+    @property
+    def cluster_keys(self) -> list[list[int]]: ...
 
 class Cluster:
     def __init__(self, min_cluster_size: int) -> None: ...
     def compute(
         self,
         frames: Frame | Sequence[Frame],
-        nlists: NeighborList | Sequence[NeighborList],
+        nlists: NeighborList | Sequence[NeighborList] | None = ...,
+        keys: Sequence[int] | None = ...,
     ) -> ClusterResult | list[ClusterResult]: ...
 
 class ClusterCentersResult:

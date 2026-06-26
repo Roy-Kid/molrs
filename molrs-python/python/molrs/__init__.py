@@ -123,6 +123,8 @@ from .molrs import (
     GreenKuboSpectrum,
 )
 
+from . import ff  # molrs.ff.potential.soft parameter interface
+
 # Rich Python Frame/Block layer (pandas-style API; CSV engine in Rust on the
 # core Block). These subclass the bare PyO3 cores and SHADOW the top-level
 # ``molrs.Block`` / ``molrs.Frame`` as the canonical types — every public API
