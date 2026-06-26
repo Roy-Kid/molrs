@@ -48,6 +48,7 @@
 //! | [`radius_of_gyration`] | `(&Vec<ClusterResult>, &Vec<COMResult>)` | `Vec<`[`RgResult`]`>` |
 //! | [`pca`] | `&Vec<T: DescriptorRow>` | [`PcaResult`] |
 //! | [`kmeans`] | `&PcaResult` | [`KMeansResult`] |
+//! | [`distribution`] | `&AtomGroups` | [`DistributionResult`](distribution::DistributionResult) |
 
 pub mod center_of_mass;
 pub mod cluster;
@@ -55,6 +56,7 @@ pub mod cluster_centers;
 pub mod density;
 pub mod dielectric;
 pub mod diffraction;
+pub mod distribution;
 pub mod environment;
 pub mod error;
 pub mod fit;

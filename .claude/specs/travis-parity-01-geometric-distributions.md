@@ -1,6 +1,6 @@
 ---
 title: Geometric distribution functions — ADF, DDF, distance DF + Observable extractors
-status: approved
+status: code-complete
 created: 2026-06-26
 ---
 
@@ -101,12 +101,12 @@ coupling; WASM-clean (no BLAS, no FFI).
 - `molrs/tests/compute/distribution.rs` (new) — analytic + PBC + normalization tests.
 
 ## Tasks
-- [ ] Write failing tests: equilateral-triangle frame → ADF density peaks at 60°; eclipsed/planar quadruple → DDF peak at 0°/180°; distance DF on a known lattice matches hand-computed separations.
-- [ ] Write failing PBC test: an angle/distance spanning a periodic boundary uses the minimum image, matching `compute::rdf` behavior.
-- [ ] Implement `Observable` + `AtomGroups` and the three concrete observables (angle via `arccos`, dihedral via `atan2`, distance via min-image).
-- [ ] Implement `histogram1d` (extracted from rdf/density) and `DistributionFunction<O>` with raw + density + `sin θ`-corrected normalization.
-- [ ] Add rustdoc with the cited θ/φ equations + the raw-vs-`sinθ` ADF convention note.
-- [ ] Wire re-exports in `compute/mod.rs`; run `cargo fmt && clippy -D warnings && test --features compute`.
+- [x] Write failing tests: equilateral-triangle frame → ADF density peaks at 60°; eclipsed/planar quadruple → DDF peak at 0°/180°; distance DF on a known lattice matches hand-computed separations.
+- [x] Write failing PBC test: an angle/distance spanning a periodic boundary uses the minimum image, matching `compute::rdf` behavior.
+- [x] Implement `Observable` + `AtomGroups` and the three concrete observables (angle via `arccos`, dihedral via `atan2`, distance via min-image).
+- [x] Implement `histogram1d` (extracted from rdf/density) and `DistributionFunction<O>` with raw + density + `sin θ`-corrected normalization.
+- [x] Add rustdoc with the cited θ/φ equations + the raw-vs-`sinθ` ADF convention note.
+- [x] Wire re-exports in `compute/mod.rs`; run `cargo fmt && clippy -D warnings && test --features compute`.
 
 ## Testing strategy
 - **Analytic** (`scientific`): closed-form geometries (equilateral triangle, regular

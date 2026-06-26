@@ -25,7 +25,8 @@ criteria:
       A DistanceObservable over a pair straddling a periodic boundary returns the
       minimum-image distance (matching compute::rdf for the same pair), not the
       raw in-box separation.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-004
     summary: histograms are correctly normalized
     type: code
@@ -33,7 +34,8 @@ criteria:
       For each distribution function, the trapezoidal integral of the normalized
       density over its bin range equals 1 within 1e-6, and the raw counts sum to
       n_samples × n_frames.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-005
     summary: raw vs sin θ-corrected ADF both available and distinct
     type: code
@@ -41,7 +43,8 @@ criteria:
       DistributionFunction exposes both the raw ADF density and the sin θ-corrected
       ADF density; for a non-uniform angular sample the two differ, and the
       corrected one is the raw divided by sin θ then renormalized.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-006
     summary: degenerate geometry does not produce NaN or panic
     type: code
@@ -49,7 +52,8 @@ criteria:
       A collinear triple yields angle 0 or π (no NaN); a zero-length vector yields a
       typed ComputeError (not a silent NaN); an empty AtomGroups yields an empty
       DistributionResult without panicking.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-007
     summary: module gated on compute, WASM-clean, full check green
     type: runtime
@@ -57,7 +61,8 @@ criteria:
       compute/distribution compiles only under the `compute` feature, pulls in no
       BLAS/FFI/new crate, and cargo fmt --check + clippy -D warnings +
       cargo test --features compute all pass.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
 ---
 
 # Acceptance criteria
