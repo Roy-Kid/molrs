@@ -5,6 +5,56 @@ All notable changes to molrs are recorded here. This project follows
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-21
+
+No library changes — tooling/CI only (no Rust, Python, or WASM API surface change).
+
+### Removed
+
+- Stop version-controlling lockfiles (`Cargo.lock`, `uv.lock`); CI and the git
+  hooks resolve dependencies fresh (dropped `cargo --locked`).
+
+### Changed
+
+- CI: the benchmark workflow publishes perf history only on the canonical
+  `MolCrafts/molrs` repo (forks lack the gh-pages branch).
+
+## [0.1.5] - 2026-06-20
+
+### Changed (breaking)
+
+- **Force-field angles are now radians internally.** Angle `theta0`, dihedral/
+  improper phase `d`/`phi`/`chi0` are stored and consumed in radians; kernel
+  constructors no longer call `.to_radians()`, and each reader normalizes
+  user-facing degree input at its boundary (LAMMPS `*.ff` deg→rad, MMFF94 XML
+  deg→rad; the OPLS/GROMACS reader was already radians). Fixes a double-conversion
+  that produced ~100+ kcal/mol of spurious angle energy on OPLS-typified
+  structures at their reference angle.
+
+## [0.1.4] - 2026-06-18
+
+### Added
+
+- **GROMACS TRR and XTC trajectory I/O.** Native readers and writers for the
+  `.trr` (full-precision XDR; single/double; coordinates, velocities, forces)
+  and `.xtc` (XDR + lossy `xdr3dfcoord` compression; classic 1995 and 2023
+  magic) formats, alongside the existing DCD/GRO support. Each exposes
+  sequential reads, single-frame access, and O(1) random access via
+  `TrajReader::read_step` (lazy per-frame offset index), plus writers. The XTC
+  compression codec is a clean-room implementation. Surfaced in Python as
+  `molrs.read_trr`/`read_xtc`, the lazy `molrs.io.read_trr_trajectory`/
+  `read_xtc_trajectory`, and `write_trr`/`write_xtc`.
+- **compute ↔ fit separation.** Trajectory `Compute`s return raw curves/ACFs; a
+  separate `Fit` family (`compute::fit`) performs the numerical fitting and
+  spectral transforms as an explicit downstream step.
+
+### Changed
+
+- **Packaging: single published crate.** The former seven workspace crates
+  (`core`/`io`/`signal`/`compute`/`ff`/`conformer` + façade) are merged into one
+  `molcrafts-molrs` with feature-gated modules. The public Rust, Python, and
+  WASM API surfaces are unchanged.
+
 ## [0.1.3] - 2026-06-14
 
 ### Added

@@ -32,6 +32,10 @@ mod poscar;
 mod sdf;
 #[path = "io/streaming.rs"]
 mod streaming;
+#[path = "io/trajectory/trr.rs"]
+mod trr;
+#[path = "io/trajectory/xtc.rs"]
+mod xtc;
 #[path = "io/data/xyz.rs"]
 mod xyz;
 

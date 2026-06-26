@@ -3,7 +3,8 @@
 //! E(φ) = K · [1 + cos(n·φ − φ₀)]
 //!
 //! `K` is the force constant, `n` the multiplicity, and `φ₀` the phase in
-//! degrees. The improper angle φ is the dihedral defined by I-J-K-L, so the
+//! radians (readers normalize at their boundary). The improper angle φ is the
+//! dihedral defined by I-J-K-L, so the
 //! geometry reuses the shared dihedral routines. (Functionally one CHARMM-form
 //! term, evaluated over the `"impropers"` block.)
 
@@ -54,7 +55,7 @@ impl Potential for ImproperPeriodic {
 }
 
 /// Construct an [`ImproperPeriodic`] from per-type params (`k`, `n`, `d`
-/// degrees) and a Frame's `"impropers"` block (`atomi/atomj/atomk/atoml/type`).
+/// radians) and a Frame's `"impropers"` block (`atomi/atomj/atomk/atoml/type`).
 pub fn improper_periodic_ctor(
     _sp: &Params,
     tp: &[(&str, &Params)],
@@ -93,7 +94,7 @@ pub fn improper_periodic_ctor(
         al.push(lc[idx] as usize);
         kk.push(p.get("k").ok_or("improper_periodic: missing k")? as F);
         nn.push(p.get("n").ok_or("improper_periodic: missing n")? as F);
-        dd.push((p.get("d").unwrap_or(0.0) as F).to_radians());
+        dd.push(p.get("d").unwrap_or(0.0) as F); // radians (normalized at read)
     }
     Ok(Box::new(ImproperPeriodic {
         atom_i: ai,

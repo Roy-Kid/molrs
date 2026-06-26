@@ -101,14 +101,18 @@ pub fn angle_harmonic_ctor(
         let params = type_map
             .get(label.as_str())
             .ok_or_else(|| format!("AngleHarmonic: unknown angle type '{}'", label))?;
+        // Accept `k` (LAMMPS / hand-built) or its `k0` alias (the OPLS XML
+        // reader emits `k0`/`theta0`). Either spelling is the force const.
         let k0 = params
             .get("k")
-            .ok_or_else(|| format!("AngleHarmonic type '{}': missing 'k'", label))?
+            .or_else(|| params.get("k0"))
+            .ok_or_else(|| format!("AngleHarmonic type '{}': missing 'k' (or 'k0')", label))?
             as F;
+        // theta0 is consumed in radians; readers normalize at their boundary.
         let theta0_rad = params
             .get("theta0")
             .ok_or_else(|| format!("AngleHarmonic type '{}': missing 'theta0'", label))?
-            .to_radians() as F;
+            as F;
 
         atom_i.push(i_col[idx] as usize);
         atom_j.push(j_col[idx] as usize);

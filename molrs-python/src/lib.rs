@@ -16,6 +16,7 @@
 //! | `NeighborList`       | [`PyNeighborList`]| Query result with pair indices + distances |
 //! | `Atomistic`          | [`PyAtomistic`]   | All-atom molecular graph                   |
 //! | `MMFFTypifier`       | [`PyMMFFTypifier`]| MMFF94 atom-type assignment                |
+//! | `OplsTypifier`       | [`PyOplsTypifier`]| OPLS-AA atom-type + bonded assignment      |
 //! | `Potentials`         | [`PyPotentials`]  | Compiled energy/force evaluator            |
 //! | `RDF` / `MSD` / `Cluster` |              | Structural analysis                        |
 //!
@@ -61,7 +62,9 @@ mod conformer;
 use conformer::{PyConformer, PyConformerReport, PyConformerStageReport};
 
 mod forcefield;
-use forcefield::{PyForceField, PyLBFGS, PyMMFFTypifier, PyOptReport, PyPotentials};
+use forcefield::{
+    PyForceField, PyLBFGS, PyMMFFTypifier, PyOplsTypifier, PyOptReport, PyPotentials,
+};
 
 mod compute;
 use compute::{
@@ -72,6 +75,7 @@ use compute::{
 };
 
 mod compute_extra;
+mod compute_fit;
 mod dielectric;
 mod signal;
 mod transport;
@@ -147,6 +151,10 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<io::PyLAMMPSTrajReader>()?;
     m.add_function(wrap_pyfunction!(io::read_dcd, m)?)?;
     m.add_class::<io::PyDcdTrajReader>()?;
+    m.add_function(wrap_pyfunction!(io::read_trr, m)?)?;
+    m.add_class::<io::PyTrrTrajReader>()?;
+    m.add_function(wrap_pyfunction!(io::read_xtc, m)?)?;
+    m.add_class::<io::PyXtcTrajReader>()?;
     m.add_function(wrap_pyfunction!(io::read_gro, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_chgcar_file, m)?)?;
     m.add_function(wrap_pyfunction!(io::read_cube_file, m)?)?;
@@ -159,6 +167,8 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(io::write_lammps, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_lammps_traj, m)?)?;
     m.add_function(wrap_pyfunction!(io::write_dcd, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_trr, m)?)?;
+    m.add_function(wrap_pyfunction!(io::write_xtc, m)?)?;
     // SMILES
     m.add_function(wrap_pyfunction!(io::parse_smiles, m)?)?;
     m.add_class::<io::PySmilesIR>()?;
@@ -201,6 +211,7 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Force field
     m.add_class::<PyForceField>()?;
     m.add_class::<PyMMFFTypifier>()?;
+    m.add_class::<PyOplsTypifier>()?;
     m.add_class::<PyPotentials>()?;
     m.add_class::<PyOptReport>()?;
     m.add_class::<PyLBFGS>()?;
@@ -240,6 +251,12 @@ fn molrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Additional analyzers ported from freud (Steinhardt, Nematic, …).
     compute_extra::register(m)?;
+
+    // Raw-compute + explicit-fit classes (phase-02 compute/fit repoint):
+    // VACF / EinsteinConductivity / GreenKuboConductivity / … + LinearFit /
+    // RunningIntegral / Plateau / DebyeFit / PowerSpectrum / IRSpectrum /
+    // RamanSpectrum at the top level (`molrs.VACF`, `molrs.LinearFit`, …).
+    compute_fit::register(m)?;
 
     // Signal processing
     m.add_function(wrap_pyfunction!(signal::signal_acf_fft, m)?)?;

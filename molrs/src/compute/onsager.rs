@@ -34,7 +34,11 @@
 
 use ndarray::Array1;
 
+use molrs::store::frame_access::FrameAccess;
+
 use crate::compute::error::ComputeError;
+use crate::compute::result::ComputeResult;
+use crate::compute::traits::Compute;
 
 /// Result of an Onsager collective-displacement cross-correlation.
 #[derive(Debug, Clone)]
@@ -45,6 +49,8 @@ pub struct OnsagerResult {
     /// origins, length `max_lag + 1`. For positions in Å this is in Å².
     pub correlation: Array1<f64>,
 }
+
+impl ComputeResult for OnsagerResult {}
 
 fn validate_series(p: &ndarray::Array2<f64>, name: &'static str) -> Result<usize, ComputeError> {
     let shape = p.shape();
@@ -70,9 +76,15 @@ fn validate_series(p: &ndarray::Array2<f64>, name: &'static str) -> Result<usize
     Ok(n_frames)
 }
 
-/// Windowed collective-displacement cross-correlation of two species.
+/// Raw Onsager collective-displacement cross-correlation compute.
 ///
-/// Computes, for each lag `τ ∈ [0, max_lag]`,
+/// Computes the windowed (all-time-origins) cross-correlation of two species'
+/// **collective** displacements — a pure raw observable, with the long-time
+/// linear fit `L_ij(τ) ≈ 2·d·D_ij·τ` left to the caller
+/// ([`LinearFit`](crate::compute::fit::LinearFit)). The collective-coordinate
+/// reduction `P_s = Σ_a r_a` and periodic-image unwrapping are the caller's job.
+///
+/// For each lag `τ ∈ [0, max_lag]`,
 ///
 /// ```text
 ///     L_ij(τ) = (1/(N − τ)) Σ_{t=0}^{N−1−τ} Σ_d
@@ -80,24 +92,28 @@ fn validate_series(p: &ndarray::Array2<f64>, name: &'static str) -> Result<usize
 /// ```
 ///
 /// the average over all time origins of the dot product of the two species'
-/// collective displacements. When `p_i` and `p_j` are the same array this is
-/// the collective mean-square displacement of that species.
+/// collective displacements. When `p_i` and `p_j` are the same array this is the
+/// collective mean-square displacement of that species.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OnsagerCorrelation;
+
+/// `(p_i, p_j, dt, max_correlation_time)` argument bundle for
+/// [`OnsagerCorrelation`].
 ///
-/// # Arguments
 /// * `p_i`, `p_j` — collective coordinates `P_s(t) = Σ_{a ∈ s} r_a(t)`, shape
 ///   `(n_frames, 3)`. Must already be **unwrapped** (continuous, no
 ///   periodic-image jumps) and have the same number of frames.
 /// * `dt` — frame spacing (> 0); sets the `lag_times` axis.
 /// * `max_correlation_time` — longest lag in **frames**, clamped to
 ///   `n_frames − 1`.
-///
-/// # Errors
-/// * `DimensionMismatch` if either input is not `(_, 3)` or the two series have
-///   different frame counts.
-/// * `EmptyInput` if fewer than two frames.
-/// * `NonFinite` on any NaN/inf input.
-/// * `OutOfRange` if `dt ≤ 0`.
-pub fn onsager_correlation(
+pub type OnsagerCorrelationArgs<'a> = (
+    &'a ndarray::Array2<f64>,
+    &'a ndarray::Array2<f64>,
+    f64,
+    usize,
+);
+
+fn collective_cross_correlation(
     p_i: &ndarray::Array2<f64>,
     p_j: &ndarray::Array2<f64>,
     dt: f64,
@@ -147,10 +163,32 @@ pub fn onsager_correlation(
     })
 }
 
+impl Compute for OnsagerCorrelation {
+    /// `(p_i, p_j, dt, max_correlation_time)`. The `frames` slice is unused (the
+    /// collective coordinates are pre-assembled by the caller).
+    type Args<'a> = OnsagerCorrelationArgs<'a>;
+    type Output = OnsagerResult;
+
+    fn compute<'a, FA: FrameAccess + Sync + 'a>(
+        &self,
+        _frames: &[&'a FA],
+        args: Self::Args<'a>,
+    ) -> Result<Self::Output, ComputeError> {
+        let (p_i, p_j, dt, max_correlation_time) = args;
+        collective_cross_correlation(p_i, p_j, dt, max_correlation_time)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use molrs::Frame;
     use ndarray::array;
+
+    /// Empty frame slice for the series-based `OnsagerCorrelation` compute.
+    fn no_frames() -> Vec<&'static Frame> {
+        Vec::new()
+    }
 
     #[test]
     fn self_correlation_is_collective_msd() {
@@ -163,7 +201,9 @@ mod tests {
             [3.0, 0.0, 0.0],
             [4.0, 0.0, 0.0],
         ];
-        let r = onsager_correlation(&p, &p, 1.0, 4).unwrap();
+        let r = OnsagerCorrelation
+            .compute(&no_frames(), (&p, &p, 1.0, 4))
+            .unwrap();
         for tau in 0..=4 {
             let expected = (tau as f64) * (tau as f64);
             assert!(
@@ -180,7 +220,9 @@ mod tests {
         // P_i drifts +x, P_j drifts −x. ΔP_i·ΔP_j = (τ)(−τ) = −τ².
         let pi = array![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
         let pj = array![[0.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-2.0, 0.0, 0.0]];
-        let r = onsager_correlation(&pi, &pj, 0.5, 2).unwrap();
+        let r = OnsagerCorrelation
+            .compute(&no_frames(), (&pi, &pj, 0.5, 2))
+            .unwrap();
         assert!((r.correlation[1] + 1.0).abs() < 1e-12); // −1²·... origins avg = −1
         assert!((r.correlation[2] + 4.0).abs() < 1e-12);
         assert!((r.lag_times[1] - 0.5).abs() < 1e-12);
@@ -191,7 +233,9 @@ mod tests {
         // Non-uniform motion to exercise the origin average at τ=1.
         let p = array![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 2.0, 0.0]];
         // τ=1 origins: (t0=0) Δ=(1,0,0) → 1; (t0=1) Δ=(0,2,0) → 4. mean = 2.5
-        let r = onsager_correlation(&p, &p, 1.0, 2).unwrap();
+        let r = OnsagerCorrelation
+            .compute(&no_frames(), (&p, &p, 1.0, 2))
+            .unwrap();
         assert!((r.correlation[1] - 2.5).abs() < 1e-12);
     }
 
@@ -199,9 +243,21 @@ mod tests {
     fn rejects_bad_shape_and_mismatch() {
         let p3 = array![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
         let p_short = array![[0.0, 0.0, 0.0]];
-        assert!(onsager_correlation(&p3, &p_short, 1.0, 1).is_err());
+        assert!(
+            OnsagerCorrelation
+                .compute(&no_frames(), (&p3, &p_short, 1.0, 1))
+                .is_err()
+        );
         let bad = array![[0.0, 0.0], [1.0, 0.0]];
-        assert!(onsager_correlation(&bad, &bad, 1.0, 1).is_err());
-        assert!(onsager_correlation(&p3, &p3, 0.0, 1).is_err());
+        assert!(
+            OnsagerCorrelation
+                .compute(&no_frames(), (&bad, &bad, 1.0, 1))
+                .is_err()
+        );
+        assert!(
+            OnsagerCorrelation
+                .compute(&no_frames(), (&p3, &p3, 0.0, 1))
+                .is_err()
+        );
     }
 }

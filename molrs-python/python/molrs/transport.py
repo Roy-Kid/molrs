@@ -12,7 +12,6 @@ coefficients), ``jacf`` (current-ACF Green–Kubo conductivity), and ``persist``
 """
 
 from .molrs import (
-    transport_green_kubo_conductivity,
     transport_onsager_correlation,
     transport_pair_survival_tcf,
 )
@@ -24,10 +23,10 @@ class Onsager:
     correlation = staticmethod(transport_onsager_correlation)
 
 
-class Jacf:
-    """Green–Kubo ionic conductivity from the charge-current ACF (static)."""
-
-    green_kubo_conductivity = staticmethod(transport_green_kubo_conductivity)
+# The bundled ``Jacf.green_kubo_conductivity`` (raw JACF + fitted sigma) was
+# removed in compute-fit-03-cleanup: compose :class:`molrs.GreenKuboConductivity`
+# (raw current ACF) with :class:`molrs.RunningIntegral` and a
+# ``1/(3·V·k_B·T)`` MD→SI prefactor instead.
 
 
 class Persist:
@@ -36,4 +35,4 @@ class Persist:
     pair_survival_tcf = staticmethod(transport_pair_survival_tcf)
 
 
-__all__ = ["Onsager", "Jacf", "Persist"]
+__all__ = ["Onsager", "Persist"]

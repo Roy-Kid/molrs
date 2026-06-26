@@ -69,11 +69,14 @@ fn total_force_is_balanced() {
 }
 
 #[test]
-fn compile_path_converts_degrees_to_radians() {
-    // def_type stores theta0 in degrees; the kernel converts to radians.
+fn compile_path_consumes_radians() {
+    // def_type stores theta0 in radians (molrs internal convention); the kernel
+    // consumes it directly with no .to_radians() of its own.
     let mut ff = ForceField::new("angle-only");
-    ff.def_anglestyle("harmonic")
-        .def_type("H-O-H", &[("k", K0), ("theta0", 90.0)]);
+    ff.def_anglestyle("harmonic").def_type(
+        "H-O-H",
+        &[("k", K0), ("theta0", std::f64::consts::FRAC_PI_2)],
+    );
     // 90 deg geometry -> dtheta = 0 -> energy 0.
     let mut frame = atoms_frame(&[[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
     frame.insert(

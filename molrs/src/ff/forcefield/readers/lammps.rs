@@ -23,9 +23,10 @@
 //! molrs harmonic bond/angle kernels use the `½·k·(x−x₀)²` form, while LAMMPS
 //! `harmonic` uses `K(x−x₀)²` with **no ½** — so the stored stiffness is `k = 2·K`
 //! (the molrs ctor param key is `"k"`). Every angle-valued parameter — angle
-//! `theta0`, dihedral phase `d`, improper `chi0` — is stored in **degrees**: the
-//! molrs kernels call `.to_radians()` themselves, so the LAMMPS degree values pass
-//! through unchanged. The `fourier` dihedral maps to molrs's `periodic` kernel
+//! `theta0`, dihedral phase `d`, improper `chi0` — is read in **degrees** and
+//! **normalized to radians at this boundary** (`.to_radians()`), matching molrs's
+//! internal-radians convention: the kernels consume radians directly and do no
+//! unit conversion of their own. The `fourier` dihedral maps to molrs's `periodic` kernel
 //! (`E = Σ Kₘ[1+cos(nₘφ−dₘ)]`). ε, σ, r0 and the dihedral K/n are already in
 //! molrs units.
 //!
@@ -199,7 +200,7 @@ fn add_angle(
     rest: &[&str],
     where_: &dyn Fn() -> String,
 ) -> Result<(), String> {
-    // angle_coeff <a>-<b>-<c> K theta0(deg)   (k = 2K; theta0 kept in degrees)
+    // angle_coeff <a>-<b>-<c> K theta0(deg)   (k = 2K; theta0 deg→rad at read)
     let [a, b, c] = split_types::<3>(rest.first(), "angle", where_)?;
     let k = parse_f64(get(rest, 1, "angle K", where_)?, "angle K", where_)?;
     let theta0_deg = parse_f64(
@@ -211,7 +212,7 @@ fn add_angle(
         &a,
         &b,
         &c,
-        &[("k", 2.0 * k), ("theta0", theta0_deg)],
+        &[("k", 2.0 * k), ("theta0", theta0_deg.to_radians())],
     );
     Ok(())
 }
@@ -222,7 +223,7 @@ fn add_dihedral(
     where_: &dyn Fn() -> String,
 ) -> Result<(), String> {
     // dihedral_coeff <a>-<b>-<c>-<d> m  K1 n1 d1  [K2 n2 d2 ...]
-    // → periodic kernel keys k{m}/n{m}/d{m} (d in degrees, kernel converts).
+    // → periodic kernel keys k{m}/n{m}/d{m} (phase d deg→rad at read).
     let [a, b, c, d] = split_types::<4>(rest.first(), "dihedral", where_)?;
     let m: usize = get(rest, 1, "dihedral m", where_)?
         .parse()
@@ -243,7 +244,7 @@ fn add_dihedral(
         )?;
         owned.push((format!("k{}", term + 1), k));
         owned.push((format!("n{}", term + 1), n));
-        owned.push((format!("d{}", term + 1), phase)); // degrees; kernel → radians
+        owned.push((format!("d{}", term + 1), phase.to_radians())); // deg→rad at read
     }
     let params: Vec<(&str, f64)> = owned.iter().map(|(k, v)| (k.as_str(), *v)).collect();
     style_mut(ff, "dihedral", "fourier", "dihedral_style fourier", where_)?
@@ -256,7 +257,7 @@ fn add_improper(
     rest: &[&str],
     where_: &dyn Fn() -> String,
 ) -> Result<(), String> {
-    // improper_coeff <a>-<b>-<c>-<d> K chi0(deg)   (k = 2K; chi0 kept in degrees)
+    // improper_coeff <a>-<b>-<c>-<d> K chi0(deg)   (k = 2K; chi0 deg→rad at read)
     let [a, b, c, d] = split_types::<4>(rest.first(), "improper", where_)?;
     let k = parse_f64(get(rest, 1, "improper K", where_)?, "improper K", where_)?;
     let chi0_deg = parse_f64(
@@ -271,7 +272,13 @@ fn add_improper(
         "improper_style harmonic",
         where_,
     )?
-    .def_impropertype(&a, &b, &c, &d, &[("k", 2.0 * k), ("chi0", chi0_deg)]);
+    .def_impropertype(
+        &a,
+        &b,
+        &c,
+        &d,
+        &[("k", 2.0 * k), ("chi0", chi0_deg.to_radians())],
+    );
     Ok(())
 }
 
@@ -395,16 +402,17 @@ dihedral_coeff c3-c3-oh-ho 1 0.060000 3 0.000000
         assert!((bt.params.get("k").unwrap() - 457.78).abs() < 1e-6, "k");
         assert!((bt.params.get("r0").unwrap() - 1.5354).abs() < 1e-9, "r0");
 
-        // angle: K 76.79 → k = 153.58 ; theta0 kept in degrees (kernel converts).
+        // angle: K 76.79 → k = 153.58 ; theta0 normalized to radians at read.
         let angle = ff.get_style("angle", "harmonic").unwrap();
         let at = &angle_types(angle)[0];
         assert!((at.params.get("k").unwrap() - 153.58).abs() < 1e-6, "ak");
         assert!(
-            (at.params.get("theta0").unwrap() - 109.66).abs() < 1e-12,
+            (at.params.get("theta0").unwrap() - 109.66_f64.to_radians()).abs() < 1e-12,
             "theta0"
         );
 
-        // dihedral fourier → periodic keys k1/n1/d1 (d kept in degrees).
+        // dihedral fourier → periodic keys k1/n1/d1 (phase d normalized to radians;
+        // 0° → 0 rad).
         let dih = ff.get_style("dihedral", "fourier").unwrap();
         let dt = &dihedral_types(dih)[0];
         assert!((dt.params.get("k1").unwrap() - 0.06).abs() < 1e-12, "k1");

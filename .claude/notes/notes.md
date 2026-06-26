@@ -17,6 +17,20 @@ status change) and conflicts with `CLAUDE.md`.
 
 ---
 
+## 2026-06-19 — GAFF: AmberTools-only, no native molrs GAFF
+**Decision:** GAFF support is **AmberTools (antechamber) delegation only** — no
+native molrs GAFF typifier, `gaff.dat` parser, or clean-room typing. The
+`gaff-typifier-redesign` spec (and the `gaff-typifier-01..05` chain it superseded)
+is dropped; do not re-propose a native GAFF path. The `ff/typifier/estimate` GAFF
+*empirical formulas* (Badger / Wang2004 Eq.5 / parmchk2 substitution) are
+**unaffected** — that is a general missing-parameter estimator, not GAFF typing.
+**Why:** Trustworthy native GAFF typing would need a clean-room reimplementation of
+antechamber's GPL `atomtype.c` ruleset + a vendored `gaff.dat` + an
+antechamber-parity corpus. AmberTools already produces both the atom types and
+AM1-BCC charges authoritatively; reimplementing it in molrs is not worth the
+maintenance + correctness burden.
+**Status:** provisional
+
 ## 2026-06-12 — petgraph: removed from molrs-core, KEPT in molrs-io (VF2)
 **Decision:** `molrs-core` no longer depends on petgraph (spec `core-drop-petgraph`,
 commit eedc1e6): `Topology`/`topo_distances`/`chem::rings` run on native MolGraph

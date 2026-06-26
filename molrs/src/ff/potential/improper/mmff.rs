@@ -1,7 +1,5 @@
 //! MMFF94 out-of-plane bending: E = 0.5*143.9325*koop*chi^2 (Wilson angle)
 
-use std::collections::HashMap;
-
 use crate::ff::forcefield::Params;
 use crate::ff::potential::Potential;
 use crate::ff::potential::geometry::{cross3, dot3, mag3, sub3, validate_coords};
@@ -82,10 +80,11 @@ impl Potential for MMFFOutOfPlane {
 
 pub fn mmff_oop_ctor(
     _sp: &Params,
-    tp: &[(&str, &Params)],
+    _tp: &[(&str, &Params)],
     frame: &Frame,
 ) -> Result<Box<dyn Potential>, String> {
-    let type_map: HashMap<&str, &Params> = tp.iter().copied().collect();
+    // Per-instance parameters: the MMFF typifier baked koop onto each improper.
+    // This kernel only reads the column and evaluates.
     let block = frame
         .get("impropers")
         .ok_or("mmff_oop: missing \"impropers\"")?;
@@ -93,7 +92,9 @@ pub fn mmff_oop_ctor(
     let jc = block.get_uint("atomj").ok_or("missing atomj")?;
     let kc = block.get_uint("atomk").ok_or("missing atomk")?;
     let lc = block.get_uint("atoml").ok_or("missing atoml")?;
-    let tc = block.get_string("type").ok_or("missing type")?;
+    let koopc = block
+        .get_float("koop")
+        .ok_or("mmff_oop: missing \"koop\" column (typifier did not bake oop params)")?;
 
     let n = ic.len();
     let (mut ai, mut aj, mut ak, mut al, mut koop) = (
@@ -105,14 +106,11 @@ pub fn mmff_oop_ctor(
     );
 
     for idx in 0..n {
-        let p = type_map
-            .get(tc[idx].as_str())
-            .ok_or_else(|| format!("mmff_oop: unknown '{}'", tc[idx]))?;
         ai.push(ic[idx] as usize);
         aj.push(jc[idx] as usize);
         ak.push(kc[idx] as usize);
         al.push(lc[idx] as usize);
-        koop.push(p.get("koop").ok_or("missing koop")? as F);
+        koop.push(koopc[idx] as F);
     }
     Ok(Box::new(MMFFOutOfPlane {
         atom_i: ai,

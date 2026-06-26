@@ -39,6 +39,22 @@ pub struct QueryGraph {
     pub recursives: Vec<QueryGraph>,
 }
 
+impl QueryGraph {
+    /// Collect every `%LABEL` context-label appearing anywhere in this query
+    /// graph, including inside recursive `$(...)` subpatterns. Order is the
+    /// traversal order; duplicates are kept (callers dedup as needed).
+    pub fn context_labels(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for atom in &self.atoms {
+            atom.query.collect_context_labels(&mut out);
+        }
+        for sub in &self.recursives {
+            out.extend(sub.context_labels());
+        }
+        out
+    }
+}
+
 /// Parse a SMARTS string into a [`QueryGraph`].
 pub fn parse(smarts: &str) -> Result<QueryGraph, MolRsError> {
     let mut p = Parser::new(smarts);
@@ -59,6 +75,11 @@ struct Parser<'s> {
     /// Recursive `$(...)` subpatterns accumulated during parsing; moved into
     /// the [`QueryGraph`] when the top-level parse completes.
     recursive_stash: Vec<QueryGraph>,
+    /// Whether the next bracket-atom primitive is the *leading* one (no prior
+    /// primitive parsed inside the current `[...]`). Disambiguates a leading
+    /// `H` (= hydrogen element) from a following `H<n>` (= total-H count), as
+    /// in RDKit / molpy: `[H]` is the element, `[CH3]` / `[C;H1]` is a count.
+    bracket_first_primitive: bool,
 }
 
 /// State threaded through a single connected SMARTS branch tree.
@@ -75,6 +96,7 @@ impl<'s> Parser<'s> {
             pos: 0,
             src,
             recursive_stash: Vec::new(),
+            bracket_first_primitive: false,
         }
     }
 
@@ -338,6 +360,9 @@ impl<'s> Parser<'s> {
     fn parse_bracket_atom(&mut self) -> Result<QueryAtom, MolRsError> {
         debug_assert_eq!(self.peek(), Some('['));
         self.bump(); // consume '['
+        // The first primitive inside the bracket is in "leading" position, where
+        // a bare `H` denotes the hydrogen element rather than an H count.
+        self.bracket_first_primitive = true;
         let mut map_label = None;
         let query = self.parse_atom_low(&mut map_label)?;
         if self.peek() != Some(']') {
@@ -401,6 +426,10 @@ impl<'s> Parser<'s> {
 
     /// A single atom primitive inside brackets.
     fn parse_atom_primitive(&mut self, map: &mut Option<u32>) -> Result<AtomQuery, MolRsError> {
+        // Consume the "leading primitive" flag: only the first primitive of a
+        // bracket atom sees it set. A leading bare `H` is the hydrogen element.
+        let leading = self.bracket_first_primitive;
+        self.bracket_first_primitive = false;
         let c = self
             .peek()
             .ok_or_else(|| self.err("unexpected end of atom"))?;
@@ -427,8 +456,18 @@ impl<'s> Parser<'s> {
             }
             'H' => {
                 self.bump();
-                let n = self.read_u32().unwrap_or(1);
-                Ok(AtomQuery::Prim(AtomPrimitive::TotalH(n)))
+                // RDKit / molpy disambiguation: a *leading* `H` not followed by
+                // a digit is the hydrogen element (`[H]`, `[H][C...]`); an `H`
+                // after another primitive, or `H<n>`, is the total-H count
+                // (`[CH3]`, `[C;H1]`, `[H1]`).
+                let next_is_digit = self.peek().is_some_and(|c| c.is_ascii_digit());
+                if leading && !next_is_digit {
+                    // Hydrogen as an element (atomic number 1).
+                    Ok(AtomQuery::Prim(AtomPrimitive::AliphaticElement(1)))
+                } else {
+                    let n = self.read_u32().unwrap_or(1);
+                    Ok(AtomQuery::Prim(AtomPrimitive::TotalH(n)))
+                }
             }
             'X' => {
                 self.bump();
@@ -472,6 +511,7 @@ impl<'s> Parser<'s> {
                 Ok(AtomQuery::Prim(AtomPrimitive::RingBondCount(n)))
             }
             '+' | '-' => self.parse_charge(),
+            '%' => self.parse_context_label(),
             ':' => {
                 // atom-map label
                 self.bump();
@@ -552,6 +592,40 @@ impl<'s> Parser<'s> {
         }
         let charge = if positive { magnitude } else { -magnitude };
         Ok(AtomQuery::Prim(AtomPrimitive::Charge(charge)))
+    }
+
+    // -- context label -------------------------------------------------------
+
+    /// Parse a `%LABEL` context-label predicate (a molrs extension, only valid
+    /// inside a bracket atom). `%` here is **not** a ring closure: standard
+    /// SMARTS ring closures (`%nn`) appear at the branch level outside brackets
+    /// and require two digits, whereas a context label is `%` followed by a
+    /// non-empty identifier (letters / digits / `_`, e.g. `%opls_154`). A bare
+    /// `%` or a label beginning with a digit is rejected as malformed.
+    fn parse_context_label(&mut self) -> Result<AtomQuery, MolRsError> {
+        debug_assert_eq!(self.peek(), Some('%'));
+        self.bump(); // consume '%'
+        // The first char must be a letter or '_' so a context label never
+        // collides with a numeric ring closure (which is parsed at the branch
+        // level, never reaching this bracket-atom path).
+        match self.peek() {
+            Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+            _ => {
+                return Err(
+                    self.err("'%LABEL' context label needs an identifier (letter or '_' first)")
+                );
+            }
+        }
+        let mut name = String::new();
+        while let Some(c) = self.peek() {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                name.push(c);
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        Ok(AtomQuery::Prim(AtomPrimitive::HasContextLabel(name)))
     }
 
     // -- lexing helpers ------------------------------------------------------
