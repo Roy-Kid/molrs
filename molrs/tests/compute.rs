@@ -25,3 +25,6 @@ mod reorientation;
 mod spatial_distribution;
 #[path = "compute/van_hove.rs"]
 mod van_hove;
+#[cfg(feature = "voronoi")]
+#[path = "compute/voronoi.rs"]
+mod voronoi;

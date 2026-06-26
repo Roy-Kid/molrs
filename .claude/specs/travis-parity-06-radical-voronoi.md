@@ -1,6 +1,6 @@
 ---
 title: Radical (Laguerre) Voronoi tessellation + domain & void analysis
-status: approved
+status: code-complete
 created: 2026-06-26
 ---
 
@@ -89,13 +89,13 @@ neighbors); WASM-clean on the default native backend.
 - `molrs/tests/compute/voronoi.rs` (new) — volume-sum + analytic-cell + domain/void tests.
 
 ## Tasks
-- [ ] Write failing tessellation tests: total cell volume = box volume (1e-9); a simple cubic lattice (equal radii) gives unit-cube cells; a 2-atom unequal-radius case puts the face at the analytic radical plane.
-- [ ] Write failing periodic test: cells wrap correctly across box edges; neighbor relation is symmetric (i lists j ⇔ j lists i).
-- [ ] Write failing domain test: a constructed bilayer of two labels yields the expected two domains; an interpenetrating mix yields one percolating domain.
-- [ ] Write failing void test: a lattice with a removed atom yields one cavity of ~the expected volume.
-- [ ] Implement native periodic radical-Voronoi cell clipping (voro++ algorithm) reusing `NeighborQuery` for candidate neighbors.
-- [ ] Implement `DomainAnalysis` (union-find over cell adjacency) + `VoidAnalysis`.
-- [ ] Add the `voronoi` feature; rustdoc with radical-plane equation + citations; run fmt/clippy/test under `--features voronoi`.
+- [x] Write failing tessellation tests: total cell volume = box volume (1e-9); a simple cubic lattice (equal radii) gives unit-cube cells; a 2-atom unequal-radius case puts the face at the analytic radical plane.
+- [x] Write failing periodic test: cells wrap correctly across box edges; neighbor relation is symmetric (i lists j ⇔ j lists i).
+- [x] Write failing domain test: a constructed bilayer of two labels yields the expected two domains; an interpenetrating mix yields one percolating domain.
+- [x] Write failing void test: a lattice with a removed atom yields one cavity of ~the expected volume.
+- [x] Implement native periodic radical-Voronoi cell clipping (voro++ algorithm) reusing `NeighborQuery` for candidate neighbors.
+- [x] Implement `DomainAnalysis` (union-find over cell adjacency) + `VoidAnalysis`.
+- [x] Add the `voronoi` feature; rustdoc with radical-plane equation + citations; run fmt/clippy/test under `--features voronoi`.
 
 ## Testing strategy
 - **Volume conservation** (`scientific`): `Σ volume = box volume` to 1e-9 — the

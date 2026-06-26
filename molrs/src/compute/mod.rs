@@ -80,6 +80,8 @@ pub mod traits;
 pub mod util;
 pub mod validate;
 pub mod van_hove;
+#[cfg(feature = "voronoi")]
+pub mod voronoi;
 
 // Re-exports
 pub use center_of_mass::{COMResult, CenterOfMass};
@@ -144,3 +146,7 @@ pub use result::{ComputeResult, DescriptorRow};
 pub use spectra::{RamanSpectrumResult, SpectrumResult};
 pub use traits::{Compute, Fit};
 pub use van_hove::{VanHove, VanHoveResult};
+#[cfg(feature = "voronoi")]
+pub use voronoi::{
+    DomainAnalysis, DomainResult, Face, RadicalVoronoi, VoidAnalysis, VoidResult, VoronoiCells,
+};

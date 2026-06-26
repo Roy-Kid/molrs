@@ -25,7 +25,8 @@ criteria:
       Cells wrap across periodic boundaries; the neighbor relation is symmetric
       (i has j as a face-neighbor iff j has i), and the shared face areas agree
       within 1e-9.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-004
     summary: domain analysis recovers constructed domains
     type: code
@@ -33,7 +34,8 @@ criteria:
       A constructed two-label bilayer yields exactly two domains of the expected
       sizes; an interpenetrating mixture yields a single percolating domain — via
       union-find over the cell-adjacency graph.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-005
     summary: void analysis recovers a constructed cavity
     type: code
@@ -41,7 +43,8 @@ criteria:
       A lattice with one atom removed yields a single cavity whose volume matches the
       removed cell's volume within tolerance, and a total void fraction consistent
       with the construction.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-006
     summary: native backend is WASM-clean; full check green
     type: runtime
@@ -49,7 +52,8 @@ criteria:
       The default `voronoi` feature builds for wasm32 with no C/C++ FFI dependency;
       any voro_rs oracle is behind a separate non-default feature; cargo fmt --check
       + clippy -D warnings + cargo test --features voronoi pass.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
 ---
 
 # Acceptance criteria
