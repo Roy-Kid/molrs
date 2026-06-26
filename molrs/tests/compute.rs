@@ -25,6 +25,8 @@ mod reorientation;
 mod spatial_distribution;
 #[path = "compute/spectra_chiral.rs"]
 mod spectra_chiral;
+#[path = "compute/travis_parity.rs"]
+mod travis_parity;
 #[path = "compute/van_hove.rs"]
 mod van_hove;
 #[cfg(feature = "voronoi")]

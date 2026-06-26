@@ -9,7 +9,8 @@ criteria:
       histogramming it with DistributionFunction yields a normalized density whose
       peak bin contains 60° (±1 bin), with f64 agreement to a hand-computed angle
       within 1e-9 before binning.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26  # TRAVIS ADF parity (tests/compute/travis_parity.rs)
   - id: ac-002
     summary: DihedralObservable matches IUPAC-signed reference torsions
     type: scientific
