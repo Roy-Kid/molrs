@@ -1,6 +1,6 @@
 ---
 title: Spatial Distribution Function (SDF) — reference-frame 3-D density + orientation
-status: approved
+status: code-complete
 created: 2026-06-26
 ---
 
@@ -87,12 +87,12 @@ WASM-clean.
 - `molrs/tests/compute/spatial_distribution.rs` (new) — alignment + density + orientation tests.
 
 ## Tasks
-- [ ] Write failing Kabsch tests: aligning a randomly rotated/translated rigid copy back to its template recovers R (det=+1, no reflection) with RMSD ≈ 0 within 1e-9.
-- [ ] Write failing SDF test: a target placed at a fixed body-frame offset around a tumbling reference molecule accumulates a single sharp density voxel at that offset (lab-frame GaussianDensity would smear it into a shell).
-- [ ] Write failing orientation test: a target vector fixed in the reference frame yields a uniform mean-vector field; a randomized one averages toward zero.
-- [ ] Implement native Kabsch (covariance + 3×3 eigen, reflection guard) reusing the existing tensor eigen path.
-- [ ] Implement `SpatialDistribution` (align → unwrap → bin) + bulk normalization + optional orientation field.
-- [ ] Rustdoc with Kabsch/SDF equations + citations; run fmt/clippy/test.
+- [x] Write failing Kabsch tests: aligning a randomly rotated/translated rigid copy back to its template recovers R (det=+1, no reflection) with RMSD ≈ 0 within 1e-9.
+- [x] Write failing SDF test: a target placed at a fixed body-frame offset around a tumbling reference molecule accumulates a single sharp density voxel at that offset (lab-frame GaussianDensity would smear it into a shell).
+- [x] Write failing orientation test: a target vector fixed in the reference frame yields a uniform mean-vector field; a randomized one averages toward zero.
+- [x] Implement native Kabsch (covariance + 3×3 eigen, reflection guard) reusing the existing tensor eigen path.
+- [x] Implement `SpatialDistribution` (align → unwrap → bin) + bulk normalization + optional orientation field.
+- [x] Rustdoc with Kabsch/SDF equations + citations; run fmt/clippy/test.
 
 ## Testing strategy
 - **Alignment** (`scientific`): exact recovery of a known rotation; proper-rotation

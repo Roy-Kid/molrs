@@ -25,14 +25,16 @@ criteria:
     pass_when: |
       For an ideal-gas target distribution, the bulk-normalized g_SDF tends to 1
       (within statistical tolerance) in voxels far from the reference COM.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-004
     summary: target unwrapping honors PBC about the reference COM
     type: code
     pass_when: |
       A target atom on the opposite side of a periodic boundary from the reference
       COM is binned at its minimum-image position relative to that COM.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-005
     summary: orientation field behaves correctly
     type: code
@@ -40,7 +42,8 @@ criteria:
       A target unit vector fixed in the reference frame yields a per-voxel mean
       vector equal to it (norm ≈ 1); a uniformly random target vector yields a mean
       vector with norm → 0.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-006
     summary: degenerate reference rejected; full check green
     type: runtime
@@ -48,7 +51,8 @@ criteria:
       A reference set with fewer than 3 non-collinear atoms returns a typed
       ComputeError; the module is BLAS-free/WASM-clean; and cargo fmt --check +
       clippy -D warnings + cargo test --features compute pass.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
 ---
 
 # Acceptance criteria

@@ -17,3 +17,5 @@ mod distribution;
 mod msd;
 #[path = "compute/rdf.rs"]
 mod rdf;
+#[path = "compute/spatial_distribution.rs"]
+mod spatial_distribution;

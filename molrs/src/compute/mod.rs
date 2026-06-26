@@ -85,7 +85,8 @@ pub use cluster::{Cluster, ClusterProperties, ClusterPropertiesResult, ClusterRe
 pub use cluster_centers::{ClusterCenters, ClusterCentersResult};
 pub use density::{
     CorrelationFunction, CorrelationFunctionResult, GaussianDensity, GaussianDensityResult,
-    LocalDensity, LocalDensityResult, SphereVoxelization, SphereVoxelizationResult,
+    GridSpec, LocalDensity, LocalDensityResult, SpatialDistribution, SpatialDistributionResult,
+    SphereVoxelization, SphereVoxelizationResult,
 };
 pub use dielectric::{
     StaticDielectricResult, compute_current_density, compute_dipole_moment, decompose_current,
