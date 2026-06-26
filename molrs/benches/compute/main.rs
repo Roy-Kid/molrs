@@ -9,6 +9,7 @@ mod msd;
 mod radius_of_gyration;
 mod rdf;
 mod spectra;
+mod van_hove;
 #[cfg(feature = "voronoi")]
 mod voronoi;
 
@@ -26,6 +27,7 @@ criterion_main!(
     radius_of_gyration::benches,
     dielectric::benches,
     spectra::benches,
+    van_hove::benches,
     voronoi::benches,
 );
 
@@ -41,4 +43,5 @@ criterion_main!(
     radius_of_gyration::benches,
     dielectric::benches,
     spectra::benches,
+    van_hove::benches,
 );

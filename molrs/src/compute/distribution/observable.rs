@@ -9,7 +9,7 @@
 use molrs::spatial::region::simbox::SimBox;
 use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
-use ndarray::{Array2, Ix1, s};
+use ndarray::Array2;
 
 use crate::compute::error::ComputeError;
 
@@ -129,57 +129,39 @@ pub trait Observable {
 }
 
 /// Read the `atoms` x/y/z columns of a frame into an `N×3` array.
+///
+/// Thin wrapper over [`compute::util::get_positions_ref`](crate::compute::util)
+/// (the shared column extractor) materialized into an owned `Array2` so the
+/// observables can index per tuple.
 pub(crate) fn positions<FA: FrameAccess>(frame: &FA) -> Result<Array2<F>, ComputeError> {
-    let col = |c: &'static str| -> Result<_, ComputeError> {
-        let v = frame
-            .get_float("atoms", c)
-            .ok_or(ComputeError::MissingColumn {
-                block: "atoms",
-                col: c,
-            })?;
-        v.into_dimensionality::<Ix1>()
-            .map_err(|_| ComputeError::BadShape {
-                expected: "1-D column".to_string(),
-                got: "non-1-D".to_string(),
-            })
-    };
-    let x = col("x")?;
-    let y = col("y")?;
-    let z = col("z")?;
-    let n = x.len();
-    if y.len() != n || z.len() != n {
+    let (xp, yp, zp) = crate::compute::util::get_positions_ref(frame)?;
+    let (xs, ys, zs) = (xp.slice(), yp.slice(), zp.slice());
+    let n = xs.len();
+    if ys.len() != n || zs.len() != n {
         return Err(ComputeError::DimensionMismatch {
             expected: n,
-            got: y.len().min(z.len()),
+            got: ys.len().min(zs.len()),
             what: "atoms x/y/z length",
         });
     }
     let mut pos = Array2::<F>::zeros((n, 3));
     for i in 0..n {
-        pos[[i, 0]] = x[i];
-        pos[[i, 1]] = y[i];
-        pos[[i, 2]] = z[i];
+        pos[[i, 0]] = xs[i];
+        pos[[i, 1]] = ys[i];
+        pos[[i, 2]] = zs[i];
     }
     Ok(pos)
 }
 
 /// Minimum-image displacement `b - a` when a `SimBox` is present, else the raw
-/// separation. Delegates to [`SimBox::delta`] so distance DFs and
-/// [`compute::rdf`](crate::compute::rdf) agree on the same pair (ac-003).
+/// separation. Routes through the shared
+/// [`compute::util::mic_disp`](crate::compute::util) so there is one
+/// minimum-image implementation across `compute`, and distance DFs agree with
+/// [`compute::rdf`](crate::compute::rdf) on the same pair (ac-003).
 pub(crate) fn displacement(simbox: Option<&SimBox>, pos: &Array2<F>, a: usize, b: usize) -> [F; 3] {
-    match simbox {
-        Some(sb) => {
-            let pa = pos.slice(s![a..a + 1, ..]);
-            let pb = pos.slice(s![b..b + 1, ..]);
-            let d = sb.delta(pa, pb, true); // b - a, minimum image
-            [d[[0, 0]], d[[0, 1]], d[[0, 2]]]
-        }
-        None => [
-            pos[[b, 0]] - pos[[a, 0]],
-            pos[[b, 1]] - pos[[a, 1]],
-            pos[[b, 2]] - pos[[a, 2]],
-        ],
-    }
+    let from = [pos[[a, 0]], pos[[a, 1]], pos[[a, 2]]];
+    let to = [pos[[b, 0]], pos[[b, 1]], pos[[b, 2]]];
+    crate::compute::util::mic_disp(simbox, from, to)
 }
 
 pub(crate) fn norm(v: [F; 3]) -> F {

@@ -307,6 +307,11 @@ impl VoronoiIntegration {
 }
 
 // --- small orthorhombic vector helpers (the voronoi module is ortho-only) ---
+//
+// ponytail: specialized orthorhombic MIC over a precomputed box-length array,
+// called once per voxel (millions of times) in the hot Pass-B loop below;
+// `compute::util::mic_disp` is the general (box-kind-resolving) path used
+// elsewhere. Kept local on purpose to avoid per-iteration box dispatch.
 
 #[inline]
 fn sub(a: [F; 3], b: [F; 3]) -> [F; 3] {

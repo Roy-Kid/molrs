@@ -40,6 +40,7 @@
 //!   as [`msd`](crate::compute::msd) does — so the second-moment bridge holds.
 //!   Distinct distances use the minimum image (matching `rdf`).
 
+use molrs::spatial::neighbors::NeighborQuery;
 use molrs::store::frame_access::FrameAccess;
 use molrs::types::F;
 use ndarray::{Array1, Array2};
@@ -48,7 +49,7 @@ use crate::compute::distribution::Histogram1d;
 use crate::compute::error::ComputeError;
 use crate::compute::result::ComputeResult;
 use crate::compute::traits::Compute;
-use crate::compute::util::{get_positions_ref, mic_disp};
+use crate::compute::util::get_positions_ref;
 
 /// Van Hove correlation analyzer.
 ///
@@ -120,8 +121,9 @@ impl Compute for VanHove {
         }
         let n_frames = frames.len();
 
-        // Gather positions [frame][particle] = [x,y,z], validating constant N.
-        let mut pos: Vec<Vec<[F; 3]>> = Vec::with_capacity(n_frames);
+        // Gather positions as one `N×3` array per frame (validating constant N).
+        // `Array2` so the distinct part can hand views to `NeighborQuery`.
+        let mut pos: Vec<Array2<F>> = Vec::with_capacity(n_frames);
         let mut n_particles: Option<usize> = None;
         for frame in frames {
             let (xp, yp, zp) = get_positions_ref(*frame)?;
@@ -138,7 +140,13 @@ impl Compute for VanHove {
                 }
                 _ => {}
             }
-            pos.push((0..m).map(|i| [xs[i], ys[i], zs[i]]).collect());
+            let mut arr = Array2::<F>::zeros((m, 3));
+            for i in 0..m {
+                arr[[i, 0]] = xs[i];
+                arr[[i, 1]] = ys[i];
+                arr[[i, 2]] = zs[i];
+            }
+            pos.push(arr);
         }
         let n = n_particles.unwrap_or(0);
 
@@ -172,23 +180,29 @@ impl Compute for VanHove {
                 let a = &pos[tau];
                 let b = &pos[tau + lag];
                 // Self: raw (unwrapped) displacement magnitude — matches msd.
-                for (ai, bi) in a.iter().zip(b.iter()) {
-                    let dx = bi[0] - ai[0];
-                    let dy = bi[1] - ai[1];
-                    let dz = bi[2] - ai[2];
+                for i in 0..n {
+                    let dx = b[[i, 0]] - a[[i, 0]];
+                    let dy = b[[i, 1]] - a[[i, 1]];
+                    let dz = b[[i, 2]] - a[[i, 2]];
                     hist_self.add((dx * dx + dy * dy + dz * dz).sqrt());
                 }
                 // Distinct: min-image distance from r_i(τ) to r_j(τ+lag), j≠i.
-                if volume.is_some() {
-                    for (i, ai) in a.iter().enumerate() {
-                        for (j, bj) in b.iter().enumerate() {
-                            if i == j {
-                                continue;
-                            }
-                            let d = mic_disp(simbox, *ai, *bj);
-                            let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-                            hist_dist.add(dist);
+                // Use the same `NeighborQuery` spatial search as `compute::rdf`
+                // (cutoff = r_max): every pair within r_max is found and binned,
+                // every pair beyond it would be dropped by the histogram anyway,
+                // so the result is identical to the old all-pairs loop but
+                // O(N·neighbours) instead of O(N²). The self pair (i == j, the
+                // self part) is excluded.
+                if let Some(sb) = simbox {
+                    let nlist = NeighborQuery::new(sb, a.view(), self.r_max).query(b.view());
+                    let ref_i = nlist.point_indices(); // index into a (= r_i(τ))
+                    let oth_j = nlist.query_point_indices(); // index into b (= r_j(τ+lag))
+                    let d2 = nlist.dist_sq();
+                    for k in 0..nlist.n_pairs() {
+                        if ref_i[k] == oth_j[k] {
+                            continue;
                         }
+                        hist_dist.add(d2[k].sqrt());
                     }
                 }
                 n_origins += 1;
