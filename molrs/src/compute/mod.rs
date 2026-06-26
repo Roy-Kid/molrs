@@ -114,7 +114,9 @@ pub use fit::{
     EinsteinHelfandSpectrum, EwaldBoundary, GreenKuboConductivity, GreenKuboConductivityResult,
     GreenKuboDiffusion, GreenKuboSpectrum, IRFlux, IRFluxResult, IRSpectrum, LinearFit,
     LinearFitResult, Plateau, PlateauResult, PowerSpectrum, RamanSpectrum, RamanTensor,
-    RamanTensorResult, RunningIntegral, RunningIntegralResult, VACF, VacfResult,
+    RamanTensorResult, ResonanceRamanSpectrum, ResonanceRamanTensor, RoaCrossResult,
+    RoaCrossTensor, RoaSpectrum, RunningIntegral, RunningIntegralResult, VACF, VacfResult,
+    VcdCrossFlux, VcdCrossResult, VcdSpectrum,
 };
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
 pub use hbond::{

@@ -31,7 +31,8 @@ criteria:
       The new fits call fit::spectral::window_and_fft / forward_fft_onesided and emit
       the same cm⁻¹ frequency grid as IRSpectrum/RamanSpectrum (verified by identical
       grids on identical input length/dt).
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-005
     summary: edge cases + full check green
     type: runtime
@@ -39,7 +40,8 @@ criteria:
       A zero-length input series returns a typed ComputeError; a single-molecule input
       is well-defined (no cross-molecule terms); the module stays WASM-clean and
       cargo fmt --check + clippy -D warnings + cargo test --features compute pass.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
 ---
 
 # Acceptance criteria

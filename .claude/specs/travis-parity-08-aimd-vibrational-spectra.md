@@ -1,6 +1,6 @@
 ---
 title: AIMD vibrational spectra — VCD, ROA, and resonance Raman
-status: approved
+status: code-complete
 created: 2026-06-26
 ---
 
@@ -94,12 +94,12 @@ WASM-clean.
 - `molrs/tests/compute/spectra_chiral.rs` (new) — symmetry + consistency tests.
 
 ## Tasks
-- [ ] Write failing VCD tests: an achiral (mirror-symmetric) synthetic system gives ~zero VCD; an enantiomer pair gives equal-and-opposite VCD spectra (the defining chiral signature).
-- [ ] Write failing ROA test: enantiomers give sign-flipped ROA; an achiral system gives ~zero.
-- [ ] Write failing consistency test: peak positions (cm⁻¹) of VCD/ROA coincide with the IR/Raman peaks of the same trajectory (same vibrational frequencies, different intensities/signs).
-- [ ] Implement `VcdCrossFlux`/`RoaCrossTensor`/`ResonanceRamanTensor` raw computes (reusing `dielectric` current/magnetic machinery).
-- [ ] Implement `VcdSpectrum`/`RoaSpectrum`/`ResonanceRamanSpectrum` fits reusing `window_and_fft` + cm⁻¹ grid + IR/Raman prefactor conventions.
-- [ ] Rustdoc with the cross-correlation definitions + citations + the shared-prefactor note; run fmt/clippy/test.
+- [x] Write failing VCD tests: an achiral (mirror-symmetric) synthetic system gives ~zero VCD; an enantiomer pair gives equal-and-opposite VCD spectra (the defining chiral signature).
+- [x] Write failing ROA test: enantiomers give sign-flipped ROA; an achiral system gives ~zero.
+- [x] Write failing consistency test: peak positions (cm⁻¹) of VCD/ROA coincide with the IR/Raman peaks of the same trajectory (same vibrational frequencies, different intensities/signs).
+- [x] Implement `VcdCrossFlux`/`RoaCrossTensor`/`ResonanceRamanTensor` raw computes (reusing `dielectric` current/magnetic machinery).
+- [x] Implement `VcdSpectrum`/`RoaSpectrum`/`ResonanceRamanSpectrum` fits reusing `window_and_fft` + cm⁻¹ grid + IR/Raman prefactor conventions.
+- [x] Rustdoc with the cross-correlation definitions + citations + the shared-prefactor note; run fmt/clippy/test.
 
 ## Testing strategy
 - **Chiral sign law** (`scientific`): enantiomers ⇒ equal-and-opposite VCD/ROA;
