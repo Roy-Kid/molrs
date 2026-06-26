@@ -62,6 +62,7 @@ pub mod environment;
 pub mod error;
 pub mod fit;
 pub mod gyration_tensor;
+pub mod hbond;
 pub mod inertia_tensor;
 pub mod jacf;
 pub mod kmeans;
@@ -114,6 +115,10 @@ pub use fit::{
     RamanTensorResult, RunningIntegral, RunningIntegralResult, VACF, VacfResult,
 };
 pub use gyration_tensor::{GyrationTensor, GyrationTensorResult};
+pub use hbond::{
+    DistKind, HBond, HBondCriterion, HBonds, HBondsResult, LifetimeResult, NetworkResult,
+    hbond_components, hbond_lifetimes, presence_from_hbonds,
+};
 pub use inertia_tensor::{InertiaTensor, InertiaTensorResult};
 // `jacf` is now a documentation-only module: the Green–Kubo conductivity is the
 // `GreenKuboConductivity` (raw ACF) + `fit::RunningIntegral` composition. Its

@@ -13,6 +13,8 @@ mod center_of_mass;
 mod combined_distribution;
 #[path = "compute/distribution.rs"]
 mod distribution;
+#[path = "compute/hbond.rs"]
+mod hbond;
 #[path = "compute/msd.rs"]
 mod msd;
 #[path = "compute/rdf.rs"]

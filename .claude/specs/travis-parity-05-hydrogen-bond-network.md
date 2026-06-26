@@ -1,6 +1,6 @@
 ---
 title: Hydrogen-bond network detection + dynamics
-status: approved
+status: code-complete
 created: 2026-06-26
 ---
 
@@ -89,12 +89,12 @@ Layer discipline: `compute` → `core` (`Topology`, `NeighborQuery`); explicitly
 - `molrs/tests/compute/hbond.rs` (new) — geometry + network + lifetime tests.
 
 ## Tasks
-- [ ] Write failing detection tests: a constructed water dimer at a known geometry is detected as one H-bond; widening the angle past the cutoff drops it; PBC-separated pair is detected via min-image.
-- [ ] Write failing network test: a constructed chain of N H-bonded molecules forms one component of size N; breaking the middle bond splits it into two.
-- [ ] Write failing lifetime test: a synthetic on/off bond series yields the analytically expected continuous vs. intermittent TCF and τ_HB ordering (τ_intermittent ≥ τ_continuous).
-- [ ] Implement `HBondCriterion` + `HBonds` detection over `NeighborQuery` with min-image angle/distance.
-- [ ] Implement `HBondNetwork` via `core::Topology` connected components (no petgraph).
-- [ ] Implement the lifetime adapter over `persist::pair_survival_tcf`; rustdoc with criteria + TCF citations; run fmt/clippy/test.
+- [x] Write failing detection tests: a constructed water dimer at a known geometry is detected as one H-bond; widening the angle past the cutoff drops it; PBC-separated pair is detected via min-image.
+- [x] Write failing network test: a constructed chain of N H-bonded molecules forms one component of size N; breaking the middle bond splits it into two.
+- [x] Write failing lifetime test: a synthetic on/off bond series yields the analytically expected continuous vs. intermittent TCF and τ_HB ordering (τ_intermittent ≥ τ_continuous).
+- [x] Implement `HBondCriterion` + `HBonds` detection over `NeighborQuery` with min-image angle/distance.
+- [x] Implement `HBondNetwork` via `core::Topology` connected components (no petgraph).
+- [x] Implement the lifetime adapter over `persist::pair_survival_tcf`; rustdoc with criteria + TCF citations; run fmt/clippy/test.
 
 ## Testing strategy
 - **Geometry** (`scientific`): known water-dimer geometry detected; angle/distance

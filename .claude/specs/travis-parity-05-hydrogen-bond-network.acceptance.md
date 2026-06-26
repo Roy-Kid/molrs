@@ -16,7 +16,8 @@ criteria:
     pass_when: |
       A donor/acceptor pair separated across a periodic boundary is detected using
       the minimum-image distance and angle, consistent with compute neighbor search.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-003
     summary: network components match a constructed topology
     type: code
@@ -24,14 +25,16 @@ criteria:
       A chain of N H-bonded molecules yields a single connected component of size N;
       removing the central bond yields two components of the expected sizes — all via
       core::Topology.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-004
     summary: no petgraph in the compute hbond path
     type: code
     pass_when: |
       A source/AST scan of compute/hbond finds no use of petgraph; the module builds
       with the `compute` feature alone (the `smiles` feature is NOT required).
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-005
     summary: continuous vs intermittent lifetimes are correct
     type: scientific
@@ -47,7 +50,8 @@ criteria:
       No donors/acceptors → empty result (no panic); self-bonds excluded and no
       double counting; cargo fmt --check + clippy -D warnings +
       cargo test --features compute pass.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
 ---
 
 # Acceptance criteria
