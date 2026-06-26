@@ -217,6 +217,18 @@ impl Poly {
         self.faces = new_faces;
     }
 
+    /// Distance from the generator (the cell-local origin) to the farthest
+    /// vertex. A candidate neighbour whose radical plane lies beyond this
+    /// radius cannot cut the cell — the basis for the O(N) candidate-search
+    /// termination bound in [`super::radical`].
+    pub(crate) fn max_vertex_dist(&self) -> F {
+        self.verts
+            .iter()
+            .map(|v| dot(*v, *v))
+            .fold(0.0, F::max)
+            .sqrt()
+    }
+
     /// Cell volume via outward-face tetrahedra from the origin (the generator,
     /// which is interior): `V = (1/6) Σ_face Σ_fan v0·(va×vb)`.
     pub(crate) fn volume(&self) -> F {
