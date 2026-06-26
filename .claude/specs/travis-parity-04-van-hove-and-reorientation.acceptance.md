@@ -31,7 +31,8 @@ criteria:
     pass_when: |
       Van Hove and Legendre results change by less than a documented tolerance when
       the number of time origins is doubled (statistical convergence, not bias).
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-005
     summary: reorientation is distinct from RotationalAutocorrelation
     type: code
@@ -39,7 +40,8 @@ criteria:
       LegendreReorientation consumes a molecular vector (not a quaternion) and its
       rustdoc cross-references order::RotationalAutocorrelation, documenting that the
       two compute different observables; both remain independently usable.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
   - id: ac-006
     summary: edge cases + full check green
     type: runtime
@@ -47,7 +49,8 @@ criteria:
       A single-frame input yields only the t=0 result; a zero-length reorientation
       vector returns a typed ComputeError; module is WASM-clean and cargo fmt --check
       + clippy -D warnings + cargo test --features compute pass.
-    status: pending
+    status: verified
+    last_checked: 2026-06-26
 ---
 
 # Acceptance criteria

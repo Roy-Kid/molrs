@@ -1,6 +1,6 @@
 ---
 title: Van Hove correlation + Legendre reorientational dynamics
-status: approved
+status: code-complete
 created: 2026-06-26
 ---
 
@@ -81,12 +81,12 @@ WASM-clean.
 - `molrs/tests/compute/van_hove.rs`, `molrs/tests/compute/reorientation.rs` (new).
 
 ## Tasks
-- [ ] Write failing Van Hove t=0 test: `G_d(r,0)` equals ρ·g(r) from the existing RDF (within binning tolerance) and `G_s(r,0)` is a spike in the first bin.
-- [ ] Write failing Van Hove dynamics test: free-particle / known-diffusion trajectory gives a Gaussian `G_s(r,t)` whose width grows as √(2·d·D·t) (matches the MSD slope).
-- [ ] Write failing Legendre test: a vector rotating at constant rate gives `C_1(t)=cos(ωt)`, `C_2(t)=(3cos²(ωt)−1)/2`; a static vector gives `C_ℓ ≡ 1`.
-- [ ] Implement `VanHove` (self + distinct, multi-origin) reusing RDF histogram + neighbor machinery.
-- [ ] Implement `LegendreReorientation` (P1/P2, multi-origin) + DebyeFit-based τ_c example.
-- [ ] Rustdoc with cited definitions + the explicit contrast vs. `RotationalAutocorrelation`; run fmt/clippy/test.
+- [x] Write failing Van Hove t=0 test: `G_d(r,0)` equals ρ·g(r) from the existing RDF (within binning tolerance) and `G_s(r,0)` is a spike in the first bin.
+- [x] Write failing Van Hove dynamics test: free-particle / known-diffusion trajectory gives a Gaussian `G_s(r,t)` whose width grows as √(2·d·D·t) (matches the MSD slope).
+- [x] Write failing Legendre test: a vector rotating at constant rate gives `C_1(t)=cos(ωt)`, `C_2(t)=(3cos²(ωt)−1)/2`; a static vector gives `C_ℓ ≡ 1`.
+- [x] Implement `VanHove` (self + distinct, multi-origin) reusing RDF histogram + neighbor machinery.
+- [x] Implement `LegendreReorientation` (P1/P2, multi-origin) + DebyeFit-based τ_c example.
+- [x] Rustdoc with cited definitions + the explicit contrast vs. `RotationalAutocorrelation`; run fmt/clippy/test.
 
 ## Testing strategy
 - **RDF consistency** (`scientific`): `G_d(r,0) = ρ g(r)` cross-checked against

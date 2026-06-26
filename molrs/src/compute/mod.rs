@@ -78,6 +78,7 @@ pub mod spectra;
 pub mod traits;
 pub mod util;
 pub mod validate;
+pub mod van_hove;
 
 // Re-exports
 pub use center_of_mass::{COMResult, CenterOfMass};
@@ -122,8 +123,9 @@ pub use msd::{MSD, MSDResult, MSDTimeSeries, MsdMode};
 pub use onsager::{OnsagerCorrelation, OnsagerResult};
 pub use order::{
     ContinuousCoordination, ContinuousCoordinationResult, Cubatic, CubaticResult, Hexatic,
-    HexaticResult, Nematic, NematicResult, RotationalAutocorrelation,
-    RotationalAutocorrelationResult, SolidLiquid, SolidLiquidResult, Steinhardt, SteinhardtResult,
+    HexaticResult, LegendreReorientation, LegendreReorientationResult, Nematic, NematicResult,
+    RotationalAutocorrelation, RotationalAutocorrelationResult, SolidLiquid, SolidLiquidResult,
+    Steinhardt, SteinhardtResult,
 };
 pub use pca::{Pca2, PcaResult};
 pub use persist::{PersistResult, SurvivalMethod, pair_survival_tcf};
@@ -136,3 +138,4 @@ pub use rdf::{RDF, RDFResult};
 pub use result::{ComputeResult, DescriptorRow};
 pub use spectra::{RamanSpectrumResult, SpectrumResult};
 pub use traits::{Compute, Fit};
+pub use van_hove::{VanHove, VanHoveResult};
