@@ -305,3 +305,95 @@ fn travis_parity_hoh_adf() {
         "H–O–H ADF parity (CIC): {n_bins} bins, max per-bin |Δp| {max_abs:.3e}, mean {mean:.4}° (TRAVIS 104.503°), std {std:.4}° (TRAVIS 1.7142°)"
     );
 }
+
+/// Parse the TRAVIS voro reference → `Vec<([x,y,z] Å, vol Å³)>`.
+///
+/// File format (`voro_he.csv`): `atom_index;x_pm;y_pm;z_pm;travis_vol_A3`, one
+/// row per cell, in input-atom order. Positions are pm (÷100 → Å).
+#[cfg(feature = "voronoi")]
+fn read_travis_voro(path: &PathBuf) -> Vec<([F; 3], F)> {
+    let reader = BufReader::new(File::open(path).expect("open travis voro csv"));
+    let mut out = Vec::new();
+    for line in reader.lines() {
+        let line = line.unwrap();
+        if line.starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+        let c: Vec<&str> = line.split(';').collect();
+        assert!(c.len() >= 5, "voro row needs 5 cols: {line}");
+        let p = [
+            c[1].trim().parse::<F>().unwrap() / 100.0,
+            c[2].trim().parse::<F>().unwrap() / 100.0,
+            c[3].trim().parse::<F>().unwrap() / 100.0,
+        ];
+        let vol: F = c[4].trim().parse().unwrap();
+        out.push((p, vol));
+    }
+    out
+}
+
+/// Per-cell Voronoi-volume parity: molrs [`RadicalVoronoi`] vs TRAVIS voro++.
+///
+/// TRAVIS recipe (`voro_he.travis-input`): helium.xyz frame, box 2000 pm, plain
+/// Voronoi (equal radii r=140 pm). TRAVIS prints each cell's centroid and volume
+/// to `voro.txt`; `voro_he.csv` is those 125 (position, volume) rows in atom
+/// order. molrs is fed the **same** generator positions and an equal-radius set
+/// (radical Voronoi with equal radii ≡ plain Voronoi), then its per-cell
+/// `volumes` are compared to TRAVIS's bin-for-bin.
+///
+/// This is the external-oracle check behind spec-06 (Voronoi domains): both
+/// tools tessellate the identical point set in the identical periodic box, so
+/// agreement proves molrs's native (voro++-algorithm) port reproduces voro++.
+#[cfg(feature = "voronoi")]
+#[test]
+fn travis_parity_he_voronoi_volume() {
+    use molrs::compute::voronoi::RadicalVoronoi;
+
+    let reference = read_travis_voro(&travis_data("voro_he.csv"));
+    let n = reference.len();
+    assert_eq!(n, 125, "expected 125 He cells");
+
+    let mut pos = Array2::<F>::zeros((n, 3));
+    for (i, (p, _)) in reference.iter().enumerate() {
+        pos[[i, 0]] = p[0];
+        pos[[i, 1]] = p[1];
+        pos[[i, 2]] = p[2];
+    }
+    // Equal radii (= plain Voronoi); r = 140 pm = 1.4 Å, matching TRAVIS. The
+    // value is immaterial for equal radii (radical plane ≡ perpendicular
+    // bisector), but mirror TRAVIS exactly.
+    let radii = vec![1.4 as F; n];
+    let simbox = SimBox::cube(BOX_ANG, array![0.0 as F, 0.0, 0.0], [true, true, true]).unwrap();
+
+    let cells = RadicalVoronoi.build(pos.view(), &radii, &simbox).unwrap();
+    assert_eq!(cells.volumes.len(), n, "molrs cell count");
+
+    // Σvol must fill the box exactly (tessellation partitions space).
+    let box_vol = BOX_ANG * BOX_ANG * BOX_ANG;
+    let sum_molrs: F = cells.total_volume();
+    assert!(
+        (sum_molrs - box_vol).abs() < 1e-6,
+        "molrs Σvol {sum_molrs:.6} vs box {box_vol:.6}"
+    );
+
+    // Per-cell parity. Same generators + same box ⇒ the two tessellations are
+    // identical up to voro++ vs molrs floating-point clipping order. TRAVIS
+    // writes volumes to 6 decimals (µÅ³); allow a hair more for accumulation.
+    let mut max_abs: F = 0.0;
+    let mut max_rel: F = 0.0;
+    for (i, (_, vol_travis)) in reference.iter().enumerate() {
+        let vol_molrs = cells.volumes[i];
+        let abs = (vol_molrs - vol_travis).abs();
+        max_abs = max_abs.max(abs);
+        max_rel = max_rel.max(abs / vol_travis);
+        assert!(
+            abs < 1e-3 * vol_travis + 1e-3,
+            "cell {i}: molrs vol {vol_molrs:.6} vs TRAVIS {vol_travis:.6} (|Δ|={abs:.2e})"
+        );
+    }
+
+    eprintln!(
+        "He Voronoi-volume parity: {n} cells, max |Δvol| {max_abs:.3e} Å³, max rel {:.4}%, Σvol {sum_molrs:.4} (box {box_vol})",
+        max_rel * 100.0
+    );
+}

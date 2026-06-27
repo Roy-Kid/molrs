@@ -26,7 +26,8 @@ criteria:
       A unit vector rotating at constant angular rate ω yields C_1(t) = cos(ωt) and
       C_2(t) = (3cos²(ωt) − 1)/2 within 1e-9; a static vector yields C_1 = C_2 = 1
       for all t.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # analytic Legendre C1/C2 constant-rotation test 1e-9 (tests/compute/reorientation.rs)
   - id: ac-004
     summary: multi-origin averaging is stable
     type: code

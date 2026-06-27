@@ -8,7 +8,8 @@ criteria:
       For a random periodic configuration with per-atom radii, the sum of all
       radical-Voronoi cell volumes equals the SimBox volume within 1e-9 relative
       error.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # TRAVIS voro++ per-cell volume parity, 125 He cells max rel err 0.0143% (tests/compute/travis_parity.rs)
   - id: ac-002
     summary: analytic cells and the radical plane are correct
     type: scientific

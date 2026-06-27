@@ -9,7 +9,8 @@ criteria:
       as exactly one D–H···A bond; perturbing the angle just past the cutoff (or the
       distance past the cutoff) drops the bond; the reported D···A distance and
       D–H···A angle match hand-computed values within 1e-9.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # analytic water-dimer detection + cutoff-boundary tests 1e-9 (tests/compute/hbond.rs)
   - id: ac-002
     summary: detection honors the minimum image under PBC
     type: code
