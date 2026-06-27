@@ -184,7 +184,11 @@ impl Compute for VanHove {
                     let dx = b[[i, 0]] - a[[i, 0]];
                     let dy = b[[i, 1]] - a[[i, 1]];
                     let dz = b[[i, 2]] - a[[i, 2]];
-                    hist_self.add((dx * dx + dy * dy + dz * dz).sqrt());
+                    // Nearest-bin (RDF convention): Van Hove is the RDF's
+                    // space-/time-resolved generalization, so its distinct part
+                    // G_d(r,0) must equal `compute::rdf`'s nearest-bin g(r). Use
+                    // add_nearest, not the geometric DF's TRAVIS cloud-in-cell.
+                    hist_self.add_nearest((dx * dx + dy * dy + dz * dz).sqrt());
                 }
                 // Distinct: min-image distance from r_i(τ) to r_j(τ+lag), j≠i.
                 // Use the same `NeighborQuery` spatial search as `compute::rdf`
@@ -202,7 +206,7 @@ impl Compute for VanHove {
                         if ref_i[k] == oth_j[k] {
                             continue;
                         }
-                        hist_dist.add(d2[k].sqrt());
+                        hist_dist.add_nearest(d2[k].sqrt());
                     }
                 }
                 n_origins += 1;

@@ -11,15 +11,15 @@
 //!   `flat = Σ_a idx[a]·stride[a]`, `stride[0]=1`.
 //! - The skip-out-of-range / running-entry bookkeeping of
 //!   `C2DF::AddToBin(double x, double y)` (`m_fSkipEntries` / `m_fBinEntries`).
-//!
-//! **Deliberate deviation from TRAVIS, documented:** `C2DF::AddToBin(double,
-//! double)` spreads each sample *bilinearly* over the four neighbouring bins
-//! (a plot-smoothing convenience). We instead use the **nearest-bin** rule of
-//! `CDF::AddToBin(double)` (`src/df.cpp`, the same scheme link-01's
-//! [`Histogram1d`](super::Histogram1d) ports) on each axis independently. This
-//! keeps the joint histogram's marginals *exactly* equal to the link-01 1-D
-//! distributions (the defining CDF contract, ac-001), which bilinear spreading
-//! would smear.
+//! - The **bilinear / trilinear cloud-in-cell** deposition of
+//!   `C2DF`/`C3DF::AddToBin`: each sample is spread over the `2^N` straddling
+//!   bins as the tensor product of the per-axis cloud-in-cell weights (the
+//!   N-D extension of link-01's [`Histogram1d::add`](super::Histogram1d::add)).
+//!   Because it is the tensor product of the same per-axis CIC scheme, summing
+//!   the joint histogram over the other axes reproduces the link-01 1-D CIC
+//!   distribution *exactly* — the defining CDF marginal-consistency contract
+//!   (ac-001) holds, now bit-for-bit with TRAVIS rather than via a nearest-bin
+//!   approximation.
 //!
 //! # References
 //! - Brehm & Kirchner, *J. Chem. Inf. Model.* **2011**, 51, 2007–2023 (TRAVIS).
@@ -91,18 +91,32 @@ impl AxisSpec {
         self.bins as F / (self.max - self.min)
     }
 
-    /// Nearest-bin index (TRAVIS `CDF::AddToBin(double)` / link-01
-    /// [`Histogram1d`](super::Histogram1d)): `None` if out of `[min, max]`,
-    /// else `floor((d-min)*fac)` folded into the last bin at the upper edge.
-    fn bin_index(&self, d: F) -> Option<usize> {
+    /// Per-axis **cloud-in-cell** contribution (TRAVIS `C2DF`/`C3DF::AddToBin`,
+    /// the multidimensional extension of link-01's [`Histogram1d::add`]
+    /// (super::Histogram1d)): returns the two straddling bin indices and their
+    /// weights `[(ip, 1−frac), (ip+1, frac)]`, or `None` if `d` is outside
+    /// `[min, max]` (TRAVIS `m_fSkipEntries`). The N-D deposit is the tensor
+    /// product of these per-axis contributions, so summing the joint histogram
+    /// over the other axes reproduces the link-01 1-D CIC histogram (marginal
+    /// consistency). For a single-bin axis both contributions point at bin 0
+    /// with weights `[1, 0]` (no out-of-range index).
+    fn cic(&self, d: F) -> Option<([usize; 2], [F; 2])> {
         if d < self.min || d > self.max {
             return None;
         }
-        let mut ip = ((d - self.min) * self.fac()) as usize;
-        if ip >= self.bins {
-            ip = self.bins - 1;
+        if self.bins == 1 {
+            return Some(([0, 0], [1.0, 0.0]));
         }
-        Some(ip)
+        let praw = (d - self.min) * self.fac() - 0.5;
+        let ipf = praw.floor();
+        let (ip, frac) = if ipf < 0.0 {
+            (0usize, 0.0)
+        } else if ipf > (self.bins - 2) as F {
+            (self.bins - 2, 1.0)
+        } else {
+            (ipf as usize, praw - ipf)
+        };
+        Some(([ip, ip + 1], [1.0 - frac, frac]))
     }
 
     fn edges(&self) -> Array1<F> {
@@ -299,23 +313,39 @@ impl Compute for CombinedDistribution {
             // a single collection — a genuine range loop, not a needless one.
             #[allow(clippy::needless_range_loop)]
             for t in 0..n_tuples {
-                // Skip the whole N-tuple if any axis is out of range
-                // (TRAVIS C2DF: m_fSkipEntries when any coordinate is outside).
-                let mut flat = 0usize;
+                // Per-axis cloud-in-cell contributions. Skip the whole N-tuple
+                // if any axis is out of range (TRAVIS C2DF: m_fSkipEntries when
+                // any coordinate is outside its range).
+                let mut contribs: [([usize; 2], [F; 2]); 3] = [([0, 0], [0.0, 0.0]); 3];
                 let mut in_range = true;
                 for a in 0..n {
-                    match self.axes[a].bin_index(cols[a][t]) {
-                        Some(ix) => flat += ix * strides[a],
+                    match self.axes[a].cic(cols[a][t]) {
+                        Some(c) => contribs[a] = c,
                         None => {
                             in_range = false;
                             break;
                         }
                     }
                 }
-                if in_range {
-                    counts[flat] += 1.0;
-                    binned += 1.0;
+                if !in_range {
+                    continue;
                 }
+                // Tensor-product deposit over the 2^n straddling bins; the
+                // per-axis weights sum to 1, so each tuple deposits total
+                // weight 1 (mass-conserving) — TRAVIS bilinear/trilinear CIC.
+                for corner in 0..(1usize << n) {
+                    let mut flat = 0usize;
+                    let mut w = 1.0;
+                    for a in 0..n {
+                        let pick = (corner >> a) & 1;
+                        flat += contribs[a].0[pick] * strides[a];
+                        w *= contribs[a].1[pick];
+                    }
+                    if w != 0.0 {
+                        counts[flat] += w;
+                    }
+                }
+                binned += 1.0;
             }
         }
 

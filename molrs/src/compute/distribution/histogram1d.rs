@@ -57,14 +57,23 @@ impl Histogram1d {
         }
     }
 
-    /// Bin one sample (weight 1). Ported from TRAVIS `CDF::AddToBin(double d)`:
-    /// values outside `[min, max]` are skipped, otherwise the bin index is
-    /// `floor((d - min) * fac)` clamped to the last bin.
+    /// Bin one sample (weight 1). Ported from TRAVIS `CDF::AddToBin(double d)`.
     pub fn add(&mut self, d: F) {
         self.add_weighted(d, 1.0);
     }
 
     /// Bin one sample with an explicit weight (TRAVIS `CDF::AddToBin(d, v)`).
+    ///
+    /// **Cloud-in-cell (linear-interpolation) deposition**, ported from TRAVIS
+    /// `CDF::AddToBin` (`src/df.cpp`): the sample is split between the two bins
+    /// whose **centers** straddle it. With `fac = n_bins / (max − min)`, let
+    /// `p = (d − min)·fac − 0.5` (position relative to bin centers — the center
+    /// of bin `i` sits at integer position `i`). Then `ip = floor(p)`, clamped
+    /// to `[0, n_bins − 2]`, and `frac = p − ip`; deposit `(1 − frac)·w` into
+    /// bin `ip` and `frac·w` into bin `ip + 1`. Samples in the first/last
+    /// half-bin clamp entirely into bin 0 / bin `n_bins − 1`; out-of-range
+    /// samples are skipped (TRAVIS `m_fSkipEntries`). Total deposited weight per
+    /// sample is `w`, so `sum(counts) == binned`.
     pub fn add_weighted(&mut self, d: F, w: F) {
         self.sum += d * w;
         self.sq_sum += d * d * w;
@@ -72,14 +81,46 @@ impl Histogram1d {
             self.skipped += w;
             return;
         }
-        // TRAVIS: ip = (int)((d - min) * fac); the d == max edge lands on
-        // bin n_bins and is folded back into the last bin.
+        self.binned += w;
+
+        // A single bin can't interpolate — deposit the whole weight.
+        if self.n_bins == 1 {
+            self.counts[0] += w;
+            return;
+        }
+
+        let praw = (d - self.min) * self.fac - 0.5;
+        let ipf = praw.floor();
+        let (ip, frac) = if ipf < 0.0 {
+            (0usize, 0.0)
+        } else if ipf > (self.n_bins - 2) as F {
+            (self.n_bins - 2, 1.0)
+        } else {
+            (ipf as usize, praw - ipf)
+        };
+        self.counts[ip] += (1.0 - frac) * w;
+        self.counts[ip + 1] += frac * w;
+    }
+
+    /// **Nearest-bin** deposition (the simple `floor((d−min)·fac)` rule, *not*
+    /// cloud-in-cell). Use this for RDF-family consumers that must match
+    /// [`compute::rdf`](crate::compute::rdf)'s nearest-bin convention — namely
+    /// the Van Hove distinct part `G_d`, whose `G_d(r,0) = ρ g(r)` contract is
+    /// checked against `compute::rdf`. The geometric ADF/DDF/distance and CDF
+    /// family use the TRAVIS cloud-in-cell [`add`](Self::add) instead.
+    pub fn add_nearest(&mut self, d: F) {
+        self.sum += d;
+        self.sq_sum += d * d;
+        if d < self.min || d > self.max {
+            self.skipped += 1.0;
+            return;
+        }
         let mut ip = ((d - self.min) * self.fac) as usize;
         if ip >= self.n_bins {
             ip = self.n_bins - 1;
         }
-        self.counts[ip] += w;
-        self.binned += w;
+        self.counts[ip] += 1.0;
+        self.binned += 1.0;
     }
 
     /// Bin edges (`n_bins + 1` values).
@@ -139,15 +180,33 @@ mod tests {
 
     #[test]
     fn binning_matches_travis_indexing() {
-        let mut h = Histogram1d::new(4, 0.0, 4.0); // bin width 1
-        h.add(0.5); // bin 0
-        h.add(1.5); // bin 1
-        h.add(3.9); // bin 3
-        h.add(4.0); // edge → folded into last bin (bin 3)
+        // Bin width 1, centers at 0.5/1.5/2.5/3.5. Center-aligned samples land
+        // wholly in one bin under cloud-in-cell (frac = 0).
+        let mut h = Histogram1d::new(4, 0.0, 4.0);
+        h.add(0.5); // exactly center 0 → bin 0
+        h.add(1.5); // exactly center 1 → bin 1
+        h.add(3.9); // past last center → clamped into bin 3
+        h.add(4.0); // max edge → clamped into bin 3
         assert_eq!(h.counts()[0], 1.0);
         assert_eq!(h.counts()[1], 1.0);
         assert_eq!(h.counts()[3], 2.0);
         assert_eq!(h.binned(), 4.0);
+    }
+
+    #[test]
+    fn cloud_in_cell_splits_between_bin_centers() {
+        // A sample at 1.0 sits exactly halfway between center 0 (0.5) and
+        // center 1 (1.5) → split 50/50 (TRAVIS CDF::AddToBin).
+        let mut h = Histogram1d::new(4, 0.0, 4.0);
+        h.add(1.0);
+        assert!((h.counts()[0] - 0.5).abs() < 1e-12);
+        assert!((h.counts()[1] - 0.5).abs() < 1e-12);
+        assert_eq!(h.binned(), 1.0);
+        // 1/4 of the way from center 1 to center 2 → 0.75 / 0.25.
+        let mut h2 = Histogram1d::new(4, 0.0, 4.0);
+        h2.add(1.75);
+        assert!((h2.counts()[1] - 0.75).abs() < 1e-12);
+        assert!((h2.counts()[2] - 0.25).abs() < 1e-12);
     }
 
     #[test]

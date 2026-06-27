@@ -28,8 +28,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+use std::f64::consts::PI;
+
 use molrs::Frame;
-use molrs::compute::distribution::{AngleObservable, AtomGroups, Observable};
+use molrs::compute::distribution::{AngleObservable, AtomGroups, DistributionFunction, Observable};
 use molrs::compute::rdf::RDF;
 use molrs::compute::traits::Compute;
 use molrs::spatial::neighbors::{LinkCell, NbListAlgo, NeighborList};
@@ -204,34 +206,6 @@ fn unit_sum(h: &[F]) -> Vec<F> {
     h.iter().map(|&v| v / total).collect()
 }
 
-/// TRAVIS's exact ADF/CDF binning (`CDF::AddToBin`, src/df.cpp): a sample at
-/// value `d` is split linearly between the two bins whose centers straddle it
-/// (cloud-in-cell), so a sample on a bin center lands wholly in that bin and one
-/// halfway between contributes 0.5/0.5. This is why TRAVIS occurrences are
-/// non-integer. molrs's `Histogram1d` uses hard nearest-bin instead, so to
-/// compare per bin we replay TRAVIS's interpolation on molrs's angle samples.
-fn travis_add_to_bin(hist: &mut [F], d: F, min: F, max: F) {
-    let n = hist.len();
-    if d < min || d > max {
-        return; // out of range (matches TRAVIS m_fSkipEntries)
-    }
-    let fac = n as F / (max - min);
-    let mut p = (d - min) * fac - 0.5;
-    let ip = if p < 0.0 {
-        p = 0.0;
-        0
-    } else if p > (n - 2) as F {
-        p = 1.0;
-        n - 2
-    } else {
-        let ip = p.floor();
-        p -= ip;
-        ip as usize
-    };
-    hist[ip] += 1.0 - p;
-    hist[ip + 1] += p;
-}
-
 /// Intramolecular H–O–H angular distribution on water.xyz vs TRAVIS ADF.
 ///
 /// TRAVIS recipe (`adf_hoh.travis-input`): same-size cell = 1490 pm, ADF,
@@ -239,16 +213,22 @@ fn travis_add_to_bin(hist: &mut [F], d: F, min: F, max: F) {
 /// water.xyz is ordered O,H,H per molecule (99 H2O), so the H–O–H triple for
 /// molecule m is (3m+1, 3m, 3m+2) with O at the vertex.
 ///
-/// We sample the angle through molrs's ported [`AngleObservable`] (its port of
-/// TRAVIS's `Angle` routine) and replay TRAVIS's own `AddToBin` interpolation
-/// into the identical 100-bin / [0,180]° grid. With the binning convention thus
-/// matched, the histograms must agree bin-for-bin: this isolates the **angle
-/// computation** as the thing under test. Both tools wrap with the same 14.90 Å
-/// box. The peak (~104.5°, σ≈1.7°) carries most of the mass.
+/// This binds molrs's actual [`DistributionFunction`] — whose [`Histogram1d`]
+/// now bins with TRAVIS's own cloud-in-cell rule (`CDF::AddToBin`, src/df.cpp) —
+/// over molrs's ported [`AngleObservable`], and compares its `counts` **directly**
+/// to TRAVIS's `adf_hoh.csv` occurrences. No replay of TRAVIS binning: both the
+/// angle computation and the histogram binning are now molrs code, so agreement
+/// is the proof the CIC port reproduces TRAVIS bin-for-bin.
+///
+/// molrs bins the angle in **radians** over `[0, π]`; TRAVIS bins **degrees**
+/// over `[0, 180]`. CIC's fractional bin position `(d−min)·res/(max−min) − 0.5`
+/// is scale-invariant, so the two grids coincide bin-for-bin. Both tools wrap
+/// with the same 14.90 Å box. The peak (~104.5°, σ≈1.7°) carries most mass.
 #[test]
 fn travis_parity_hoh_adf() {
     let frames = read_all_frames(&tests_data().join("xyz/water.xyz"), WATER_BOX_ANG);
     assert!(frames.len() > 50, "expected the full water trajectory");
+    let frame_refs: Vec<&Frame> = frames.iter().collect();
 
     // O,H,H per molecule → H–O–H triple (3m+1, 3m, 3m+2), O the vertex.
     let n_mol = frames[0].get_float("atoms", "x").unwrap().len() / 3;
@@ -261,18 +241,45 @@ fn travis_parity_hoh_adf() {
     let travis = read_travis_adf(&travis_data("adf_hoh.csv"));
     let n_bins = travis.len();
     assert_eq!(n_bins, 100, "TRAVIS ADF bin count");
-    let (min_deg, max_deg) = (0.0, 180.0);
 
-    // Sample each frame's H–O–H angles through molrs, replay TRAVIS binning.
+    // molrs distribution: AngleObservable (radians) over [0, π], CIC-binned.
+    let df = DistributionFunction::new(AngleObservable, n_bins, 0.0, PI).unwrap();
+    let result = df.compute(&frame_refs, &groups).unwrap();
+    assert_eq!(result.counts.len(), n_bins, "molrs ADF bin count");
+
+    // Same grid: bin center i ↔ TRAVIS angle column (rad→deg).
+    let width_deg = 180.0 / n_bins as F;
+    for (i, &(a_deg, _)) in travis.iter().enumerate() {
+        let center = (i as F + 0.5) * width_deg;
+        assert!(
+            (center - a_deg).abs() < 1e-6,
+            "bin {i}: molrs {center}° vs TRAVIS {a_deg}°"
+        );
+    }
+
+    // Per-bin parity — molrs CIC counts vs TRAVIS CIC occurrences, both
+    // unit-sum normalized. Identical angles + identical (now shared) binning ⇒
+    // bit-exact bar float rounding nudging a rare sample across a boundary.
+    let p_molrs = unit_sum(result.counts.as_slice().unwrap());
+    let travis_occ: Vec<F> = travis.iter().map(|&(_, o)| o).collect();
+    let p_travis = unit_sum(&travis_occ);
+    let mut max_abs: F = 0.0;
+    for i in 0..n_bins {
+        max_abs = max_abs.max((p_molrs[i] - p_travis[i]).abs());
+    }
+    assert!(
+        max_abs < 1e-6,
+        "H–O–H ADF: max per-bin |Δp| {max_abs:.3e} exceeds 1e-6 (CIC port)"
+    );
+
+    // Mean / std straight from molrs samples vs TRAVIS's printed values.
     let obs = AngleObservable;
-    let mut hist = vec![0.0 as F; n_bins];
     let mut sum: F = 0.0;
     let mut sq_sum: F = 0.0;
     let mut n_samples = 0usize;
     for frame in &frames {
         for theta in obs.sample(frame, &groups).unwrap() {
             let deg = theta.to_degrees();
-            travis_add_to_bin(&mut hist, deg, min_deg, max_deg);
             sum += deg;
             sq_sum += deg * deg;
             n_samples += 1;
@@ -283,34 +290,6 @@ fn travis_parity_hoh_adf() {
         n_mol * frames.len(),
         "one angle per water per frame"
     );
-
-    // Same grid: bin center i = min + (i+0.5)·width == TRAVIS angle column.
-    let width = (max_deg - min_deg) / n_bins as F;
-    for (i, &(a_deg, _)) in travis.iter().enumerate() {
-        let center = min_deg + (i as F + 0.5) * width;
-        assert!(
-            (center - a_deg).abs() < 1e-6,
-            "bin {i}: molrs {center}° vs TRAVIS {a_deg}°"
-        );
-    }
-
-    // Per-bin parity under the matched binning convention (unit-sum normalized).
-    let p_molrs = unit_sum(&hist);
-    let travis_occ: Vec<F> = travis.iter().map(|&(_, o)| o).collect();
-    let p_travis = unit_sum(&travis_occ);
-    let mut max_abs: F = 0.0;
-    for i in 0..n_bins {
-        max_abs = max_abs.max((p_molrs[i] - p_travis[i]).abs());
-    }
-    // Identical angles + identical binning ⇒ near bit-exact; the only slack is
-    // float rounding of the angle pushing a rare sample a hair across a bin
-    // boundary (≪ 1 sample in 9900 worth of probability).
-    assert!(
-        max_abs < 1e-3,
-        "H–O–H ADF: max per-bin |Δp| {max_abs:.6} exceeds 1e-3 (binning matched)"
-    );
-
-    // Mean / std straight from molrs samples vs TRAVIS's printed values.
     let mean = sum / n_samples as F;
     let std = (sq_sum / n_samples as F - mean * mean).max(0.0).sqrt();
     assert!(
@@ -323,6 +302,6 @@ fn travis_parity_hoh_adf() {
     );
 
     eprintln!(
-        "H–O–H ADF parity: {n_bins} bins, max per-bin |Δp| {max_abs:.6}, mean {mean:.4}° (TRAVIS 104.503°), std {std:.4}° (TRAVIS 1.7142°)"
+        "H–O–H ADF parity (CIC): {n_bins} bins, max per-bin |Δp| {max_abs:.3e}, mean {mean:.4}° (TRAVIS 104.503°), std {std:.4}° (TRAVIS 1.7142°)"
     );
 }
