@@ -9,7 +9,8 @@ criteria:
       kabsch() returns a rotation with det = +1 matching R within 1e-9 and RMSD
       below 1e-9; a chiral template confirms the reflection guard never returns a
       det = −1 improper rotation.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # Kabsch RMSD≈0 + det+1 test 1e-9 (tests/compute/spatial_distribution.rs)
   - id: ac-002
     summary: SDF is frame-invariant (the defining property)
     type: scientific
@@ -18,7 +19,8 @@ criteria:
       while the whole assembly tumbles arbitrarily each frame, accumulates into a
       single sharp density voxel at that offset — whereas the same data through
       lab-frame GaussianDensity smears across a spherical shell.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # SDF frame-invariance single-voxel test (spatial_distribution.rs)
   - id: ac-003
     summary: bulk-normalized g_SDF approaches 1 far from the reference
     type: code

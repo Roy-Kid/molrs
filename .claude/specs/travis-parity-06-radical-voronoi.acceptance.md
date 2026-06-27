@@ -17,7 +17,8 @@ criteria:
       a two-atom unequal-radius case places the shared face at the analytic radical
       plane |x−xi|²−Ri² = |x−xj|²−Rj²; equal radii reproduce the plain Voronoi
       bisector.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # analytic two-atom radical-plane test 1e-9 (tests/compute/voronoi.rs)
   - id: ac-003
     summary: tessellation is periodic and neighbor-symmetric
     type: code

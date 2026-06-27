@@ -18,7 +18,8 @@ criteria:
       For fixed four-atom configurations with known torsions (0°, +90°, 180°,
       −90°), DihedralObservable returns the IUPAC-signed φ in (−π, π] matching the
       analytic value within 1e-9.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # analytic IUPAC-signed dihedral test 1e-9 (tests/compute/distribution.rs)
   - id: ac-003
     summary: distance DF over explicit pairs honors the minimum image under PBC
     type: code

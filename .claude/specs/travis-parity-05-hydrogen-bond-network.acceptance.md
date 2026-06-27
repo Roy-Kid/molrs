@@ -42,7 +42,8 @@ criteria:
       For a synthetic binary bond-presence series, the continuous S_HB(t) and
       intermittent C_HB(t) match the analytic correlation functions, and the
       intermittent lifetime τ ≥ the continuous lifetime.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # continuous/intermittent lifetime TCF ordering test (tests/compute/hbond.rs)
   - id: ac-006
     summary: edge cases + full check green
     type: runtime

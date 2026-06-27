@@ -8,14 +8,16 @@ criteria:
       For a synthetic enantiomer pair, VcdSpectrum produces equal-and-opposite
       spectra (sign-flipped within tolerance), and an achiral / mirror-symmetric
       system produces a VCD spectrum near zero.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # VCD enantiomer equal-and-opposite test (tests/compute/spectra_chiral.rs)
   - id: ac-002
     summary: ROA obeys the enantiomer sign law
     type: scientific
     pass_when: |
       For a synthetic enantiomer pair, RoaSpectrum produces sign-flipped spectra, and
       an achiral system produces ~zero ROA.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # ROA sign-flip test (spectra_chiral.rs)
   - id: ac-003
     summary: peak positions coincide with IR/Raman
     type: scientific
@@ -23,7 +25,8 @@ criteria:
       For the same trajectory, the cm⁻¹ peak positions of VCD/ROA/resonance-Raman
       coincide (within one frequency bin) with the IR/Raman peaks from the existing
       IRSpectrum/RamanSpectrum — same vibrational frequencies, different intensities.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # VCD/ROA peak coincidence with IR/Raman test (spectra_chiral.rs)
   - id: ac-004
     summary: windowing + frequency grid reuse the existing spectral helpers
     type: code

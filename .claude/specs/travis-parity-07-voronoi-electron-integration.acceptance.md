@@ -18,7 +18,8 @@ criteria:
       The sum over all radical-Voronoi cells of the integrated electronic charge
       equals the grid total ∫ρ dV within the grid discretization tolerance, and the
       per-molecule total charge sums to the system charge.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # charge-conservation test (tests/compute/voronoi_integration.rs)
   - id: ac-003
     summary: integrated dipole matches an analytic distribution
     type: scientific
@@ -27,7 +28,8 @@ criteria:
       analytic dipole within grid tolerance; a centrosymmetric density yields a
       dipole magnitude near zero; origin-dependence for a charged species is
       documented and exercised.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # analytic dipole + centrosymmetric→0 test (voronoi_integration.rs)
   - id: ac-004
     summary: unit conversion is correct
     type: code
@@ -43,7 +45,8 @@ criteria:
       Given synthetic moment sets generated from a known α tensor under ±E fields,
       polarizability_finite_field recovers that α within the central-difference
       truncation tolerance.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # finite-field α recovery test 1e-9 (voronoi_integration.rs)
   - id: ac-006
     summary: boundary/PBC robustness + full check green
     type: runtime

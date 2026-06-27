@@ -8,7 +8,8 @@ criteria:
       On a single frame, VanHove's distinct part at zero lag, G_d(r,0), equals the
       bulk density times compute::rdf's g(r) on the same configuration within the
       shared binning tolerance; G_s(r,0) is concentrated in the first r-bin.
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # G_d(r,0)=ρg(r) vs compute::rdf test (tests/compute/van_hove.rs)
   - id: ac-002
     summary: self Van Hove width tracks the MSD
     type: scientific
@@ -16,7 +17,8 @@ criteria:
       For a trajectory with known diffusion, the second moment ∫ r² G_s(r,t) dr
       equals the MSD from compute::msd at each lag within 2%, and G_s(r,t) is
       Gaussian with width ∝ sqrt(t).
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # ∫r²G_s=MSD vs compute::msd test (van_hove.rs)
   - id: ac-003
     summary: Legendre C1/C2 match analytic rotation
     type: scientific
