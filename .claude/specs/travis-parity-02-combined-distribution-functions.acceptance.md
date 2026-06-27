@@ -9,7 +9,8 @@ criteria:
       density over the angle axis reproduces the link-01 distance DistributionResult
       density, and over the distance axis reproduces the ADF density, each within
       1e-6 per bin (after matching bin grids).
-    status: pending
+    status: verified
+    last_checked: 2026-06-27  # marginal-consistency test ∘ bit-exact TRAVIS ADF parity
   - id: ac-002
     summary: correlation vs independence is resolved
     type: code
