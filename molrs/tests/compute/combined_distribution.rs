@@ -142,20 +142,27 @@ fn correlated_data_lies_on_diagonal_band() {
     let groups = [dist_groups(), angle_groups()];
     let joint = cdf.compute(&refs, &groups).unwrap();
 
-    // For a square grid with frac↦(r,θ) both linear, occupied cells satisfy
-    // ix == iy. Off-diagonal cells must be empty.
+    // frac↦(r,θ) are both linear with identical fractional bin position, so
+    // each sample's cloud-in-cell deposit lands in the 2×2 block {ip,ip+1}²:
+    // occupied cells lie on the diagonal BAND |ix−iy| ≤ 1 (TRAVIS bilinear CIC
+    // widens a sharp diagonal by one bin). Cells further off-diagonal are
+    // exactly empty — the correlation is still resolved as a tight band.
     for ix in 0..NX {
         for iy in 0..NX {
             let c = joint.counts[joint.flat_index(&[ix, iy])];
-            if ix != iy {
-                assert_eq!(c, 0.0, "off-band cell ({ix},{iy}) = {c}");
+            if ix.abs_diff(iy) >= 2 {
+                assert_eq!(c, 0.0, "far-off-band cell ({ix},{iy}) = {c}");
             }
         }
     }
-    let on_band: F = (0..NX)
-        .map(|i| joint.counts[joint.flat_index(&[i, i])])
+    // All mass stays within the diagonal band and totals to m (CIC conserves
+    // weight: each sample deposits total weight 1).
+    let band: F = (0..NX)
+        .flat_map(|ix| (0..NX).map(move |iy| (ix, iy)))
+        .filter(|&(ix, iy)| ix.abs_diff(iy) <= 1)
+        .map(|(ix, iy)| joint.counts[joint.flat_index(&[ix, iy])])
         .sum();
-    assert_eq!(on_band, m as F);
+    assert!((band - m as F).abs() < 1e-9, "band mass {band} != {m}");
 }
 
 #[test]
